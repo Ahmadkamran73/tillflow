@@ -4,7 +4,7 @@ _Last updated: 2026-09-29_
 
 ## Current phase / step
 
-**Phase 0 · Foundations** — Step 0.4 Part 1 (local tenancy schema + RLS) done: lint, typecheck, `pnpm test` (28) and `pnpm test:rls` (27) green locally; dropping a policy makes the tests fail. Part 2 (staging Supabase project) not started, waiting for approval. Still to run before merge: `/security-review` and the `tenant-isolation-auditor` agent.
+**Phase 0 · Foundations** — Step 0.4 Part 1 (local tenancy schema + RLS) done and hardened after `/security-review` (no findings) and the `tenant-isolation-auditor` agent (2 medium, several low; addressed in migration 0003). `pnpm test:rls` green locally (39 tests). Part 2 (staging Supabase project) not started, waiting for approval.
 
 ## Done
 
@@ -25,11 +25,13 @@ _Last updated: 2026-09-29_
 - Organisations are created only by the sign-up flow with the service role (no client INSERT policy).
 - `memberships.user_id` has no FK to `auth.users` (auth stays swappable behind `src/lib/auth`).
 - Server data access must run as the `authenticated` role with the user's JWT claims for RLS to apply; a plain `DATABASE_URL` connection as `postgres` bypasses RLS.
-- Not done yet: guard against removing/demoting the last owner; manager-invites-cashier flow.
+- `0003_harden_memberships_and_audit` (from the tenant-isolation audit): clients can no longer INSERT `memberships` or `audit_log`; server code writes both after checking the caller's role (invite/accept flow for memberships). Triggers: `location_ids` must belong to the membership's org; an org cannot lose its last owner unless closed. `touch_updated_at` pins `search_path`.
+- Deferred audit items: location scoping by `location_ids` (before multi-location), owner MFA (aal2) in policies, `FORCE ROW LEVEL SECURITY`, and defining the app's non-owner DB role (`set local role authenticated` + JWT claims per request). Re-audit when `src/db` client exists.
+- Not done yet: manager-invites-cashier flow.
 
 ## Open issues
 
-- **Python 3.10+ is not installed** (only the Microsoft Store shortcut). The security-guidance plugin needs it. Install it and run `/reload-plugins`.
+- Python 3.12.10 installed per-user (winget) and `/reload-plugins` run on 2026-09-29. If the security-guidance plugin still complains, turn off the Windows "App execution aliases" for python.exe/python3.exe.
 - **`jq` is not installed.** The hooks parse JSON with `node` instead, so nothing is blocked. Install it later only if wanted.
 - `.claude/settings.local.json` and `.env.local` are local-only; don't commit them.
 - Product decisions still open (from PLAN.md): price amount and whether per shop or per business, trial length, phone-support owner and hours.

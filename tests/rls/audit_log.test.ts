@@ -17,24 +17,28 @@ describe("audit_log RLS and append-only", () => {
       await denied(() => as(null, () => sql`select id from audit_log`));
     }));
 
-  it("members can append entries in their own org as themselves, nothing else", () =>
+  it("clients cannot write entries at all (server code appends them)", () =>
     inWorld(async ({ sql, world, as, denied }) => {
-      const insert = (actor: typeof world.a.owner, orgId: string, actorId: string) =>
-        as(
-          actor,
-          () =>
-            sql`insert into audit_log (id, org_id, actor_user_id, action, entity) values (${randomUUID()}, ${orgId}, ${actorId}, 'refund.override', 'sale')`,
-        );
-      await insert(world.a.cashier, world.a.orgId, world.a.cashier.userId);
-      await denied(() => insert(world.a.cashier, world.b.orgId, world.a.cashier.userId));
-      await denied(() => insert(world.a.cashier, world.a.orgId, world.a.owner.userId));
-      await denied(() =>
-        as(
-          null,
-          () =>
-            sql`insert into audit_log (id, org_id, action, entity) values (${randomUUID()}, ${world.a.orgId}, 'x', 'y')`,
-        ),
+      for (const actor of [world.a.owner, world.a.manager, world.a.cashier, world.b.owner, null]) {
+        for (const orgId of [world.a.orgId, world.b.orgId]) {
+          await denied(() =>
+            as(
+              actor,
+              () =>
+                sql`insert into audit_log (id, org_id, actor_user_id, action, entity) values (${randomUUID()}, ${orgId}, ${actor?.userId ?? null}, 'refund.approved', 'sale')`,
+            ),
+          );
+        }
+      }
+    }));
+
+  it("service role can append entries", () =>
+    inWorld(async ({ sql, world, asService }) => {
+      const rows = await asService(
+        () =>
+          sql`insert into audit_log (id, org_id, actor_user_id, action, entity) values (${randomUUID()}, ${world.a.orgId}, ${world.a.manager.userId}, 'refund.approved', 'sale') returning id`,
       );
+      expect(rows).toHaveLength(1);
     }));
 
   it("nobody can update, delete or truncate it", () =>

@@ -5,6 +5,8 @@ import { inWorld, sql } from "./helpers";
 
 afterAll(() => sql.end());
 
+const CHECK_VIOLATION = ["23514"];
+
 describe("memberships RLS", () => {
   it("members see their org's memberships and never Shop B's", () =>
     inWorld(async ({ sql, world, as }) => {
@@ -28,15 +30,31 @@ describe("memberships RLS", () => {
       );
     }));
 
-  it("owner can add, change and remove members in their own org", () =>
+  it("nobody can create memberships through the API, not even an owner attaching another user", () =>
+    inWorld(async ({ sql, world, as, denied }) => {
+      const victim = world.b.cashier.userId;
+      for (const actor of [world.a.owner, world.a.manager, world.a.cashier, null]) {
+        await denied(() =>
+          as(
+            actor,
+            () =>
+              sql`insert into memberships (id, org_id, user_id, role) values (${randomUUID()}, ${world.a.orgId}, ${victim}, 'cashier')`,
+          ),
+        );
+        await denied(() =>
+          as(
+            actor,
+            () =>
+              sql`insert into memberships (id, org_id, user_id, role) values (${randomUUID()}, ${world.b.orgId}, ${randomUUID()}, 'owner')`,
+          ),
+        );
+      }
+    }));
+
+  it("owner can change and remove members in their own org", () =>
     inWorld(async ({ sql, world, as }) => {
       const newUser = randomUUID();
-      const ins = await as(
-        world.a.owner,
-        () =>
-          sql`insert into memberships (id, org_id, user_id, role) values (${randomUUID()}, ${world.a.orgId}, ${newUser}, 'cashier') returning id`,
-      );
-      expect(ins).toHaveLength(1);
+      await sql`insert into memberships (id, org_id, user_id, role) values (${randomUUID()}, ${world.a.orgId}, ${newUser}, 'cashier')`;
       const upd = await as(
         world.a.owner,
         () => sql`update memberships set role = 'manager' where user_id = ${newUser} returning id`,
@@ -49,7 +67,7 @@ describe("memberships RLS", () => {
       expect(del).toHaveLength(1);
     }));
 
-  it("cashier and manager cannot change roles, including their own", () =>
+  it("cashier and manager cannot change roles, locations or delete members", () =>
     inWorld(async ({ sql, world, as }) => {
       for (const actor of [world.a.cashier, world.a.manager]) {
         const self = await as(
@@ -64,6 +82,12 @@ describe("memberships RLS", () => {
             sql`update memberships set role = 'cashier' where user_id = ${world.a.owner.userId} returning id`,
         );
         expect(other).toHaveLength(0);
+        const locs = await as(
+          actor,
+          () =>
+            sql`update memberships set location_ids = ${[world.a.locationId]}::uuid[] where user_id = ${actor.userId} returning id`,
+        );
+        expect(locs).toHaveLength(0);
         const del = await as(
           actor,
           () => sql`delete from memberships where user_id = ${world.a.owner.userId} returning id`,
@@ -75,29 +99,9 @@ describe("memberships RLS", () => {
       expect(row?.role).toBe("cashier");
     }));
 
-  it("cashier and manager cannot add members", () =>
-    inWorld(async ({ sql, world, as, denied }) => {
-      for (const actor of [world.a.cashier, world.a.manager]) {
-        await denied(() =>
-          as(
-            actor,
-            () =>
-              sql`insert into memberships (id, org_id, user_id, role) values (${randomUUID()}, ${world.a.orgId}, ${randomUUID()}, 'owner')`,
-          ),
-        );
-      }
-    }));
-
   it("Shop A's owner cannot touch Shop B's memberships or move rows across orgs", () =>
     inWorld(async ({ sql, world, as, denied }) => {
       const owner = world.a.owner;
-      await denied(() =>
-        as(
-          owner,
-          () =>
-            sql`insert into memberships (id, org_id, user_id, role) values (${randomUUID()}, ${world.b.orgId}, ${owner.userId}, 'owner')`,
-        ),
-      );
       expect(
         await as(
           owner,
@@ -121,6 +125,48 @@ describe("memberships RLS", () => {
       const [{ count } = { count: -1 }] =
         await sql`select count(*)::int as count from memberships where org_id = ${world.b.orgId}`;
       expect(count).toBe(3);
+    }));
+
+  it("location_ids must belong to the membership's own org", () =>
+    inWorld(async ({ sql, world, as, denied }) => {
+      const cashier = world.a.cashier.userId;
+      const set = (ids: string[]) => () =>
+        as(
+          world.a.owner,
+          () =>
+            sql`update memberships set location_ids = ${ids}::uuid[] where user_id = ${cashier} returning id`,
+        );
+      expect(await set([world.a.locationId])()).toHaveLength(1);
+      await denied(set([world.b.locationId]), CHECK_VIOLATION);
+      await denied(set([world.a.locationId, world.b.locationId]), CHECK_VIOLATION);
+      await denied(set([randomUUID()]), CHECK_VIOLATION);
+    }));
+
+  it("an org can never lose its last owner (even via service role)", () =>
+    inWorld(async ({ sql, world, as, asService, denied }) => {
+      const id = world.a.owner.userId;
+      const demote = () => sql`update memberships set role = 'manager' where user_id = ${id}`;
+      const remove = () => sql`delete from memberships where user_id = ${id}`;
+      await denied(() => as(world.a.owner, demote), CHECK_VIOLATION);
+      await denied(() => as(world.a.owner, remove), CHECK_VIOLATION);
+      await denied(() => asService(demote), CHECK_VIOLATION);
+      await denied(() => asService(remove), CHECK_VIOLATION);
+      await denied(demote, CHECK_VIOLATION);
+
+      // With a second owner, the first can step down.
+      await sql`update memberships set role = 'owner' where user_id = ${world.a.manager.userId}`;
+      await as(world.a.owner, demote);
+      const [row] = await sql`select role from memberships where user_id = ${id}`;
+      expect(row?.role).toBe("manager");
+    }));
+
+  it("a closed org may remove its last owner", () =>
+    inWorld(async ({ sql, world }) => {
+      await sql`update organisations set status = 'closed' where id = ${world.a.orgId}`;
+      await sql`delete from memberships where user_id = ${world.a.owner.userId}`;
+      const [{ count } = { count: -1 }] =
+        await sql`select count(*)::int as count from memberships where org_id = ${world.a.orgId} and role = 'owner'`;
+      expect(count).toBe(0);
     }));
 
   it("anon gets nothing", () =>

@@ -22,6 +22,13 @@
       "when": 1790694728970,
       "tag": "0002_seed_irish_tax_rates",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790696102481,
+      "tag": "0003_harden_memberships_and_audit",
+      "breakpoints": true
     }
   ]
 }
