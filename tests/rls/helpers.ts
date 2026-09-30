@@ -24,10 +24,19 @@ export type World = { a: Shop; b: Shop };
 
 class Rollback extends Error {}
 
+/** JWT session facts. Defaults to a fully verified (aal2) password session. */
+export type Session = { aal?: "aal1" | "aal2"; amr?: { method: string }[] };
+
 export type Ctx = ReturnType<typeof makeCtx>;
 
 function makeCtx(tx: TransactionSql, world: World) {
-  const claims = (userId: string) => JSON.stringify({ sub: userId, role: "authenticated" });
+  const claims = (userId: string, session: Session) =>
+    JSON.stringify({
+      sub: userId,
+      role: "authenticated",
+      aal: session.aal ?? "aal2",
+      amr: session.amr ?? [],
+    });
 
   return {
     /** The transaction connection. Tests must query through this (shadowing the module-level pool), never the pool. */
@@ -36,10 +45,10 @@ function makeCtx(tx: TransactionSql, world: World) {
     /** Run fn as a signed-in user (RLS applies), then go back to the seeding superuser. */
     // Each call runs in a savepoint: if fn fails, the rollback also undoes SET LOCAL ROLE, and
     // the aborted transaction is never asked to run a "reset role" (which would raise 25P02).
-    async as<T>(actor: Actor | null, fn: () => Promise<T>): Promise<T> {
+    async as<T>(actor: Actor | null, fn: () => Promise<T>, session: Session = {}): Promise<T> {
       return tx.savepoint(async () => {
         if (actor) {
-          await tx`select set_config('request.jwt.claims', ${claims(actor.userId)}, true)`;
+          await tx`select set_config('request.jwt.claims', ${claims(actor.userId, session)}, true)`;
           await tx.unsafe("set local role authenticated");
         } else {
           await tx`select set_config('request.jwt.claims', '', true)`;
