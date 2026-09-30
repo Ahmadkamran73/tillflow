@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [develop] # only used by the staging smoke check below
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Job name "CI" is the required status check on main.
+  ci:
+    name: CI
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      NEXT_PUBLIC_APP_ENV: ci
+      E2E_BASE_URL: http://localhost:3000
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Unit tests
+        run: pnpm exec vitest run tests/unit src
+
+      - name: Start local Supabase
+        run: pnpm exec supabase start -x studio,imgproxy,edge-runtime,logflare,vector,supavisor
+      - name: Export local Supabase settings (throwaway CI values only)
+        run: |
+          pnpm exec supabase status -o env > "$RUNNER_TEMP/supabase.env"
+          get() { grep "^$1=" "$RUNNER_TEMP/supabase.env" | cut -d= -f2- | tr -d '"'; }
+          for v in ANON_KEY SERVICE_ROLE_KEY; do echo "::add-mask::$(get $v)"; done
+          {
+            echo "NEXT_PUBLIC_SUPABASE_URL=$(get API_URL)"
+            echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$(get ANON_KEY)"
+            echo "SUPABASE_SERVICE_ROLE_KEY=$(get SERVICE_ROLE_KEY)"
+            echo "DIRECT_URL=$(get DB_URL)"
+            echo "DATABASE_URL=$(get DB_URL)"
+          } >> "$GITHUB_ENV"
+
+      - name: RLS tests (Shop A vs Shop B)
+        run: pnpm test:rls
+
+      - name: Build
+        run: pnpm build
+
+      - name: Install Playwright browser
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Playwright (against the production build)
+        run: pnpm test:e2e
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-results
+          path: test-results/
+          retention-days: 7
+
+      - name: Show Supabase logs on failure
+        if: failure()
+        run: pnpm exec supabase status || true
+
+  # After a merge to develop, Hostinger deploys staging by itself. This waits for it and checks it.
+  # Set the repository variable STAGING_URL (e.g. https://staging.tillflow.ie) to turn it on.
+  staging-smoke:
+    name: Staging smoke check
+    if: github.event_name == 'push' && vars.STAGING_URL != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      STAGING_URL: ${{ vars.STAGING_URL }}
+    steps:
+      - name: Wait for /api/health on the new commit
+        run: |
+          for i in $(seq 1 45); do
+            body=$(curl -fsS --max-time 10 "$STAGING_URL/api/health" || true)
+            commit=$(printf '%s' "$body" | sed -n 's/.*"commit":"\([^"]*\)".*/\1/p')
+            if [ "$commit" = "$GITHUB_SHA" ]; then echo "Staging is on $commit"; exit 0; fi
+            if [ "$commit" = "unknown" ] && [ "$i" -ge 10 ]; then
+              echo "::warning::Staging is healthy but does not report a commit"; exit 0
+            fi
+            echo "Attempt $i: got '${commit:-no response}', want $GITHUB_SHA"; sleep 20
+          done
+          echo "::error::Staging did not report commit $GITHUB_SHA in time"; exit 1

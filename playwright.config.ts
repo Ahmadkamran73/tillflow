@@ -10,9 +10,12 @@ export default defineConfig({
   use: { baseURL, trace: "on-first-retry" },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    command: `pnpm exec next dev --port ${port}`,
+    // CI tests the production build (`pnpm build` runs first); locally it uses the dev server.
+    command: process.env.CI
+      ? `pnpm exec next start --port ${port}`
+      : `pnpm exec next dev --port ${port}`,
     url: baseURL,
-    reuseExistingServer: true,
+    reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },
 });
