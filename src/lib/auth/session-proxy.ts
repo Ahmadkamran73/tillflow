@@ -1,0 +1,43 @@
+import { createServerClient } from "@supabase/ssr";
+import { NextResponse, type NextRequest } from "next/server";
+
+const PROTECTED_PREFIXES = ["/o", "/onboarding", "/start", "/mfa", "/reset-password"];
+
+function isProtected(pathname: string) {
+  return PROTECTED_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+}
+
+/**
+ * Runs in proxy.ts on every page request: refreshes the Supabase session cookies and does an
+ * optimistic "is there a session?" redirect for back-office paths. It is NOT the authorisation
+ * check. Roles, org membership and MFA are enforced by requireRole()/requireBackOffice() where
+ * the data is read.
+ */
+export async function updateSession(request: NextRequest): Promise<NextResponse> {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !anonKey) throw new Error("Supabase environment variables are not set");
+
+  let response = NextResponse.next({ request });
+  const supabase = createServerClient(url, anonKey, {
+    cookies: {
+      getAll: () => request.cookies.getAll(),
+      setAll(toSet) {
+        for (const { name, value } of toSet) request.cookies.set(name, value);
+        response = NextResponse.next({ request });
+        for (const { name, value, options } of toSet) response.cookies.set(name, value, options);
+      },
+    },
+  });
+
+  const { data } = await supabase.auth.getClaims();
+
+  const { pathname, search } = request.nextUrl;
+  if (!data?.claims && isProtected(pathname)) {
+    const login = request.nextUrl.clone();
+    login.pathname = "/login";
+    login.search = `?next=${encodeURIComponent(pathname + search)}`;
+    return NextResponse.redirect(login);
+  }
+  return response;
+}

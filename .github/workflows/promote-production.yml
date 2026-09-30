@@ -1,0 +1,35 @@
+name: Promote to production
+
+# Manual only. The job waits for approval from the "production" environment reviewer,
+# then pushes the migrations on main to the PRODUCTION Supabase project.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: promote-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  promote:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: supabase/setup-cli@v3
+        with:
+          version: 2.118.0
+      - name: Link to the production project
+        run: supabase link --project-ref "$SUPABASE_PROJECT_REF"
+      - name: Show pending migrations
+        run: supabase db push --dry-run
+      - name: Apply migrations
+        run: supabase db push
