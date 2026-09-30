@@ -4,7 +4,7 @@ _Last updated: 2026-09-29_
 
 ## Current phase / step
 
-**Phase 0 · Foundations** — Step 0.4 Part 1 (local tenancy schema + RLS) done and hardened after `/security-review` (no findings) and the `tenant-isolation-auditor` agent (2 medium, several low; addressed in migration 0003). `pnpm test:rls` green locally (39 tests). Part 2 (staging Supabase project) not started, waiting for approval.
+**Phase 0 · Foundations** — Step 0.4 Part 1 (local tenancy schema + RLS) done and hardened after `/security-review` (no findings) and the `tenant-isolation-auditor` agent (2 medium, several low; addressed in migration 0003). `pnpm test:rls` green locally (39 tests). Part 2 done: staging project `tillflow-staging` (eu-west-1, ref `kbtpydpigscfmvtqmkfy`, org `tline`) created, linked, migrations 0000–0003 pushed, `check-rls` OK against staging.
 
 ## Done
 
@@ -14,9 +14,11 @@ _Last updated: 2026-09-29_
 - [x] **0.3** CLAUDE.md, `.claude/rules` (db, money, register-ui), subagents (tenant-isolation-auditor, vat-auditor, accessibility-reviewer), hooks (Prettier on edit, protect `.env*` and committed migrations, STATUS.md on compact), skills (`/new-table`, `/write-spec`), security guidance
 - [x] **0.4 Part 1** Tenancy foundation (local): `organisations`, `locations`, `memberships`, `registers`, `tax_rates` (Irish rates incl. the 1 July 2026 catering/hairdressing 13.5% → 9% change), `audit_log` (append-only). Migrations `0000_tenancy_tables` (generated), `0001_rls_helpers_and_policies` and `0002_seed_irish_tax_rates` (hand-written). Helper family in schema `app`: `org_ids_with_roles` (the only memberships lookup), `current_org_ids`, `manager_org_ids`, `owner_org_ids`, `current_user_id` (the only `auth.uid()` call). RLS tests in `tests/rls` (Shop A vs Shop B, owner/manager/cashier). `scripts/check-rls.ts` + `pnpm check:rls`; `pnpm test:rls` runs it first.
 
+- [x] **0.4 Part 2** Staging project. `.mcp.json` points the Supabase MCP at staging (`read_only=true`; run `/mcp` to reconnect). `.env.local` (local only) holds `SUPABASE_STAGING_DB_PASSWORD`, `SUPABASE_STAGING_URL`, `SUPABASE_STAGING_ANON_KEY`. Check staging with: `STAGING_CHECK_URL=<session-pooler url> pnpm check:rls --url-env=STAGING_CHECK_URL` (read-only transaction). Nothing was created or pushed in any production project.
+
 ## Next step
 
-**0.4 Part 2 — staging Supabase project** (needs your go-ahead): confirm org, create `tillflow-staging` (eu-west-1), link, `supabase db push`, run check-rls against staging, point `.mcp.json` at it (read-only).
+**0.5** per the prompts file (next step after 0.4). Before it: reconnect the MCP with `/mcp`, and consider a CI job that runs `supabase db push` to staging instead of pushing by hand.
 
 ## Design notes (0.4)
 
