@@ -14,10 +14,11 @@ export default defineConfig({
   webServer: {
     // CI tests the production build (`pnpm build` runs first); locally it uses the dev server.
     command: process.env.CI
-      ? `pnpm exec next start --port ${port}`
+      ? `node node_modules/next/dist/bin/next start --port ${port}`
       : `pnpm exec next dev --port ${port}`,
     url: baseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
+    gracefulShutdown: { signal: "SIGTERM", timeout: 5_000 },
   },
 });
