@@ -41,3 +41,11 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+
+# claude code local overrides
+.claude/settings.local.json
+.claude/claude-security-guidance.local.md
+
+# playwright
+/test-results/
+/playwright-report/

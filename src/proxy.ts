@@ -1,0 +1,13 @@
+import type { NextRequest } from "next/server";
+import { updateSession } from "@/lib/auth/session-proxy";
+
+export async function proxy(request: NextRequest) {
+  return updateSession(request);
+}
+
+export const config = {
+  // Everything except Next internals and static files.
+  matcher: [
+    "/((?!api/health|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+  ],
+};
