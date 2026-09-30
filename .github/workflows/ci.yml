@@ -64,6 +64,7 @@ jobs:
       - name: Install Playwright browser
         run: pnpm exec playwright install --with-deps chromium
       - name: Playwright (against the production build)
+        timeout-minutes: 12
         run: pnpm test:e2e
       - uses: actions/upload-artifact@v7
         if: failure()
@@ -72,9 +73,12 @@ jobs:
           path: test-results/
           retention-days: 7
 
-      - name: Show Supabase logs on failure
+      - name: Show local Supabase state on failure
         if: failure()
-        run: pnpm exec supabase status || true
+        run: |
+          pnpm exec supabase status || true
+          docker ps --format "{{.Names}} {{.Status}}" || true
+          curl -sS --max-time 5 http://127.0.0.1:54324/api/v1/messages | head -c 500 || true
 
   # After a merge to develop, Hostinger deploys staging by itself. This waits for it and checks it.
   # Set the repository variable STAGING_URL (e.g. https://staging.tillflow.ie) to turn it on.

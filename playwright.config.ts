@@ -7,6 +7,8 @@ const port = new URL(baseURL).port || "3000";
 export default defineConfig({
   testDir: "./tests/e2e",
   fullyParallel: true,
+  reporter: process.env.CI ? [["list"]] : "list",
+  globalTimeout: process.env.CI ? 10 * 60_000 : undefined,
   use: { baseURL, trace: "on-first-retry" },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
