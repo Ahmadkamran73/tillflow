@@ -1,10 +1,10 @@
 # Tillflow POS — Status
 
-_Last updated: 2026-09-29_
+_Last updated: 2026-09-30_
 
 ## Current phase / step
 
-**Phase 0 · Foundations** — Step 0.4 Part 1 (local tenancy schema + RLS) done and hardened after `/security-review` (no findings) and the `tenant-isolation-auditor` agent (2 medium, several low; addressed in migration 0003). `pnpm test:rls` green locally (39 tests). Part 2 done: staging project `tillflow-staging` (eu-west-1, ref `kbtpydpigscfmvtqmkfy`, org `tline`) created, linked, migrations 0000–0003 pushed, `check-rls` OK against staging.
+**Phase 0 · Foundations** — Step 0.5 (auth) built and tested locally; Google sign-in verified locally by hand (2026-09-30: sign-up, MFA enrol, re-login challenge). Earlier: Step 0.4 Part 1 (local tenancy schema + RLS) done and hardened after `/security-review` (no findings) and the `tenant-isolation-auditor` agent (2 medium, several low; addressed in migration 0003). `pnpm test:rls` green locally (39 tests). Part 2 done: staging project `tillflow-staging` (eu-west-1, ref `kbtpydpigscfmvtqmkfy`, org `tline`) created, linked, migrations 0000–0003 pushed, `check-rls` OK against staging.
 
 ## Done
 
@@ -16,9 +16,14 @@ _Last updated: 2026-09-29_
 
 - [x] **0.4 Part 2** Staging project. `.mcp.json` points the Supabase MCP at staging (`read_only=true`; run `/mcp` to reconnect). `.env.local` (local only) holds `SUPABASE_STAGING_DB_PASSWORD`, `SUPABASE_STAGING_URL`, `SUPABASE_STAGING_ANON_KEY`. Check staging with: `STAGING_CHECK_URL=<session-pooler url> pnpm check:rls --url-env=STAGING_CHECK_URL` (read-only transaction). Nothing was created or pushed in any production project.
 
+- [x] **0.5** Auth (spec: `docs/specs/auth.md`). Sign up, log in, magic link, password reset, email verification, TOTP MFA (owners required; anyone with a factor), first-org provisioning via `public.create_my_organisation` (migration 0004, no service-role key in the request path), `src/proxy.ts` + `requireRole`/`requireBackOffice`, Upstash rate limits (5/min IP+email, in-memory fallback with warning), `/onboarding` placeholder, Google behind `AUTH_GOOGLE_ENABLED` (off). Back office lives at `/o/<orgId>/dashboard`; other orgs return 404. Checks: lint, typecheck, 70 unit, 44 RLS, 8 Playwright e2e all pass. `pnpm build` not run (a stale `next start` holds `.next`). Run e2e with `E2E_BASE_URL=http://localhost:3100 pnpm test:e2e` if port 3000 is busy. Ran `tenant-isolation-auditor` and `accessibility-reviewer`; `/security-review` still to run.
+
 ## Next step
 
-**0.5** per the prompts file (next step after 0.4). Before it: reconnect the MCP with `/mcp`, and consider a CI job that runs `supabase db push` to staging instead of pushing by hand.
+1. **Google on staging:** confirm the client ID/secret are entered in the staging dashboard and enable the provider there; set `AUTH_GOOGLE_ENABLED=true` in each deployed environment.
+2. Staging dashboard settings for auth (see `docs/specs/auth.md`): site URL, redirect URLs, password length 10, confirmations, TOTP, the three email templates in `supabase/templates`; push migration 0004 to staging.
+3. Run `/security-review`, then commit.
+4. **0.6** per the prompts file. Consider a CI job that runs `supabase db push` to staging.
 
 ## Design notes (0.4)
 
@@ -30,6 +35,16 @@ _Last updated: 2026-09-29_
 - `0003_harden_memberships_and_audit` (from the tenant-isolation audit): clients can no longer INSERT `memberships` or `audit_log`; server code writes both after checking the caller's role (invite/accept flow for memberships). Triggers: `location_ids` must belong to the membership's org; an org cannot lose its last owner unless closed. `touch_updated_at` pins `search_path`.
 - Deferred audit items: location scoping by `location_ids` (before multi-location), owner MFA (aal2) in policies, `FORCE ROW LEVEL SECURITY`, and defining the app's non-owner DB role (`set local role authenticated` + JWT claims per request). Re-audit when `src/db` client exists.
 - Not done yet: manager-invites-cashier flow.
+
+## Auth: deferred audit findings (step 0.5)
+
+- **Fixed (migration 0005):** owner MFA is now enforced in RLS. `app.org_ids_with_roles` needs aal2 for owners and anyone with a verified TOTP factor; an aal1 session sees only its own membership rows. OAuth (Google) sessions never get cashier access (`amr` claim). `tests/rls/mfa_and_oauth.test.ts`.
+- **Fixed:** orgs are no longer auto-created on page load. New users without a membership go to `/start` (“Create your business”, an explicit form POST, name pre-filled from sign-up), then `/mfa`, then `/onboarding`. Later invite/accept: check pending invites on `/start`.
+- **Still true:** the Supabase Google provider is enabled locally regardless of `AUTH_GOOGLE_ENABLED`. On hosted projects enable/disable it in the dashboard to match the flag. A new Google identity can still be created directly at Supabase; it gets no data (no membership) until it creates a business at `/start`. Enable captcha on hosted to limit empty accounts.
+- Rate limits: add an email-only bucket; refuse to run in production without Upstash; `x-forwarded-for` is only trustworthy behind Vercel. Hosted `max_frequency` for auth emails should be 60s+, `secure_password_change` on.
+- `requireRole` sends MFA redirects to `/o`, losing the deep link.
+- Accessibility follow-ups (non-blocking): show-password toggle, skip link and single `<main>` per group, accessibility statement before launch, contrast check of muted text.
+- Re-audit `src/db` client when it exists.
 
 ## Open issues
 
