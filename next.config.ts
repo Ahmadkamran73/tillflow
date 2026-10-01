@@ -1,5 +1,4 @@
 import { execSync } from "node:child_process";
-import { withSentryConfig } from "@sentry/nextjs/config";
 import type { NextConfig } from "next";
 import pkg from "./package.json";
 
@@ -16,19 +15,16 @@ function commitSha() {
 }
 
 const nextConfig: NextConfig = {
-  // Inlined at build time; read by /api/health and Sentry.
+  // Loaded at runtime from node_modules, not bundled (pg and pino are external by default).
+  serverExternalPackages: ["pg-boss"],
+  // Off on Hostinger, so maps are never served. CI sets SOURCE_MAPS=true in the source-maps
+  // workflow to keep a private copy per commit (docs/DEPLOY.md "Reading a browser stack trace").
+  productionBrowserSourceMaps: process.env.SOURCE_MAPS === "true",
+  // Inlined at build time; read by /api/health.
   env: {
     APP_VERSION: pkg.version,
     APP_COMMIT: commitSha(),
   },
 };
 
-export default withSentryConfig(nextConfig, {
-  silent: !process.env.CI,
-  // Source maps upload only when a token is present (Hostinger/production builds).
-  authToken: process.env.SENTRY_AUTH_TOKEN,
-  org: process.env.SENTRY_ORG,
-  project: process.env.SENTRY_PROJECT,
-  telemetry: false,
-  widenClientFileUpload: true,
-});
+export default nextConfig;

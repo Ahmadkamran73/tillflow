@@ -1,0 +1,65 @@
+name: Source maps
+
+# Hostinger builds the app itself with source maps OFF, so browsers never get them. This job
+# rebuilds the same commit with the same public NEXT_PUBLIC_* values as that environment and
+# keeps the browser .map files as a CI artifact for 30 days, so a minified browser stack trace
+# from error_events can be mapped back to source by hand (docs/DEPLOY.md).
+#
+# Needs these repository VARIABLES (public values, not secrets; Settings > Secrets and
+# variables > Actions > Variables): STAGING_SUPABASE_URL, STAGING_SUPABASE_ANON_KEY and, once
+# production exists, PROD_SUPABASE_URL, PROD_SUPABASE_ANON_KEY.
+on:
+  push:
+    branches: [develop, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  maps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SOURCE_MAPS: "true"
+      NEXT_PUBLIC_APP_ENV: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+      NEXT_PUBLIC_APP_URL: ${{ github.ref_name == 'main' && 'https://pos.tillflow.ie' || 'https://staging.tillflow.ie' }}
+      NEXT_PUBLIC_SUPABASE_URL: ${{ github.ref_name == 'main' && vars.PROD_SUPABASE_URL || vars.STAGING_SUPABASE_URL }}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ github.ref_name == 'main' && vars.PROD_SUPABASE_ANON_KEY || vars.STAGING_SUPABASE_ANON_KEY }}
+    steps:
+      - name: Skip until the variables exist
+        id: ready
+        run: |
+          if [ -z "$NEXT_PUBLIC_SUPABASE_URL" ] || [ -z "$NEXT_PUBLIC_SUPABASE_ANON_KEY" ]; then
+            echo "::warning::Supabase URL/anon key variables for $NEXT_PUBLIC_APP_ENV are not set; no source maps saved."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v7
+        if: steps.ready.outputs.ok == 'true'
+      - uses: pnpm/action-setup@v6
+        if: steps.ready.outputs.ok == 'true'
+      - uses: actions/setup-node@v7
+        if: steps.ready.outputs.ok == 'true'
+        with:
+          node-version: 24
+          cache: pnpm
+      - if: steps.ready.outputs.ok == 'true'
+        run: pnpm install --frozen-lockfile
+      - name: Build with source maps
+        if: steps.ready.outputs.ok == 'true'
+        run: pnpm build
+      - name: Collect browser maps
+        if: steps.ready.outputs.ok == 'true'
+        run: |
+          mkdir -p "$RUNNER_TEMP/maps"
+          cd .next/static && find . -name '*.map' -exec cp --parents {} "$RUNNER_TEMP/maps/" \;
+          echo "Saved $(find "$RUNNER_TEMP/maps" -name '*.map' | wc -l) source maps"
+      - uses: actions/upload-artifact@v7
+        if: steps.ready.outputs.ok == 'true'
+        with:
+          name: source-maps-${{ env.NEXT_PUBLIC_APP_ENV }}-${{ github.sha }}
+          path: ${{ runner.temp }}/maps
+          retention-days: 30
+          if-no-files-found: error

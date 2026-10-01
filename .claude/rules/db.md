@@ -14,7 +14,8 @@ paths:
 - **Indexes**: index `org_id` on every table, usually as the leading column of a composite (`(org_id, created_at)`, `(org_id, barcode)`). Foreign keys get indexes too.
 - **Money columns** are `integer` cents (`*_cents`) or `rate_bp` basis points. Never `numeric`/`float` for money.
 - **Append-only tables** (`stock_movements`, `audit_log`, completed `sales`/`sale_lines`/`payments`): no UPDATE or DELETE policy; corrections are new rows.
-- **Service role** bypasses RLS: only in server jobs and migrations/seed scripts, never in code reachable from a user request.
+- **Service role / privileged connection** bypasses RLS: only in `src/lib/ops/db.ts` (calls `ops.*` SECURITY DEFINER functions, never a table), pg-boss job handlers in `src/lib/jobs`, and migrations/seed scripts. `pnpm check:imports` enforces it.
+- **Platform tables** without `org_id` (`tax_rates`, `error_events`, `rate_limits`, `job_runs`) still get RLS and a policy (deny-all where clients have no access) so `check-rls` passes.
 - **Never run destructive SQL** (`drop`, `truncate`, `db reset`) against anything but the local database. Never use the production project.
 - Add `created_at timestamptz not null default now()`; add `updated_at` only on tables that are legitimately mutable.
 - After a schema change, run `pnpm test:rls` and regenerate types.

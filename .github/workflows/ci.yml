@@ -35,6 +35,8 @@ jobs:
 
       - name: Lint
         run: pnpm lint
+      - name: Privileged access check (ops module, pg-boss, service role)
+        run: pnpm check:imports
       - name: Typecheck
         run: pnpm typecheck
       - name: Unit tests
@@ -53,6 +55,7 @@ jobs:
             echo "SUPABASE_SERVICE_ROLE_KEY=$(get SERVICE_ROLE_KEY)"
             echo "DIRECT_URL=$(get DB_URL)"
             echo "DATABASE_URL=$(get DB_URL)"
+            echo "JOBS_DATABASE_URL=$(get DB_URL)"
           } >> "$GITHUB_ENV"
 
       - name: RLS tests (Shop A vs Shop B)

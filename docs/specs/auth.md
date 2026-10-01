@@ -25,7 +25,22 @@ Supabase Auth behind `src/lib/auth`. Nothing else in the app imports a provider 
 
 ## Rate limits
 
-5 per minute per IP + email (hashed) for login, magic link, reset request and sign-up; 5 per minute per user for MFA codes. Upstash when `UPSTASH_REDIS_REST_URL/TOKEN` are set, otherwise an in-memory limiter with a startup warning. If Upstash errors, attempts are allowed and logged (an outage must not lock shops out).
+Policies live in `RATE_LIMITS` in `src/lib/rate-limit`:
+
+| Limit                                            | Key              | Allowed                                        |
+| ------------------------------------------------ | ---------------- | ---------------------------------------------- |
+| `login` (also Google start)                      | IP + email       | 5 per minute                                   |
+| `login-account` (password sign-in)               | email            | 20 per 15 minutes (stops IP-rotation guessing) |
+| `sign-up`, `magic-link`                          | IP + email       | 5 per minute                                   |
+| `reset-account` (reset request, password update) | email or user id | 3 per hour                                     |
+| `reset-ip` (reset request)                       | IP               | 10 per hour                                    |
+| `mfa` (enrol, challenge)                         | user id          | 5 per minute                                   |
+
+Counted in Postgres by `ops.check_rate_limit()` (migration 0006: one atomic `INSERT … ON CONFLICT`, fixed window), which returns allowed, remaining and retry-after, so every app instance shares the count and the user is told how long to wait ("Try again in 25 minutes."). Identifiers are SHA-256 hashed in `src/lib/rate-limit` before they reach the database; only the hash is stored.
+
+**Fails closed.** If the database cannot be asked, the attempt is refused with a generic "We can't process this right now. Please try again shortly." and the failure is logged to `error_events`. Sign-in needs the database anyway, so this locks nobody out who could otherwise get in. (Changed from the earlier fail-open design in step 0.6.)
+
+Cashier PIN lockout (5 failures) is a separate per-membership counter in the database, not this limiter.
 
 ## Local vs hosted config
 
