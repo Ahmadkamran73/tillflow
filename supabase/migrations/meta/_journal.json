@@ -43,6 +43,27 @@
       "when": 1790762669688,
       "tag": "0005_owner_mfa_and_oauth_in_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790780658123,
+      "tag": "0006_ops_errors_rate_limits_jobs",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790780660846,
+      "tag": "0007_pgboss_schema",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790862751413,
+      "tag": "0008_ops_least_privilege_role",
+      "breakpoints": true
     }
   ]
 }

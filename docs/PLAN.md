@@ -10,18 +10,18 @@ Companion file: **`TILLFLOW_POS_CLAUDE_CODE_PROMPTS.md`** — the copy-paste Cla
 
 ## 1. Decisions made
 
-| Question | Decision |
-| --- | --- |
-| Who is v1 for? | Retail (general/convenience, electronics & phones, clothing & footwear), cafés (counter service) and restaurants (table service) |
+| Question                       | Decision                                                                                                                                                                                                                      |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Who is v1 for?                 | Retail (general/convenience, electronics & phones, clothing & footwear), cafés (counter service) and restaurants (table service)                                                                                              |
 | Card payments at the till (v1) | **No integrated card reader.** Shops use their own standalone card terminal (from their bank, SumUp, etc.); the cashier records the tender as "Card" in Tillflow. Integrated readers (Stripe Terminal / SumUp) come in **v2** |
-| Login | Fully separate app and accounts from Tillflow Finance |
-| VAT set-up | Each shop gets its country's default VAT rates preloaded (Ireland first), stored as editable, effective-dated data |
-| Pricing model | **One fixed monthly price** for every shop (no tiers), paid by **bank transfer**; amount to be confirmed by management |
-| Subscription billing | Manual invoicing + bank transfer, reconciled in the super-admin panel. **No Stripe in v1** — card/direct-debit billing is a v2 option |
-| Stack | Next.js + TypeScript + Supabase Postgres (Ireland region) with Row-Level Security |
-| Hosting | App on Vercel (Dublin) **or** Hostinger Web Apps (EU data centre) — choose in Step 0.0; tillflow.ie landing page on Hostinger |
-| Build method | You drive Claude Code phase by phase from written specs; tests gate every merge |
-| Still open | Phone support owner and hours · the fixed price amount · whether the price is per shop or per business · trial length |
+| Login                          | Fully separate app and accounts from Tillflow Finance                                                                                                                                                                         |
+| VAT set-up                     | Each shop gets its country's default VAT rates preloaded (Ireland first), stored as editable, effective-dated data                                                                                                            |
+| Pricing model                  | **One fixed monthly price** for every shop (no tiers), paid by **bank transfer**; amount to be confirmed by management                                                                                                        |
+| Subscription billing           | Manual invoicing + bank transfer, reconciled in the super-admin panel. **No Stripe in v1** — card/direct-debit billing is a v2 option                                                                                         |
+| Stack                          | Next.js + TypeScript + Supabase Postgres (Ireland region) with Row-Level Security                                                                                                                                             |
+| Hosting                        | App on Vercel (Dublin) **or** Hostinger Web Apps (EU data centre) — choose in Step 0.0; tillflow.ie landing page on Hostinger                                                                                                 |
+| Build method                   | You drive Claude Code phase by phase from written specs; tests gate every merge                                                                                                                                               |
+| Still open                     | Phone support owner and hours · the fixed price amount · whether the price is per shop or per business · trial length                                                                                                         |
 
 > VAT note: preloaded rates handle the VAT your customers charge. Tillflow's own subscription invoices still need your business's VAT registration once you pass the Irish threshold — confirm with an accountant before launch.
 
@@ -29,14 +29,14 @@ Companion file: **`TILLFLOW_POS_CLAUDE_CODE_PROMPTS.md`** — the copy-paste Cla
 
 ## 2. Phased roadmap (one developer + Claude Code)
 
-| Phase | Weeks | Goal | Exit gate |
-| --- | --- | --- | --- |
-| **0 · Foundations** | 1–2 | Repo, Claude Code setup, Supabase projects, auth, RLS, CI/CD, design system, app shell | Cross-tenant RLS tests pass in CI; preview deploys work |
-| **1 · Core register** | 3–7 | VAT money library, business-type onboarding, products, register PWA, cash sales, receipts, offline outbox & sync, device pairing & PINs | A cash sale made offline syncs correctly with the right VAT |
-| **2 · Payments, hospitality & daily ops** | 8–14 | Card tender (external terminal), split tender, refunds, shifts & Z-reports, stock ledger, customers, modifiers & allergens, tables/tabs/kitchen tickets/split bills, bulk import & filtered exports, VAT reports | A full trading day for each of the 5 business types runs end to end in staging |
-| **3 · SaaS readiness** | 15–17 | Bank-transfer billing (invoices, payment references, mark-as-paid, reminders, pause unpaid), super-admin, emails, legal pages & GDPR tools, WCAG 2.2 AA audit, security hardening, load test, backups & runbook | **Pilot gate:** pen test passed, offline tests lose no sales |
-| **4 · Pilot** | 18–21 | 4–6 Irish sites (retail shops, a café, a restaurant) on free pilot terms; weekly fixes; accountant review of VAT reports | **Launch gate:** pilot sites trade 2 weeks with no data errors |
-| **5 · Public launch, then v2** | 22+ | Tillflow POS live on tillflow.ie at one fixed price; then (v2) integrated card readers (Stripe Terminal / SumUp), Stripe billing, multi-location, loyalty, KDS, accounting exports | — |
+| Phase                                     | Weeks | Goal                                                                                                                                                                                                             | Exit gate                                                                      |
+| ----------------------------------------- | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| **0 · Foundations**                       | 1–2   | Repo, Claude Code setup, Supabase projects, auth, RLS, CI/CD, design system, app shell                                                                                                                           | Cross-tenant RLS tests pass in CI; preview deploys work                        |
+| **1 · Core register**                     | 3–7   | VAT money library, business-type onboarding, products, register PWA, cash sales, receipts, offline outbox & sync, device pairing & PINs                                                                          | A cash sale made offline syncs correctly with the right VAT                    |
+| **2 · Payments, hospitality & daily ops** | 8–14  | Card tender (external terminal), split tender, refunds, shifts & Z-reports, stock ledger, customers, modifiers & allergens, tables/tabs/kitchen tickets/split bills, bulk import & filtered exports, VAT reports | A full trading day for each of the 5 business types runs end to end in staging |
+| **3 · SaaS readiness**                    | 15–17 | Bank-transfer billing (invoices, payment references, mark-as-paid, reminders, pause unpaid), super-admin, emails, legal pages & GDPR tools, WCAG 2.2 AA audit, security hardening, load test, backups & runbook  | **Pilot gate:** pen test passed, offline tests lose no sales                   |
+| **4 · Pilot**                             | 18–21 | 4–6 Irish sites (retail shops, a café, a restaurant) on free pilot terms; weekly fixes; accountant review of VAT reports                                                                                         | **Launch gate:** pilot sites trade 2 weeks with no data errors                 |
+| **5 · Public launch, then v2**            | 22+   | Tillflow POS live on tillflow.ie at one fixed price; then (v2) integrated card readers (Stripe Terminal / SumUp), Stripe billing, multi-location, loyalty, KDS, accounting exports                               | —                                                                              |
 
 Estimates, not promises: the gates matter more than the dates.
 
@@ -44,17 +44,17 @@ Estimates, not promises: the gates matter more than the dates.
 
 ## 3. Product scope
 
-| Module | v1 (MVP) | Later (v2+) |
-| --- | --- | --- |
-| Register / checkout | Product grid, search, barcode scan, cart, discounts, split tender (cash/card/voucher), 5c cash rounding, email or printed receipt, returns & refunds, park/recall sale, modifiers, table plan & open tabs, kitchen/bar ticket printing, split bills | Customer-facing display, self-checkout kiosk, kitchen display screens (KDS), online ordering |
-| Products & inventory | Products, variants, categories, barcodes, VAT category per product, stock levels, low-stock alerts, Excel/CSV/JSON import & export | Suppliers & purchase orders, stock transfers, stocktakes, batch/expiry, bundles |
-| Cash management | Open/close shift, float, cash in/out, X- and Z-reports, over/short | Multiple drawers per register, blind cash-up |
-| Staff | Owner / manager / cashier roles, PIN on paired devices, per-user sales | Timesheets, tip-pooling reports, custom permissions |
-| Customers | Records, purchase history, B2B VAT number for invoices | Loyalty, store credit, gift cards, marketing lists |
-| Reports | Daily sales, by product/category/staff, VAT by rate, payment totals, filtered export (xlsx/csv/pdf) | Margin & COGS, Xero/Sage/QuickBooks export, AI insights |
-| Multi-location | Single location | Multiple branches, consolidated reports |
-| Integrations | ESC/POS printers, cash drawer, USB/Bluetooth scanners; card via the shop's own standalone terminal | Integrated card readers (Stripe Terminal, SumUp), Shopify/WooCommerce stock sync, Tillflow Finance invoices, Peppol |
-| Platform | Sign-up, trial, bank-transfer billing & payment tracking, onboarding wizard, super-admin | Card / SEPA Direct Debit billing via Stripe, public API & webhooks, reseller accounts |
+| Module               | v1 (MVP)                                                                                                                                                                                                                                            | Later (v2+)                                                                                                         |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Register / checkout  | Product grid, search, barcode scan, cart, discounts, split tender (cash/card/voucher), 5c cash rounding, email or printed receipt, returns & refunds, park/recall sale, modifiers, table plan & open tabs, kitchen/bar ticket printing, split bills | Customer-facing display, self-checkout kiosk, kitchen display screens (KDS), online ordering                        |
+| Products & inventory | Products, variants, categories, barcodes, VAT category per product, stock levels, low-stock alerts, Excel/CSV/JSON import & export                                                                                                                  | Suppliers & purchase orders, stock transfers, stocktakes, batch/expiry, bundles                                     |
+| Cash management      | Open/close shift, float, cash in/out, X- and Z-reports, over/short                                                                                                                                                                                  | Multiple drawers per register, blind cash-up                                                                        |
+| Staff                | Owner / manager / cashier roles, PIN on paired devices, per-user sales                                                                                                                                                                              | Timesheets, tip-pooling reports, custom permissions                                                                 |
+| Customers            | Records, purchase history, B2B VAT number for invoices                                                                                                                                                                                              | Loyalty, store credit, gift cards, marketing lists                                                                  |
+| Reports              | Daily sales, by product/category/staff, VAT by rate, payment totals, filtered export (xlsx/csv/pdf)                                                                                                                                                 | Margin & COGS, Xero/Sage/QuickBooks export, AI insights                                                             |
+| Multi-location       | Single location                                                                                                                                                                                                                                     | Multiple branches, consolidated reports                                                                             |
+| Integrations         | ESC/POS printers, cash drawer, USB/Bluetooth scanners; card via the shop's own standalone terminal                                                                                                                                                  | Integrated card readers (Stripe Terminal, SumUp), Shopify/WooCommerce stock sync, Tillflow Finance invoices, Peppol |
+| Platform             | Sign-up, trial, bank-transfer billing & payment tracking, onboarding wizard, super-admin                                                                                                                                                            | Card / SEPA Direct Debit billing via Stripe, public API & webhooks, reseller accounts                               |
 
 ---
 
@@ -62,13 +62,13 @@ Estimates, not promises: the gates matter more than the dates.
 
 At sign-up the owner answers four questions: business name & VAT number, **business type**, number of tills, and "import products now or start empty?". The type only switches presets on and off — every shop runs the same code and can change any setting later.
 
-| Business type | Product fields switched on | Register behaviour | Starter categories & reports |
-| --- | --- | --- | --- |
-| General / convenience | Barcode, age-restricted flag, Re-turn deposit, bag levy item | Scan-first screen, age-check prompt on alcohol & tobacco, 5c rounding on | Grocery, drinks, household, tobacco; fastest movers, low stock |
-| Electronics & phones | Serial / IMEI, warranty period, brand, model | Serial prompt on sale, warranty end date on receipt, serial lookup for returns | Phones, accessories, repairs; sales by brand, serials sold |
-| Clothing & footwear | Size × colour variant matrix, season, style code | Variant picker, exchange flow, gift receipts | Menswear, womenswear, kids, shoes; sales by size & colour |
-| Café (counter service) | Modifiers (size, milk, extra shot), allergens, eat-in vs take-away VAT | Quick counter screen, order name/number, bar/kitchen tickets, tips | Hot drinks, cold drinks, food, bakery; sales by hour, tips |
-| Restaurant (table service) | Modifiers & courses, allergens, 9% food vs 23% drinks per item | Table plan with open tabs, send by course, split bill by item or seat, service charge, tips | Starters, mains, desserts, bar; covers, spend per cover, tips |
+| Business type              | Product fields switched on                                             | Register behaviour                                                                          | Starter categories & reports                                   |
+| -------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| General / convenience      | Barcode, age-restricted flag, Re-turn deposit, bag levy item           | Scan-first screen, age-check prompt on alcohol & tobacco, 5c rounding on                    | Grocery, drinks, household, tobacco; fastest movers, low stock |
+| Electronics & phones       | Serial / IMEI, warranty period, brand, model                           | Serial prompt on sale, warranty end date on receipt, serial lookup for returns              | Phones, accessories, repairs; sales by brand, serials sold     |
+| Clothing & footwear        | Size × colour variant matrix, season, style code                       | Variant picker, exchange flow, gift receipts                                                | Menswear, womenswear, kids, shoes; sales by size & colour      |
+| Café (counter service)     | Modifiers (size, milk, extra shot), allergens, eat-in vs take-away VAT | Quick counter screen, order name/number, bar/kitchen tickets, tips                          | Hot drinks, cold drinks, food, bakery; sales by hour, tips     |
+| Restaurant (table service) | Modifiers & courses, allergens, 9% food vs 23% drinks per item         | Table plan with open tabs, send by course, split bill by item or seat, service charge, tips | Starters, mains, desserts, bar; covers, spend per cover, tips  |
 
 Implementation: `organisations.business_type` + a `business_type_presets` config file (fields, categories, register options, dashboard tiles). Type-specific data (IMEI, warranty, modifiers, allergens) lives in a Zod-validated `attributes` JSONB column on variants, so a sixth type is a config change, not a migration.
 
@@ -77,6 +77,7 @@ Implementation: `organisations.business_type` + a `business_type_presets` config
 ## 5. Bulk import & export
 
 **Import** (products, stock, customers, suppliers) — every plan:
+
 1. Upload Excel (.xlsx), CSV or JSON, up to 50,000 rows; per-business-type templates.
 2. Column mapping with auto-match and saved mappings; ready-made mappings for Square, Lightspeed, Imonggo and Shopify exports.
 3. Validation preview: row-level errors (prices, VAT, duplicate barcodes, type-required fields), downloadable error file.
@@ -95,28 +96,28 @@ Libraries: Papa Parse (CSV), ExcelJS (xlsx), react-pdf (PDF), `import_jobs` tabl
 
 ## 6. Tech stack
 
-| Layer | Choice | Why |
-| --- | --- | --- |
-| Language | TypeScript (strict) | Types catch AI mistakes at build time |
-| Web app | Next.js (App Router) + React | Server components for back office, client components for the register |
-| Register | Same app as installable PWA (Serwist service worker) | iPad, Android, Windows/Mac; no app store |
-| UI | Tailwind CSS + shadcn/ui (Radix) + Lucide | Accessible components, easy for AI to extend |
-| Offline storage | IndexedDB via Dexie.js | Local catalogue and sale outbox |
-| Database | PostgreSQL on Supabase, eu-west-1 (Ireland) | RLS, PITR backups, EU residency |
-| ORM & migrations | Drizzle ORM + drizzle-kit | Typed SQL, versioned migrations |
-| Auth | Supabase Auth (password, magic link, TOTP MFA) + device pairing + cashier PINs | Integrates with RLS via JWT |
-| Validation | Zod, shared client/server | One source of truth |
-| Server logic | Server actions + route handlers (`/api/v1/*`) | Sync, webhooks |
-| Background jobs | Inngest | Reports, emails, imports/exports, retries |
-| Rate limits | Upstash Redis | Auth, PIN, sync, exports |
-| Card payments | None integrated in v1 — "Card" tender recorded from the shop's own terminal | No card data ever touches Tillflow; Stripe Terminal / SumUp in v2 |
-| Subscriptions | Manual invoices + bank transfer | Management's choice; automated card/direct-debit billing is v2 |
-| Email | Resend + React Email | Receipts, Z-reports, invites |
-| Printing | ESC/POS via WebUSB/network or local print bridge; browser print fallback | Receipts, kitchen tickets, drawer kick |
-| Hosting | Vercel (`dub1`) or Hostinger Web Apps (Node.js) | Vercel: preview URL per PR · Hostinger: flat price, separate staging app |
-| Monitoring | Sentry, Better Stack | Errors, uptime, logs |
-| Testing | Vitest, Playwright, SQL RLS tests | Safety net for AI-written code |
-| CI/CD | GitHub Actions | Lint, typecheck, test, migrate |
+| Layer            | Choice                                                                                       | Why                                                                      |
+| ---------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Language         | TypeScript (strict)                                                                          | Types catch AI mistakes at build time                                    |
+| Web app          | Next.js (App Router) + React                                                                 | Server components for back office, client components for the register    |
+| Register         | Same app as installable PWA (Serwist service worker)                                         | iPad, Android, Windows/Mac; no app store                                 |
+| UI               | Tailwind CSS + shadcn/ui (Radix) + Lucide                                                    | Accessible components, easy for AI to extend                             |
+| Offline storage  | IndexedDB via Dexie.js                                                                       | Local catalogue and sale outbox                                          |
+| Database         | PostgreSQL on Supabase, eu-west-1 (Ireland)                                                  | RLS, PITR backups, EU residency                                          |
+| ORM & migrations | Drizzle ORM + drizzle-kit                                                                    | Typed SQL, versioned migrations                                          |
+| Auth             | Supabase Auth (password, magic link, TOTP MFA) + device pairing + cashier PINs               | Integrates with RLS via JWT                                              |
+| Validation       | Zod, shared client/server                                                                    | One source of truth                                                      |
+| Server logic     | Server actions + route handlers (`/api/v1/*`)                                                | Sync, webhooks                                                           |
+| Background jobs  | pg-boss (Postgres queue in Supabase)                                                         | Reports, emails, imports/exports, retries; no extra sub-processor        |
+| Rate limits      | Postgres `check_rate_limit()` (auth, exports) + in-memory (sync); PIN lockout as DB counters | No extra sub-processor or secrets                                        |
+| Card payments    | None integrated in v1 — "Card" tender recorded from the shop's own terminal                  | No card data ever touches Tillflow; Stripe Terminal / SumUp in v2        |
+| Subscriptions    | Manual invoices + bank transfer                                                              | Management's choice; automated card/direct-debit billing is v2           |
+| Email            | Resend + React Email                                                                         | Receipts, Z-reports, invites                                             |
+| Printing         | ESC/POS via WebUSB/network or local print bridge; browser print fallback                     | Receipts, kitchen tickets, drawer kick                                   |
+| Hosting          | Vercel (`dub1`) or Hostinger Web Apps (Node.js)                                              | Vercel: preview URL per PR · Hostinger: flat price, separate staging app |
+| Monitoring       | Own error log (`error_events`, pino, email alerts via Resend) + Better Stack uptime          | Errors stay in our EU database                                           |
+| Testing          | Vitest, Playwright, SQL RLS tests                                                            | Safety net for AI-written code                                           |
+| CI/CD            | GitHub Actions                                                                               | Lint, typecheck, test, migrate                                           |
 
 Higgsfield: design exploration and the tillflow.ie marketing site. The POS itself lives in a GitHub repo you own.
 Hostinger alternative: Docker on a Hostinger KVM VPS with Coolify, Supabase stays managed — only if cost demands it later.
@@ -136,7 +137,7 @@ flowchart TB
   end
   subgraph Vercel["Vercel · Dublin"]
     APP["Next.js app<br/>screens · /api/v1/sync · webhooks<br/>validates every sale, recalculates VAT"]
-    JOBS["Inngest jobs<br/>reports · imports · exports · emails"]
+    JOBS["pg-boss worker<br/>reports · imports · exports · emails"]
   end
   subgraph Supa["Supabase · Ireland"]
     PG[("Postgres + RLS<br/>org_id on every row · PITR")]
@@ -144,7 +145,6 @@ flowchart TB
   end
   subgraph Ext["External"]
     MAIL["Resend"]
-    SENTRY["Sentry"]
   end
   REG -- "sync sales (HTTPS)" --> APP
   BO --> APP
@@ -152,7 +152,6 @@ flowchart TB
   APP --> AUTH
   JOBS --> PG
   JOBS --> MAIL
-  APP --> SENTRY
 ```
 
 The register writes each sale locally first, then syncs it; the API re-checks prices and VAT before writing to Postgres. Card payments happen on the shop's own terminal; Tillflow only records that a card was used, so no card data ever reaches it.
@@ -163,28 +162,28 @@ The register writes each sale locally first, then syncs it; the API re-checks pr
 
 Every business table carries `org_id`; RLS allows a row only when `org_id` matches the signed-in user's organisation. Money is integer cents; IDs are UUIDv7 generated on the device.
 
-| Table | Key columns | Notes |
-| --- | --- | --- |
-| `organisations` | name, legal_name, vat_number, cro_number, business_type, country, plan, trial_ends_at, status | The tenant |
-| `locations` | org_id, name, address, eircode, timezone, receipt_footer | A shop |
-| `registers` | location_id, name, device_token_hash, paired_at, last_seen_at | Paired till |
-| `memberships` | user_id, org_id, role, pin_hash, location_ids | owner / manager / cashier |
-| `tax_rates` | country, code, rate_bp, valid_from, valid_to | 2300 = 23%; effective-dated |
-| `products` / `variants` | sku, barcode, name, price_incl_vat, tax_category, cost, track_stock, attributes (JSONB) | VAT-inclusive prices |
-| `categories` | name, parent_id, colour, sort | Register tiles |
-| `modifier_groups` / `modifiers` | name, min/max choices, price_delta | Cafés & restaurants |
-| `tables` / `tabs` | floor, seats, status; tab lines, course | Restaurants |
-| `stock_movements` | variant_id, location_id, qty_delta, reason, ref_id | Append-only ledger |
-| `stock_levels` | variant_id, location_id, on_hand | Cached total |
-| `customers` | name, email, phone, vat_number, marketing_consent_at | GDPR consent timestamp |
-| `sales` / `sale_lines` | receipt_no, status, totals, idempotency_key; qty, unit_price, discount, tax_rate_bp, tax_amount | Rate snapshotted on the line |
-| `payments` | method, amount, provider_ref, tip_amount | No card numbers |
-| `refunds` | original_sale_id, lines, reason, approved_by | |
-| `shifts` / `cash_movements` | float, counted, expected, closed_at | Z-report |
-| `import_jobs` | type, status, rows, errors, batch_id | Undo within 24h |
-| `audit_log` | actor, action, entity, before, after, ip | Append-only |
-| `subscriptions` | status (trial / active / overdue / paused), price_cents, period_start, period_end | One fixed price, paid by bank transfer |
-| `billing_invoices` | invoice_no (sequential), org_id, amount_ex_vat, vat, total, issued_at, due_at, payment_reference, paid_at, bank_reference, marked_paid_by | Your invoices to shops; paid by bank transfer, marked paid by super-admin (audit-logged) |
+| Table                           | Key columns                                                                                                                               | Notes                                                                                    |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `organisations`                 | name, legal_name, vat_number, cro_number, business_type, country, plan, trial_ends_at, status                                             | The tenant                                                                               |
+| `locations`                     | org_id, name, address, eircode, timezone, receipt_footer                                                                                  | A shop                                                                                   |
+| `registers`                     | location_id, name, device_token_hash, paired_at, last_seen_at                                                                             | Paired till                                                                              |
+| `memberships`                   | user_id, org_id, role, pin_hash, location_ids                                                                                             | owner / manager / cashier                                                                |
+| `tax_rates`                     | country, code, rate_bp, valid_from, valid_to                                                                                              | 2300 = 23%; effective-dated                                                              |
+| `products` / `variants`         | sku, barcode, name, price_incl_vat, tax_category, cost, track_stock, attributes (JSONB)                                                   | VAT-inclusive prices                                                                     |
+| `categories`                    | name, parent_id, colour, sort                                                                                                             | Register tiles                                                                           |
+| `modifier_groups` / `modifiers` | name, min/max choices, price_delta                                                                                                        | Cafés & restaurants                                                                      |
+| `tables` / `tabs`               | floor, seats, status; tab lines, course                                                                                                   | Restaurants                                                                              |
+| `stock_movements`               | variant_id, location_id, qty_delta, reason, ref_id                                                                                        | Append-only ledger                                                                       |
+| `stock_levels`                  | variant_id, location_id, on_hand                                                                                                          | Cached total                                                                             |
+| `customers`                     | name, email, phone, vat_number, marketing_consent_at                                                                                      | GDPR consent timestamp                                                                   |
+| `sales` / `sale_lines`          | receipt_no, status, totals, idempotency_key; qty, unit_price, discount, tax_rate_bp, tax_amount                                           | Rate snapshotted on the line                                                             |
+| `payments`                      | method, amount, provider_ref, tip_amount                                                                                                  | No card numbers                                                                          |
+| `refunds`                       | original_sale_id, lines, reason, approved_by                                                                                              |                                                                                          |
+| `shifts` / `cash_movements`     | float, counted, expected, closed_at                                                                                                       | Z-report                                                                                 |
+| `import_jobs`                   | type, status, rows, errors, batch_id                                                                                                      | Undo within 24h                                                                          |
+| `audit_log`                     | actor, action, entity, before, after, ip                                                                                                  | Append-only                                                                              |
+| `subscriptions`                 | status (trial / active / overdue / paused), price_cents, period_start, period_end                                                         | One fixed price, paid by bank transfer                                                   |
+| `billing_invoices`              | invoice_no (sequential), org_id, amount_ex_vat, vat, total, issued_at, due_at, payment_reference, paid_at, bank_reference, marked_paid_by | Your invoices to shops; paid by bank transfer, marked paid by super-admin (audit-logged) |
 
 Rules: completed sales are never edited (refund/void rows instead) · VAT per line, half-up to the cent, rate copied onto the line · every register write has an idempotency key · records kept ≥ 6 years.
 
@@ -206,10 +205,10 @@ Server owns catalogue and prices; the device owns what was sold. Stock may go ne
 ## 10. Security
 
 - **Tenant isolation:** RLS on every table from the first migration; CI fails if a table lacks a policy; tests prove Shop A cannot read or write Shop B.
-- **Service-role key** only in server jobs, never in the browser.
+- **Service-role / privileged DB access** only in `src/lib/ops/db.ts` (calls `ops.*` SECURITY DEFINER functions only) and the pg-boss job handlers; never in the browser. CI checks the imports.
 - **Auth:** owners MFA-required; registers paired with one-time codes (revocable device tokens); cashier PINs hashed with Argon2, rate-limited, lockout after 5 failures; PIN never works on an unpaired device; manager override for refunds, big discounts and no-sale drawer opens, all audit-logged.
 - **PCI DSS:** out of scope in v1 — Tillflow never handles card data. The "Card" tender stores only the amount and an optional terminal receipt reference typed by the cashier (never card numbers).
-- **App:** Zod validation + role check in every server action; server recalculates all totals; CSP/HSTS/secure cookies; rate limits; secrets only in Vercel/Supabase settings; Dependabot + `npm audit`; Sentry PII scrubbing.
+- **App:** Zod validation + role check in every server action; server recalculates all totals; CSP/HSTS/secure cookies; rate limits; secrets only in Vercel/Supabase settings; Dependabot + `npm audit`; PII scrubbing in our own error log.
 - **Data:** TLS + encryption at rest; PITR; monthly restore test; append-only audit log; independent pen test before launch and yearly.
 - **AI guardrails:** Claude Code never gets production credentials; RLS, auth, payments and money-maths changes need a passing test and your line-by-line review.
 
@@ -223,23 +222,23 @@ Stateless app servers · Supabase connection pooler · indexes `(org_id, created
 
 Not legal advice — have an Irish accountant and solicitor review before launch. Ireland currently has no fiscalised-till requirement.
 
-| Area | Requirement | What Tillflow does |
-| --- | --- | --- |
-| VAT rates | 23% / 13.5% / 9% / 0% (+4.8% livestock). From 1 July 2026 restaurant & catering services and hairdressing moved from 13.5% to 9%; alcohol, soft drinks and bottled water stay 23%; tea and coffee 9% | Effective-dated rate rows; tax category per product; meal-deal apportionment; central rate updates |
-| Eat-in vs take-away | Take-away food is a supply of goods; cold take-away food 0% | Eat-in / take-away toggle for cafés & restaurants |
-| Receipts & VAT invoices | Business customers can request a full VAT invoice | Sequential receipt numbers; "Convert to VAT invoice" |
-| VAT returns | VAT3 and annual Return of Trading Details | VAT report by rate and period, exportable |
-| Record keeping | Keep records 6 years | 6-year retention, soft delete, archive |
-| E-invoicing (ViDA) | From Nov 2028 large corporates issue structured e-invoices; all VAT-registered businesses must be able to receive them; B2C out of scope | No till change; B2B invoices via Tillflow Finance with Peppol by 2028 |
-| GDPR / DPA 2018 | You are processor for shops' customer data; DPC regulates | DPA in T&Cs, EU hosting, sub-processor list, export & deletion tools, consent timestamps |
-| Card payments | PCI DSS; PSD2 SCA; consumer card surcharges banned | Handled by the shop's own terminal and acquirer in v1; Tillflow offers no consumer surcharge option |
-| Accessibility (EAA) | In force since 28 June 2025 (S.I. 636/2023); CCPC enforces | WCAG 2.2 AA; mandatory for customer-facing screens and your sign-up/billing pages |
-| Cash | 5c rounding common | Optional 5c rounding shown on receipt |
-| Tips | Tips & Gratuities Act 2022: show how tips are shared | Tip capture + tips report |
-| Deposit Return Scheme | Re-turn deposits on bottles & cans | Deposit as separate line |
-| Levies & age | Plastic bag levy; alcohol minimum unit pricing | Levy item type; age prompt; minimum-price guard |
-| Consumer law | Consumer Rights Act 2022; VAT-inclusive prices | Refund flows with reasons |
-| Food allergens | Allergen info for the 14 regulated allergens on non-prepacked food (FSAI) | Allergen tags per item on register, menus, tickets, receipts |
+| Area                    | Requirement                                                                                                                                                                                          | What Tillflow does                                                                                  |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| VAT rates               | 23% / 13.5% / 9% / 0% (+4.8% livestock). From 1 July 2026 restaurant & catering services and hairdressing moved from 13.5% to 9%; alcohol, soft drinks and bottled water stay 23%; tea and coffee 9% | Effective-dated rate rows; tax category per product; meal-deal apportionment; central rate updates  |
+| Eat-in vs take-away     | Take-away food is a supply of goods; cold take-away food 0%                                                                                                                                          | Eat-in / take-away toggle for cafés & restaurants                                                   |
+| Receipts & VAT invoices | Business customers can request a full VAT invoice                                                                                                                                                    | Sequential receipt numbers; "Convert to VAT invoice"                                                |
+| VAT returns             | VAT3 and annual Return of Trading Details                                                                                                                                                            | VAT report by rate and period, exportable                                                           |
+| Record keeping          | Keep records 6 years                                                                                                                                                                                 | 6-year retention, soft delete, archive                                                              |
+| E-invoicing (ViDA)      | From Nov 2028 large corporates issue structured e-invoices; all VAT-registered businesses must be able to receive them; B2C out of scope                                                             | No till change; B2B invoices via Tillflow Finance with Peppol by 2028                               |
+| GDPR / DPA 2018         | You are processor for shops' customer data; DPC regulates                                                                                                                                            | DPA in T&Cs, EU hosting, sub-processor list, export & deletion tools, consent timestamps            |
+| Card payments           | PCI DSS; PSD2 SCA; consumer card surcharges banned                                                                                                                                                   | Handled by the shop's own terminal and acquirer in v1; Tillflow offers no consumer surcharge option |
+| Accessibility (EAA)     | In force since 28 June 2025 (S.I. 636/2023); CCPC enforces                                                                                                                                           | WCAG 2.2 AA; mandatory for customer-facing screens and your sign-up/billing pages                   |
+| Cash                    | 5c rounding common                                                                                                                                                                                   | Optional 5c rounding shown on receipt                                                               |
+| Tips                    | Tips & Gratuities Act 2022: show how tips are shared                                                                                                                                                 | Tip capture + tips report                                                                           |
+| Deposit Return Scheme   | Re-turn deposits on bottles & cans                                                                                                                                                                   | Deposit as separate line                                                                            |
+| Levies & age            | Plastic bag levy; alcohol minimum unit pricing                                                                                                                                                       | Levy item type; age prompt; minimum-price guard                                                     |
+| Consumer law            | Consumer Rights Act 2022; VAT-inclusive prices                                                                                                                                                       | Refund flows with reasons                                                                           |
+| Food allergens          | Allergen info for the 14 regulated allergens on non-prepacked food (FSAI)                                                                                                                            | Allergen tags per item on register, menus, tickets, receipts                                        |
 
 Open: confirm current Re-turn deposit amounts/VAT treatment and any Budget 2027 rate changes before go-live.
 
@@ -260,16 +259,16 @@ Open: confirm current Re-turn deposit amounts/VAT treatment and any Budget 2027 
 
 **One fixed monthly price, paid by bank transfer.** Management has chosen a single price for every shop (no Starter/Growth/Pro tiers) and payment by bank transfer instead of card or direct debit.
 
-| Item | Decision |
-| --- | --- |
-| Price | One fixed monthly price, ex VAT — **amount to be confirmed** (per shop or per business also to be confirmed) |
-| What's included | Everything in v1: all business types, registers, staff, reports, import/export, email support |
-| Trial | Free trial before the first invoice — length to be confirmed (14 days suggested) |
-| How shops pay | Bank transfer (SEPA credit transfer) to Tillflow's Irish business account, quoting a unique payment reference |
-| Invoices | Sequential VAT invoices, issued monthly by email as PDF with IBAN/BIC and the payment reference |
-| Reconciliation | You check the bank statement and click **Mark as paid** in the super-admin panel, entering the bank reference; every action is audit-logged |
-| Late payment | Reminder at due date, again at +7 days; account moves to **read-only** after a grace period (they can still view and export data, never deleted) |
-| Card / direct debit | Not in v1. Automated billing (e.g. Stripe with card and SEPA Direct Debit) is a v2 option |
+| Item                | Decision                                                                                                                                         |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Price               | One fixed monthly price, ex VAT — **amount to be confirmed** (per shop or per business also to be confirmed)                                     |
+| What's included     | Everything in v1: all business types, registers, staff, reports, import/export, email support                                                    |
+| Trial               | Free trial before the first invoice — length to be confirmed (14 days suggested)                                                                 |
+| How shops pay       | Bank transfer (SEPA credit transfer) to Tillflow's Irish business account, quoting a unique payment reference                                    |
+| Invoices            | Sequential VAT invoices, issued monthly by email as PDF with IBAN/BIC and the payment reference                                                  |
+| Reconciliation      | You check the bank statement and click **Mark as paid** in the super-admin panel, entering the bank reference; every action is audit-logged      |
+| Late payment        | Reminder at due date, again at +7 days; account moves to **read-only** after a grace period (they can still view and export data, never deleted) |
+| Card / direct debit | Not in v1. Automated billing (e.g. Stripe with card and SEPA Direct Debit) is a v2 option                                                        |
 
 **How it flows**
 
@@ -292,17 +291,17 @@ Benchmarks for setting the price: Lightspeed ~€69–€199/month; Square free 
 
 ## 15. Risks
 
-| Risk | Mitigation |
-| --- | --- |
-| Cross-tenant data leak from AI-written code | RLS everywhere, RLS tests in CI, security plugin + reviews, pen test |
-| Offline sync loses/duplicates sales | Idempotency keys, outbox kept until confirmed, e2e offline tests |
-| VAT errors | Tested money library, rates as data, accountant review |
-| Scope creep (5 business types + hospitality) | Presets over custom code; strict phase gates |
-| Hardware variety | Short certified-hardware list; recommended bundles |
+| Risk                                                          | Mitigation                                                                                                                                         |
+| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cross-tenant data leak from AI-written code                   | RLS everywhere, RLS tests in CI, security plugin + reviews, pen test                                                                               |
+| Offline sync loses/duplicates sales                           | Idempotency keys, outbox kept until confirmed, e2e offline tests                                                                                   |
+| VAT errors                                                    | Tested money library, rates as data, accountant review                                                                                             |
+| Scope creep (5 business types + hospitality)                  | Presets over custom code; strict phase gates                                                                                                       |
+| Hardware variety                                              | Short certified-hardware list; recommended bundles                                                                                                 |
 | Card totals typed on a separate terminal don't match the till | Card tender defaults to the exact amount due; Z-report shows card total to compare with the terminal's end-of-day report; integrated readers in v2 |
-| Support load | In-app guides, onboarding checklist, no free tier |
-| Manual bank-transfer reconciliation and late payers | Unique payment references, automated reminders, read-only mode after grace period; automated billing in v2 if volume demands |
-| Competing with free (Square, SumUp) | Irish-first VAT, local support, no lock-in, Finance bundle |
+| Support load                                                  | In-app guides, onboarding checklist, no free tier                                                                                                  |
+| Manual bank-transfer reconciliation and late payers           | Unique payment references, automated reminders, read-only mode after grace period; automated billing in v2 if volume demands                       |
+| Competing with free (Square, SumUp)                           | Irish-first VAT, local support, no lock-in, Finance bundle                                                                                         |
 
 ## 16. Sources
 

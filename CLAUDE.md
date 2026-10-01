@@ -8,22 +8,22 @@ Cloud, offline-capable point of sale for Irish retail shops, cafés and restaura
 
 ## Stack
 
-TypeScript (strict) · Next.js App Router + React · Tailwind + shadcn/ui · Supabase Postgres (eu-west-1) with RLS · Drizzle ORM/drizzle-kit · Supabase Auth (behind `src/lib/auth`) · Zod · Dexie/IndexedDB offline outbox · Serwist PWA · Inngest jobs · Upstash rate limits · Resend · Vitest, Playwright, SQL RLS tests · pnpm.
+TypeScript (strict) · Next.js App Router + React · Tailwind + shadcn/ui · Supabase Postgres (eu-west-1) with RLS · Drizzle ORM/drizzle-kit · Supabase Auth (behind `src/lib/auth`) · Zod · Dexie/IndexedDB offline outbox · Serwist PWA · pg-boss jobs (Postgres) · Postgres rate limits and error log · pino · Resend · Vitest, Playwright, SQL RLS tests · pnpm.
 
 ## Commands
 
-| Command | Purpose |
-| --- | --- |
-| `pnpm dev` | Next dev server |
-| `pnpm lint` | ESLint |
-| `pnpm typecheck` | `next typegen` + `tsc --noEmit` |
-| `pnpm test` | Vitest unit tests |
-| `pnpm test:rls` | RLS tests (Shop A vs Shop B) in `tests/rls` |
-| `pnpm test:e2e` | Playwright |
+| Command            | Purpose                                                      |
+| ------------------ | ------------------------------------------------------------ |
+| `pnpm dev`         | Next dev server                                              |
+| `pnpm lint`        | ESLint                                                       |
+| `pnpm typecheck`   | `next typegen` + `tsc --noEmit`                              |
+| `pnpm test`        | Vitest unit tests                                            |
+| `pnpm test:rls`    | RLS tests (Shop A vs Shop B) in `tests/rls`                  |
+| `pnpm test:e2e`    | Playwright                                                   |
 | `pnpm db:generate` | drizzle-kit: schema → new migration in `supabase/migrations` |
-| `pnpm db:migrate` | Apply migrations (local/staging only) |
-| `pnpm db:reset` | `supabase db reset` (local only) |
-| `pnpm verify` | lint + typecheck + test + build |
+| `pnpm db:migrate`  | Apply migrations (local/staging only)                        |
+| `pnpm db:reset`    | `supabase db reset` (local only)                             |
+| `pnpm verify`      | lint + typecheck + test + build                              |
 
 ## Folder map
 
@@ -40,27 +40,33 @@ TypeScript (strict) · Next.js App Router + React · Tailwind + shadcn/ui · Sup
 ## NON-NEGOTIABLE rules
 
 **Tenancy and data**
+
 - Every business table has `org_id`, RLS enabled, a policy, and an RLS test in the same PR.
 - Completed sales are never updated. Corrections are refunds/voids (new rows).
 - Never execute user-supplied SQL. Imports are parsed as CSV/Excel/JSON only.
 
 **Money**
+
 - Money is integer cents. All VAT and rounding goes through `src/lib/money`. Never inline maths.
 - The server recalculates every price and total. Never trust client totals.
 
 **Input and access**
+
 - Validate every input with Zod. Check the caller's role in every server action and route handler.
 
 **Secrets and privacy**
+
 - Never log personal data. Never hard-code secrets.
 - Never ask me to paste secrets into chat.
 - Never touch production credentials or the production Supabase project.
 
 **Portability**
+
 - All auth calls go through `src/lib/auth`.
 - RLS policies use ONE SQL helper for the current user's orgs. Never repeat the membership subquery.
 - File storage sits behind `src/lib/storage`.
-- Background jobs run in Inngest, not Supabase Edge Functions.
+- Background jobs run in pg-boss (`src/lib/jobs`, Postgres queue), not Supabase Edge Functions. No third-party error, rate-limit or job services: errors, rate limits and jobs live in our Postgres (see `docs/DEPLOY.md`).
+- Privileged database access (RLS-bypassing, service role) lives ONLY in `src/lib/ops/db.ts` (which calls `ops.*` SECURITY DEFINER functions and never touches tables) and the pg-boss job handlers. `pnpm check:imports` enforces this in CI.
 
 ## Definition of done
 

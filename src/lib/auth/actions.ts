@@ -1,7 +1,8 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { allowAttempt, clientIp, RATE_LIMITED_MESSAGE } from "@/lib/rate-limit";
+import { logger } from "@/lib/logger";
+import { authRateLimitError, clientIp } from "@/lib/rate-limit";
 import { appUrl, isGoogleAuthEnabled } from "./config";
 import { safeNext } from "./redirect";
 import {
@@ -28,7 +29,7 @@ const str = (formData: FormData, key: string) => {
 };
 
 function logAuthError(action: string, error: { code?: string; status?: number }) {
-  console.error(`[auth] ${action} failed`, { code: error.code, status: error.status });
+  logger.error({ code: error.code, status: error.status }, `auth ${action} failed`);
 }
 
 export async function signUpAction(_prev: FormState, formData: FormData): Promise<FormState> {
@@ -40,9 +41,8 @@ export async function signUpAction(_prev: FormState, formData: FormData): Promis
   if (!parsed.success) return { fieldErrors: fieldErrorsOf(parsed.error) };
   const { email, password, businessName } = parsed.data;
 
-  if (!(await allowAttempt("sign-up", await clientIp(), email))) {
-    return { error: RATE_LIMITED_MESSAGE };
-  }
+  const limited = await authRateLimitError("sign-up", await clientIp(), email);
+  if (limited) return { error: limited };
 
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase.auth.signUp({
@@ -72,9 +72,10 @@ export async function signInAction(_prev: FormState, formData: FormData): Promis
   if (!parsed.success) return { error: "Enter your email and password." };
   const { email, password } = parsed.data;
 
-  if (!(await allowAttempt("login", await clientIp(), email))) {
-    return { error: RATE_LIMITED_MESSAGE };
-  }
+  const limited =
+    (await authRateLimitError("login", await clientIp(), email)) ??
+    (await authRateLimitError("login-account", email));
+  if (limited) return { error: limited };
 
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -96,9 +97,8 @@ export async function sendMagicLinkAction(
   if (!parsed.success) return { fieldErrors: fieldErrorsOf(parsed.error) };
   const { email } = parsed.data;
 
-  if (!(await allowAttempt("magic-link", await clientIp(), email))) {
-    return { error: RATE_LIMITED_MESSAGE };
-  }
+  const limited = await authRateLimitError("magic-link", await clientIp(), email);
+  if (limited) return { error: limited };
 
   const supabase = await createSupabaseServerClient();
   // shouldCreateUser: false. Sign-in links never create accounts; sign-up has its own form.
@@ -119,9 +119,11 @@ export async function requestPasswordResetAction(
   if (!parsed.success) return { fieldErrors: fieldErrorsOf(parsed.error) };
   const { email } = parsed.data;
 
-  if (!(await allowAttempt("reset", await clientIp(), email))) {
-    return { error: RATE_LIMITED_MESSAGE };
-  }
+  // 3 an hour per email and 10 an hour per IP (docs/specs/auth.md).
+  const limited =
+    (await authRateLimitError("reset-account", email)) ??
+    (await authRateLimitError("reset-ip", await clientIp()));
+  if (limited) return { error: limited };
 
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
@@ -147,7 +149,8 @@ export async function updatePasswordAction(
   });
   if (!parsed.success) return { fieldErrors: fieldErrorsOf(parsed.error) };
 
-  if (!(await allowAttempt("reset", "update", user.id))) return { error: RATE_LIMITED_MESSAGE };
+  const limited = await authRateLimitError("reset-account", user.id);
+  if (limited) return { error: limited };
 
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase.auth.updateUser({ password: parsed.data.password });
@@ -166,7 +169,7 @@ export async function updatePasswordAction(
 /** "Continue with Google". Owners and managers only; see the callback for the role check. */
 export async function signInWithGoogleAction(): Promise<void> {
   if (!isGoogleAuthEnabled()) redirect("/login?error=google_disabled");
-  if (!(await allowAttempt("login", await clientIp(), "google"))) redirect("/login?error=rate");
+  if (await authRateLimitError("login", await clientIp(), "google")) redirect("/login?error=rate");
 
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase.auth.signInWithOAuth({
@@ -191,12 +194,13 @@ export async function createOrganisationAction(
   const user = await requireUser();
   const parsed = createOrganisationInput.safeParse({ businessName: str(formData, "businessName") });
   if (!parsed.success) return { fieldErrors: fieldErrorsOf(parsed.error) };
-  if (!(await allowAttempt("sign-up", "org", user.id))) return { error: RATE_LIMITED_MESSAGE };
+  const limited = await authRateLimitError("sign-up", "org", user.id);
+  if (limited) return { error: limited };
 
   try {
     await provisionOrganisation(parsed.data.businessName);
   } catch {
-    console.error("[auth] createOrganisation failed");
+    logger.error("auth createOrganisation failed");
     return { error: "We could not create your business. Please try again." };
   }
   // The new owner is at aal1: set up the authenticator first, then onboarding.
@@ -218,7 +222,8 @@ export type MfaEnrolStart =
 export async function startMfaEnrolAction(): Promise<MfaEnrolStart> {
   const user = await requireUser();
   if (user.hasVerifiedFactor) return { error: "An authenticator app is already set up." };
-  if (!(await allowAttempt("mfa", user.id))) return { error: RATE_LIMITED_MESSAGE };
+  const limited = await authRateLimitError("mfa", user.id);
+  if (limited) return { error: limited };
 
   const supabase = await createSupabaseServerClient();
   // Abandoned earlier attempts would otherwise pile up against the factor limit.
@@ -250,7 +255,8 @@ export async function verifyMfaEnrolAction(
   if (!parsed.success) return { fieldErrors: fieldErrorsOf(parsed.error) };
   // Someone who already has an authenticator must use the challenge, never enrol a second factor.
   if (user.hasVerifiedFactor) return { error: "An authenticator app is already set up." };
-  if (!(await allowAttempt("mfa", user.id))) return { error: RATE_LIMITED_MESSAGE };
+  const limited = await authRateLimitError("mfa", user.id);
+  if (limited) return { error: limited };
 
   const supabase = await createSupabaseServerClient();
   // challengeAndVerify on an unverified factor activates it and upgrades this session to aal2.
@@ -272,7 +278,8 @@ export async function verifyMfaChallengeAction(
   const user = await requireUser();
   const parsed = totpCodeInput.safeParse({ code: str(formData, "code") });
   if (!parsed.success) return { fieldErrors: fieldErrorsOf(parsed.error) };
-  if (!(await allowAttempt("mfa", user.id))) return { error: RATE_LIMITED_MESSAGE };
+  const limited = await authRateLimitError("mfa", user.id);
+  if (limited) return { error: limited };
 
   const supabase = await createSupabaseServerClient();
   const { data: factors } = await supabase.auth.mfa.listFactors();
