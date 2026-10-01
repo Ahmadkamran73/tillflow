@@ -1,17 +1,16 @@
 // @vitest-environment node
-import { config } from "dotenv";
 import { randomUUID } from "node:crypto";
 import type { PgBoss } from "pg-boss";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createBoss, registerHandler, type JobHandler } from "@/lib/jobs/boss";
+import { opsRoleUrl, sql } from "./helpers";
 
 /**
- * pg-boss against the local database (schema from migration 0007). Each test uses its own
- * queue name, so runs never see each other's jobs.
+ * pg-boss against the local database (schema 0007), connected as the least-privilege
+ * tillflow_ops role (0008) exactly like the app. Each test uses its own queue name.
  */
-config({ path: ".env.local", quiet: true });
-const url = process.env.DIRECT_URL!;
+let url: string;
 const bosses: PgBoss[] = [];
 
 async function startBoss(): Promise<PgBoss> {
@@ -35,10 +34,12 @@ const payload = z.object({ n: z.number() });
 
 let boss: PgBoss;
 beforeAll(async () => {
+  url = await opsRoleUrl();
   boss = await startBoss();
 });
 afterAll(async () => {
   for (const b of bosses) await b.stop({ graceful: false, close: true });
+  await sql.end();
 });
 
 describe("pg-boss jobs", () => {

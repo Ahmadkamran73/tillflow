@@ -1,5 +1,5 @@
 import { config } from "dotenv";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import postgres, { type TransactionSql } from "postgres";
 import { expect } from "vitest";
 
@@ -9,6 +9,20 @@ const url = process.env.DIRECT_URL;
 if (!url) throw new Error("DIRECT_URL is not set (local Supabase, see .env.local)");
 
 export const sql = postgres(url, { max: 4, onnotice: () => {} });
+
+/**
+ * LOCAL/CI ONLY. Lets the least-privilege role from migration 0008 log in and returns its URL.
+ * The password is derived from the local connection string (stable across parallel test files,
+ * never a literal); on staging/production the owner sets a real one in the SQL editor.
+ */
+export async function opsRoleUrl(): Promise<string> {
+  const password = createHash("sha256").update(`tillflow_ops:${url}`).digest("hex");
+  await sql.unsafe(`alter role tillflow_ops with login password '${password}'`);
+  const u = new URL(url!);
+  u.username = "tillflow_ops";
+  u.password = password;
+  return u.toString();
+}
 
 export type Role = "owner" | "manager" | "cashier";
 export type Actor = { userId: string; role: Role };

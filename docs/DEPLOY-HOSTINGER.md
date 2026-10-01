@@ -19,7 +19,9 @@ Do staging first. Do not start production until staging `/api/health` returns 20
 3. Have these ready in your password manager (never paste them into chat):
    - Staging Supabase URL and anon key (Supabase dashboard, `tillflow-staging` > Project Settings > API)
    - Staging service-role key and pooled `DATABASE_URL` (only needed once server code uses them)
-   - Staging `JOBS_DATABASE_URL`: Supabase dashboard > `tillflow-staging` > **Connect** > **Session pooler** (host `aws-0-eu-west-1.pooler.supabase.com`, port **5432**, user `postgres.<project-ref>`). Not the "Transaction pooler" (port 6543): pg-boss needs a session connection. Not the "Direct connection" either: it is IPv6-only unless you buy Supabase's IPv4 add-on.
+   - Staging `JOBS_DATABASE_URL`, which connects as the least-privilege **`tillflow_ops`** role (migration 0008), never as `postgres`. After the migrations reach staging (step 4 of the release route in `docs/DEPLOY.md`):
+     1. Supabase dashboard > `tillflow-staging` > **SQL Editor**, run `alter role tillflow_ops with login password '<a new strong password>';` (generate it in your password manager and save it there; never paste it into chat).
+     2. Dashboard > **Connect** > **Session pooler** (port **5432**, not the 6543 transaction pooler; not the direct connection, which is IPv6-only). Copy the URI and change the user from `postgres.<project-ref>` to **`tillflow_ops.<project-ref>`** and the password to the one from step 1. **(check)** that the pooler accepts it: the app's `/api/health` says `"database":"ok"`.
    - A Resend API key, and your Resend account email for `ALERT_EMAIL`
 
 ## A. Create the staging app
@@ -54,29 +56,29 @@ Do staging first. Do not start production until staging `/api/health` returns 20
 Repeat section A with these differences:
 
 - Branch **`main`**, domain **`pos.tillflow.ie`**.
-- Production Supabase (`tillflow-prod`) values, including its own session-pooler `JOBS_DATABASE_URL`. `NEXT_PUBLIC_APP_ENV=production`. `ALERT_FROM` must be an address on the verified `tillflow.ie` domain (for example `Tillflow Alerts <alerts@tillflow.ie>`), so do the Resend DNS step first.
+- Production Supabase (`tillflow-prod`) values, including its own session-pooler `JOBS_DATABASE_URL` as `tillflow_ops` (run the same `alter role` in the production SQL editor with a different password). `NEXT_PUBLIC_APP_ENV=production`. `ALERT_FROM` must be an address on the verified `tillflow.ie` domain (for example `Tillflow Alerts <alerts@tillflow.ie>`), so do the Resend DNS step first.
 - Consider switching **auto deploy OFF** so production moves only when you press **Redeploy**. Release order: merge `develop` into `main` by PR, run **Promote to production** on GitHub (approve it) so the database is ready, then **Redeploy** the production app.
 
 ## Environment variables to paste into hPanel
 
 Names only. Values come from your password manager. Same names in both apps, different values.
 
-| Name                                                      | Needed now? | Notes                                                                                                                                |
-| --------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `NEXT_PUBLIC_APP_URL`                                     | yes         | `https://staging.tillflow.ie` / `https://pos.tillflow.ie`                                                                            |
-| `NEXT_PUBLIC_APP_ENV`                                     | yes         | `staging` / `production`                                                                                                             |
-| `NEXT_PUBLIC_SUPABASE_URL`                                | yes         | from that environment's Supabase project                                                                                             |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY`                           | yes         | anon (publishable) key only                                                                                                          |
-| `AUTH_GOOGLE_ENABLED`                                     | yes         | `true` only after Google is enabled in that Supabase project                                                                         |
-| `JOBS_DATABASE_URL`                                       | yes         | Supabase **session pooler** URL (port 5432). Used for background jobs, rate limits, the error log and the health check. Server only. |
-| `JOBS_ENABLED`                                            | optional    | leave unset (on). `false` stops this app running the job worker.                                                                     |
-| `ALERT_EMAIL`                                             | yes         | where new-error alerts and the daily digest go. Staging: your Resend account email.                                                  |
-| `ALERT_FROM`                                              | yes         | staging `onboarding@resend.dev`; production an address on verified `tillflow.ie`                                                     |
-| `RESEND_API_KEY`                                          | yes         | Resend > API Keys. Without it alerts are skipped (errors are still stored).                                                          |
-| `SUPABASE_SERVICE_ROLE_KEY`                               | later       | server only; add when server code needs it                                                                                           |
-| `DATABASE_URL`                                            | later       | pooled connection string                                                                                                             |
-| `EMAIL_FROM`                                              | later       | receipts and invites (later steps)                                                                                                   |
-| `BANK_ACCOUNT_NAME`, `BANK_IBAN`, `BANK_BIC`, `BANK_NAME` | later       | billing invoices (phase 3)                                                                                                           |
+| Name                                                      | Needed now? | Notes                                                                                                                                                                                         |
+| --------------------------------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NEXT_PUBLIC_APP_URL`                                     | yes         | `https://staging.tillflow.ie` / `https://pos.tillflow.ie`                                                                                                                                     |
+| `NEXT_PUBLIC_APP_ENV`                                     | yes         | `staging` / `production`                                                                                                                                                                      |
+| `NEXT_PUBLIC_SUPABASE_URL`                                | yes         | from that environment's Supabase project                                                                                                                                                      |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY`                           | yes         | anon (publishable) key only                                                                                                                                                                   |
+| `AUTH_GOOGLE_ENABLED`                                     | yes         | `true` only after Google is enabled in that Supabase project                                                                                                                                  |
+| `JOBS_DATABASE_URL`                                       | yes         | Supabase **session pooler** URL (port 5432) with user `tillflow_ops.<project-ref>`, never `postgres`. Used for background jobs, rate limits, the error log and the health check. Server only. |
+| `JOBS_ENABLED`                                            | optional    | leave unset (on). `false` stops this app running the job worker.                                                                                                                              |
+| `ALERT_EMAIL`                                             | yes         | where new-error alerts and the daily digest go. Staging: your Resend account email.                                                                                                           |
+| `ALERT_FROM`                                              | yes         | staging `onboarding@resend.dev`; production an address on verified `tillflow.ie`                                                                                                              |
+| `RESEND_API_KEY`                                          | yes         | Resend > API Keys. Without it alerts are skipped (errors are still stored).                                                                                                                   |
+| `SUPABASE_SERVICE_ROLE_KEY`                               | later       | server only; add when server code needs it                                                                                                                                                    |
+| `DATABASE_URL`                                            | later       | pooled connection string                                                                                                                                                                      |
+| `EMAIL_FROM`                                              | later       | receipts and invites (later steps)                                                                                                                                                            |
+| `BANK_ACCOUNT_NAME`, `BANK_IBAN`, `BANK_BIC`, `BANK_NAME` | later       | billing invoices (phase 3)                                                                                                                                                                    |
 
 `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL` and `JOBS_DATABASE_URL` must never start with `NEXT_PUBLIC_`.
 
