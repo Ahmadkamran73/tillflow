@@ -56,11 +56,6 @@ jobs:
             echo "DIRECT_URL=$(get DB_URL)"
             echo "DATABASE_URL=$(get DB_URL)"
           } >> "$GITHUB_ENV"
-          # The app connects as the least-privilege role from migration 0008, like staging/production.
-          OPS_PW="$(openssl rand -hex 16)"
-          echo "::add-mask::$OPS_PW"
-          psql "$(get DB_URL)" -v ON_ERROR_STOP=1 -c "alter role tillflow_ops with login password '$OPS_PW'"
-          echo "JOBS_DATABASE_URL=$(get DB_URL | sed -E "s#//[^@]+@#//tillflow_ops:$OPS_PW@#")" >> "$GITHUB_ENV"
 
       - name: RLS tests (Shop A vs Shop B)
         run: pnpm test:rls
@@ -70,6 +65,14 @@ jobs:
 
       - name: Install Playwright browser
         run: pnpm exec playwright install --with-deps chromium
+      # After the RLS tests (their helper resets this role's local password): the app connects as
+      # the least-privilege role from migration 0008, like staging and production.
+      - name: Connect the app as tillflow_ops
+        run: |
+          OPS_PW="$(openssl rand -hex 16)"
+          echo "::add-mask::$OPS_PW"
+          psql "$DIRECT_URL" -v ON_ERROR_STOP=1 -c "alter role tillflow_ops with login password '$OPS_PW'"
+          echo "JOBS_DATABASE_URL=$(echo "$DIRECT_URL" | sed -E "s#//[^@]+@#//tillflow_ops:$OPS_PW@#")" >> "$GITHUB_ENV"
       - name: Playwright (against the production build)
         timeout-minutes: 12
         run: pnpm test:e2e
