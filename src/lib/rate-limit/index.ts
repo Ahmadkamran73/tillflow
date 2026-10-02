@@ -47,9 +47,18 @@ export function hashKey(...parts: string[]): string {
   return createHash("sha256").update(parts.join("|")).digest("hex");
 }
 
+/**
+ * The visitor's IP behind Hostinger's proxy: X-Real-IP, else the LAST X-Forwarded-For entry
+ * (Hostinger appends the real IP; earlier entries are whatever the client sent, so spoofable).
+ */
+export function ipFromHeaders(h: Headers): string {
+  return (
+    h.get("x-real-ip")?.trim() || h.get("x-forwarded-for")?.split(",").at(-1)?.trim() || "unknown"
+  );
+}
+
 export async function clientIp(): Promise<string> {
-  const h = await headers();
-  return h.get("x-forwarded-for")?.split(",")[0]?.trim() || h.get("x-real-ip") || "unknown";
+  return ipFromHeaders(await headers());
 }
 
 export type RateLimitOutcome = RateLimitResult & { unavailable?: true };

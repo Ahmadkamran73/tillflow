@@ -95,7 +95,7 @@ Hostinger runs the build and start commands you give it, and `next start` works 
 
 ## DNS records (hPanel > Domains > tillflow.ie > DNS / Nameservers)
 
-Assumes `tillflow.ie` uses Hostinger's nameservers. For the two app rows, use the value hPanel shows on each app's Domains step; Hostinger generates it.
+`tillflow.ie`'s DNS is at **eLive** (nameservers `dns.elive.ie`), not Hostinger, so add these records in the eLive control panel. For the two app rows, use the value hPanel shows on each app's Domains step (staging: `A` `72.61.204.157`).
 
 | Type       | Name                | Value                                                                     | TTL  | Purpose                             |
 | ---------- | ------------------- | ------------------------------------------------------------------------- | ---- | ----------------------------------- |

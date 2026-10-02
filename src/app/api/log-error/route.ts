@@ -1,7 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
+import { appUrl } from "@/lib/auth/config";
 import { reportError } from "@/lib/errors";
-import { memoryRateLimit } from "@/lib/rate-limit";
+import { ipFromHeaders, memoryRateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +28,9 @@ function sameOrigin(request: NextRequest): boolean {
   const origin = request.headers.get("origin");
   if (!origin) return false;
   try {
-    return new URL(origin).host === request.nextUrl.host;
+    // Behind Hostinger's proxy nextUrl carries the internal host, so also accept the app's own URL.
+    const host = new URL(origin).host;
+    return host === new URL(appUrl()).host || host === request.nextUrl.host;
   } catch {
     return false;
   }
@@ -37,7 +40,7 @@ export async function POST(request: NextRequest) {
   try {
     if (!sameOrigin(request)) return new NextResponse(null, { status: 403 });
 
-    const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+    const ip = ipFromHeaders(request.headers);
     if (!memoryRateLimit("log-error", ip, 30, 60_000))
       return new NextResponse(null, { status: 429 });
 

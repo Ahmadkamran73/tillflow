@@ -76,9 +76,15 @@ Rate-limit policies (login, reset, MFA, exports, imports) are listed in `docs/sp
 
 ### Does the Hostinger app stay running?
 
-**Not confirmed yet.** Hostinger's public docs for Node.js Web Apps do not say whether an app with no traffic keeps running or is stopped. The question has been sent to Hostinger support; their answer goes here. Until then the design is sleep-tolerant: jobs catch up after a pause, `"jobs":"down"` shows up in `/api/health` if the worker stops, and the 1-minute Better Stack check keeps traffic flowing.
+**Answered by Hostinger support (2026-10-02):** there is no documented sleep or scale-to-zero after inactivity; the process runs continuously, but can be restarted by deploys, maintenance, crashes or resource limits, so it is not guaranteed to be always alive. That fits the design: jobs are idempotent with state in Postgres, hourly jobs catch up after a restart, and `"jobs":"down"` in `/api/health` (the jobs monitor) shows a worker that did not come back. If continuous execution ever becomes critical, run the worker as a separate process (`JOBS_ENABLED=false` on the web app).
+
+### Visitor IP behind Hostinger
+
+Hostinger's proxy sets `X-Real-IP` to the visitor IP and appends it as the **last** `X-Forwarded-For` entry (support, 2026-10-02). `ipFromHeaders` in `src/lib/rate-limit` uses `X-Real-IP`, else the last `X-Forwarded-For` entry; earlier entries are client-supplied and never used. If another proxy (e.g. Cloudflare) is ever put in front, revisit this.
 
 ### Better Stack uptime monitors (betterstack.com > Uptime > Monitors > Create monitor)
+
+If Better Stack sign-up is unavailable, UptimeRobot (free) works the same way: a **Keyword** monitor per row below (keyword exists = up), 5-minute interval on the free plan.
 
 Create **two monitors per environment**, both on `/api/health`:
 
