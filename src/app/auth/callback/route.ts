@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { isGoogleAuthEnabled } from "@/lib/auth/config";
+import { appUrl, isGoogleAuthEnabled } from "@/lib/auth/config";
 import { safeNext } from "@/lib/auth/redirect";
 import { callbackParams } from "@/lib/auth/schemas";
 import { createSupabaseServerClient } from "@/lib/auth/server";
@@ -8,13 +8,15 @@ import { createSupabaseServerClient } from "@/lib/auth/server";
  * Landing point for every emailed link and for the Google redirect:
  *  - `token_hash` + `type` (confirm email, magic link, password recovery), or
  *  - `code` (OAuth PKCE).
+ * Redirects are built from NEXT_PUBLIC_APP_URL, never from the request: behind Hostinger's proxy
+ * the request URL is the internal 0.0.0.0:3000.
  * It only creates the session; roles, org provisioning and MFA are applied by the page it
  * forwards to (requireBackOffice / requireRole).
  */
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const fail = (reason: string) =>
-    NextResponse.redirect(new URL(`/login?error=${reason}`, request.nextUrl));
+    NextResponse.redirect(new URL(`/login?error=${reason}`, appUrl()));
 
   const parsed = callbackParams.safeParse({
     code: searchParams.get("code") ?? undefined,
@@ -54,5 +56,5 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  return NextResponse.redirect(new URL(next, request.nextUrl));
+  return NextResponse.redirect(new URL(next, appUrl()));
 }
