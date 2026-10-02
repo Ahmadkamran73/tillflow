@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { requireRole } from "@/lib/auth";
+import { t } from "@/lib/i18n";
 
-export const metadata: Metadata = { title: "Dashboard · Tillflow POS" };
+export const metadata: Metadata = { title: `${t("dashboard.title")} · ${t("app.name")}` };
 
 export default async function DashboardPage({ params }: { params: Promise<{ orgId: string }> }) {
   const { orgId } = await params;
@@ -9,12 +10,10 @@ export default async function DashboardPage({ params }: { params: Promise<{ orgI
 
   return (
     <section className="flex flex-col gap-4">
-      <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-      <div className="rounded-xl border border-dashed p-8 text-center">
-        <p className="font-medium">No sales yet</p>
-        <p className="text-muted-foreground mt-1 text-sm">
-          Today&apos;s sales, takings and VAT will appear here once your first register is set up.
-        </p>
+      <h1 className="text-title font-semibold tracking-tight">{t("dashboard.title")}</h1>
+      <div className="surface-panel p-8 text-center">
+        <p className="font-display text-heading font-semibold">{t("dashboard.emptyTitle")}</p>
+        <p className="text-muted-foreground mt-1 text-sm">{t("dashboard.emptyBody")}</p>
       </div>
     </section>
   );

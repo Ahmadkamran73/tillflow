@@ -1,5 +1,13 @@
 import { expect, test } from "@playwright/test";
-import { emailedLink, openDashboard, PASSWORD, signUpAndEnrol, totp, uniqueEmail } from "./helpers";
+import {
+  emailedLink,
+  signOut,
+  openDashboard,
+  PASSWORD,
+  signUpAndEnrol,
+  totp,
+  uniqueEmail,
+} from "./helpers";
 
 // Needs the local Supabase stack (`supabase start`) and its .env.local values.
 
@@ -16,7 +24,7 @@ test("an owner who logs in again must pass the authenticator challenge", async (
   const email = uniqueEmail("relogin");
   const { secret } = await signUpAndEnrol(page, email, "Relogin Cafe");
   await openDashboard(page);
-  await page.getByRole("button", { name: "Sign out" }).click();
+  await signOut(page);
   await expect(page).toHaveURL(/\/login/);
 
   await page.getByLabel("Email").fill(email);
@@ -34,7 +42,7 @@ test("password reset by email lets the owner log in with the new password", asyn
   const email = uniqueEmail("reset");
   const { secret } = await signUpAndEnrol(page, email, "Reset Books");
   await openDashboard(page);
-  await page.getByRole("button", { name: "Sign out" }).click();
+  await signOut(page);
 
   await page.goto("/forgot-password");
   await page.getByLabel("Email").fill(email);
@@ -55,7 +63,7 @@ test("password reset by email lets the owner log in with the new password", asyn
   await expect(page).toHaveURL(/\/o\/[0-9a-f-]{36}\/dashboard$/);
 
   // The old password no longer works; the new one does (and still needs the authenticator code).
-  await page.getByRole("button", { name: "Sign out" }).click();
+  await signOut(page);
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(PASSWORD);
   await page.getByRole("button", { name: "Log in" }).click();
