@@ -31,18 +31,18 @@ Do staging first. Do not start production until staging `/api/health` returns 20
 3. **Branch:** `develop`. If the wizard does not ask for a branch, set it under the app's **Settings > Git** afterwards. **(check)**
 4. Build settings (Hostinger will auto-detect "Next.js"; override these):
 
-   | Field            | Value                                                                           |
-   | ---------------- | ------------------------------------------------------------------------------- |
-   | Framework        | Next.js                                                                         |
-   | Node.js version  | **24.x** (same as CI). 22.x is the fallback.                                    |
-   | Root directory   | `./` (repo root)                                                                |
-   | Package manager  | pnpm if offered; otherwise keep npm and use the build command below **(check)** |
-   | Build command    | `corepack enable && pnpm install --frozen-lockfile && pnpm build`               |
-   | Start command    | `npm start` (runs `next start`)                                                 |
-   | Output directory | `.next`                                                                         |
-   | Entry file       | leave empty                                                                     |
+   | Field            | Value                                                                               |
+   | ---------------- | ----------------------------------------------------------------------------------- |
+   | Framework        | Next.js                                                                             |
+   | Node.js version  | **24.x** (same as CI). 22.x is the fallback.                                        |
+   | Root directory   | `./` (repo root)                                                                    |
+   | Package manager  | **pnpm** (hPanel detects it from `pnpm-lock.yaml` and installs dependencies itself) |
+   | Build command    | `pnpm run build` (pick it from the list; hPanel does not accept free text)          |
+   | Start command    | `pnpm run start` (runs `next start`)                                                |
+   | Output directory | `.next`                                                                             |
+   | Entry file       | leave empty                                                                         |
 
-   If hPanel rejects `corepack`, try `npm install -g pnpm@12.6.0 && pnpm install --frozen-lockfile && pnpm build`. Do not switch to `npm install`: the lockfile is `pnpm-lock.yaml`, so versions would drift.
+   If the build log shows `npm install` instead of `pnpm install`, stop and ask support how to use the pnpm lockfile: an npm install ignores `pnpm-lock.yaml`, so versions would drift.
 
 5. **Environment variables:** open the app's **Settings > Environment variables** and add the staging values from the table below **before the first deploy**. `NEXT_PUBLIC_*` values are baked in at build time, so changing one later means **Redeploy**.
 6. Click **Deploy**. The first build takes a few minutes.
