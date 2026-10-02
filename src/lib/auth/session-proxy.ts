@@ -34,10 +34,10 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
 
   const { pathname, search } = request.nextUrl;
   if (!data?.claims && isProtected(pathname)) {
-    const login = request.nextUrl.clone();
-    login.pathname = "/login";
-    login.search = `?next=${encodeURIComponent(pathname + search)}`;
-    return NextResponse.redirect(login);
+    // Not request.nextUrl: behind Hostinger's proxy its origin is the internal 0.0.0.0:3000.
+    const base = process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin;
+    const next = encodeURIComponent(pathname + search);
+    return NextResponse.redirect(new URL(`/login?next=${next}`, base));
   }
   return response;
 }

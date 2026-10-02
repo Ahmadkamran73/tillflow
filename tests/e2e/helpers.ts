@@ -104,3 +104,9 @@ export async function openDashboard(page: Page) {
   await expect(page).toHaveURL(/\/o\/[0-9a-f-]{36}\/dashboard$/);
   return /\/o\/([0-9a-f-]{36})\//.exec(page.url())![1]!;
 }
+
+/** Sign out from the user menu in the back-office top bar. */
+export async function signOut(page: Page) {
+  await page.getByRole("button", { name: "Account menu" }).click();
+  await page.getByRole("menuitem", { name: "Sign out" }).click();
+}
