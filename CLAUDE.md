@@ -8,7 +8,7 @@ Cloud, offline-capable point of sale for Irish retail shops, cafés and restaura
 
 ## Stack
 
-TypeScript (strict) · Next.js App Router + React · Tailwind + shadcn/ui · Supabase Postgres (eu-west-1) with RLS · Drizzle ORM/drizzle-kit · Supabase Auth (behind `src/lib/auth`) · Zod · Dexie/IndexedDB offline outbox · Serwist PWA · pg-boss jobs (Postgres) · Postgres rate limits and error log · pino · Resend · Vitest, Playwright, SQL RLS tests · pnpm.
+TypeScript (strict) · Next.js App Router + React · Tailwind + shadcn/ui · Supabase Postgres (eu-west-1) with RLS · Drizzle ORM/drizzle-kit · Supabase Auth (behind `src/lib/auth`) · Zod · Dexie/IndexedDB offline outbox · Serwist PWA · pg-boss jobs (Postgres) · Postgres rate limits and error log · pino · Nodemailer (SMTP) · Vitest, Playwright, SQL RLS tests · pnpm.
 
 ## Commands
 
@@ -23,7 +23,8 @@ TypeScript (strict) · Next.js App Router + React · Tailwind + shadcn/ui · Sup
 | `pnpm db:generate` | drizzle-kit: schema → new migration in `supabase/migrations` |
 | `pnpm db:migrate`  | Apply migrations (local/staging only)                        |
 | `pnpm db:reset`    | `supabase db reset` (local only)                             |
-| `pnpm verify`      | lint + typecheck + test + build                              |
+| `pnpm verify`      | Phase 0 exit check (PASS/FAIL report; `--quick` skips tests) |
+| `pnpm verify:code` | lint + typecheck + test + build                              |
 
 ## Folder map
 

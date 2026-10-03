@@ -12,4 +12,4 @@ cp .env.example .env.local   # then fill in values (local ones come from `pnpm s
 pnpm dev
 ```
 
-Run `pnpm verify` (lint, typecheck, test, build) before every commit.
+Run `pnpm verify:code` (lint, typecheck, test, build) before every commit.
