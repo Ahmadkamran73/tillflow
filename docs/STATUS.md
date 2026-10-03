@@ -1,16 +1,14 @@
 # Tillflow POS — Status
 
-_Last updated: 2026-10-02 (Phase 0 verification)_
+_Last updated: 2026-10-03 (Phase 0 complete)_
 
 ## Current phase / step
 
-**Phase 0 · Foundations** — verified with `pnpm verify` (`scripts/verify-phase0.ts`, PASS/FAIL with evidence; `--quick` skips the slow checks): 24 of 25 checks pass (tools, env names, lint, typecheck, 135 unit, 74 RLS/DB, check:imports, check:rls, CI, branch protection, staging secrets, staging `/api/health` on the `develop` commit, Claude plugins/MCP/hooks/3 subagents). **Left before Phase 0 is closed (owner):**
+**Phase 0 · Foundations: COMPLETE (2026-10-03).** Production is live at `https://pos.tillflow.ie` (`/api/health`: 200, `database` ok, `jobs` ok, `environment` production, commit = `main` tip `d767609`). `main` = `develop` (PRs #13 Release: Phase 0 and #17 Release: SMTP email, both gated by CI + GitGuardian). `tillflow-prod` migrations 0000-0008 applied via Promote to production. GitHub `production` secrets set. `pnpm verify --quick` (`scripts/verify-phase0.ts`): all checks pass except tool lookups for pnpm and the Supabase CLI, which Windows Device Guard blocked on that run (local only). The full lint/typecheck/unit/RLS run last passed on 2026-10-02 (135 unit, 74 RLS/DB) and CI on PR #17 was green. Not re-run after the merge: local RLS (Docker was off).
 
-1. **Production secrets:** GitHub environment `production` has none of `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD`, `SUPABASE_PROJECT_REF`. Needs the `tillflow-prod` Supabase project first (never touched by Claude).
-2. **Promote `develop` to `main`:** `main` is 8 commits behind (still at PR #1). Open a PR `develop` into `main`; CI gates it. (`pnpm verify` checks the PR that gated main's tip, because CI runs on PRs, not on pushes to main.)
-3. Still open from earlier: production Hostinger app, monitors; Google provider on staging; `/security-review` for 0.5; Re-turn / Budget 2027 checks.
+**Email change:** Resend replaced by nodemailer over SMTP (`src/lib/errors/alert.ts`; env `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `ALERT_EMAIL`, `ALERT_FROM`). For now a Gmail account with an app password sends for staging and production (Gmail forces From = that account, about 500 messages/day); move to a `tillflow.ie` mailbox before the pilot and add its SPF/DKIM/DMARC at eLive. Supabase Auth emails need the same SMTP set in each project (Authentication > SMTP). `.env.example` and `.env.local` are write-protected for Claude and hold names only in the committed file (an app password was committed once by mistake on 2026-10-03, caught by GitGuardian before any merge, revoked, branch deleted).
 
-`pnpm verify` is now the Phase 0 check; the old lint+typecheck+test+build chain is `pnpm verify:code`. Once items 1 and 2 are done, `pnpm verify` goes fully green and Phase 0 is complete.
+`pnpm verify` is the Phase 0 check; the old lint+typecheck+test+build chain is `pnpm verify:code`.
 
 ## Done
 
@@ -32,17 +30,13 @@ _Last updated: 2026-10-02 (Phase 0 verification)_
 
 - [x] **0.7** Design system and app shell (branch `docs/close-0.6`, not yet committed). Restyled to match tillflow.ie (tokens read from its CSS): limestone/bone/paper, ink, one ember-orange accent (`#E5561C`), night dark theme, hairline rules, pill buttons; Mona Sans (headings), Instrument Sans (text), Geist Mono (tags, figures, receipt); night sidebar with ember active marker; ledger-strip KPIs; register tiles are paper with a 3:1 border, Pay is ember. `pnpm exec tsx scripts/check-contrast.ts` checks every token pair. Tokens in `src/app/globals.css` (light + dark; type scale `text-amount/display/title/heading/body/caption`; opaque focus ring; `surface-glass` for back office, `surface-solid` for the register). Figtree font (also fixes the circular `--font-sans`). `next-themes` for light/dark/system. `src/lib/i18n` (`t()`, en-IE, ga-IE falls back). `BackOfficeShell` (dark left nav: icon rail on tablet, drawer on phone; top bar user menu with theme and sign out) now wraps `/o/<orgId>/*`; `RegisterLayout` + `SyncStatusPill` skeleton (not routed yet: no device pairing); button sizes `touch`/`icon-touch`/`pay`. Review pages: `/design`, `/design/back-office`, `/design/register[?state=offline|syncing]` (public, noindex). Screenshots in `docs/screenshots` (`pnpm exec tsx scripts/design-screenshots.ts light|dark` with the dev server up). accessibility-reviewer run; fixed: tab and destructive contrast, outline border, dialog/sheet scrim, register `<main>`, qty/live region, drawer closes on navigate. Not fixed (minor): rail labels have no sighted tooltip, check icon on selected category, shadcn translucent tints on register variants. Checks: lint, typecheck, 61 unit, build. NOT run: RLS and Playwright e2e (local Supabase down); the sign-out e2e steps now use the user menu (`signOut` helper). `/design` demo strings are placeholders; sidebar links other than Dashboard 404 until those pages exist.
 
-## Email change (2026-10-03, branch `chore/smtp-nodemailer`)
-
-Resend dropped for nodemailer over SMTP: `src/lib/errors/alert.ts` (the only sender), env `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` replace `RESEND_API_KEY`; `ALERT_EMAIL`/`ALERT_FROM` unchanged. For now a Gmail account with an app password sends for staging and production (Gmail forces From = that account, about 500 messages/day); switch to a `tillflow.ie` mailbox later (add its SPF/DKIM/DMARC). No sending-domain DNS records needed meanwhile. Supabase Auth emails (confirmations, magic links) still need the same SMTP set in each project under Authentication > SMTP. `.env.example` and `.env.local` are write-protected: update them by hand. PLAN, CLAUDE, DEPLOY, DEPLOY-HOSTINGER and both PROMPTS files updated. Sub-processor list (phase 3) = Supabase, Hostinger, the SMTP provider.
-
 ## Next step
 
-1. Owner: clear the two Phase 0 blockers above (production secrets, develop into main), then re-run `pnpm verify`.
-2. **Phase 1, Step 1.1** (core register; see `docs/PLAN.md` and `docs/PROMPTS_v1.md`). Work can start on `develop` without waiting for item 1.
-3. Owner: check tomorrow's error digest email (after 08:00 Dublin) has no names or emails.
-4. Later (production): `tillflow-prod`, Hostinger production app, production monitors.
-5. Still open from 0.5: Google provider and auth settings on staging (see `docs/specs/auth.md`), `/security-review`.
+1. **Phase 1, Step 1.1** (core register; see `docs/PLAN.md` and `docs/PROMPTS_v1.md`).
+2. **Production verified by the owner on 2026-10-03:** health, Supabase Auth settings and SMTP, sign-up with confirmation email, MFA enrolment and login, organisation/membership/audit rows, browser error in `error_events`, rate-limit message. Remaining: add the two production UptimeRobot monitors if not done, and delete the test shop/user.
+3. Owner: check the daily error digest email (after 08:00 Dublin) has no names or emails.
+4. Still open from 0.5: Google provider and auth settings on staging (see `docs/specs/auth.md`), `/security-review`.
+5. Before the pilot: a `tillflow.ie` mailbox for sending (replace Gmail).
 
 ## Design notes (0.4)
 
