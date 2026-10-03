@@ -44,7 +44,8 @@ Phase 0 is split so **Claude Code does everything it can**, and you only do what
 | 0.3 | Claude | 30 min | Writes CLAUDE.md, rules, subagents, hooks, skills, status file |
 | 0.4 | Claude | 2–3 h | Tenancy schema, RLS, RLS tests; creates and migrates the **staging** Supabase project |
 | 0.5 | Claude + you (Google keys) | 3–4 h | Sign-up, login, MFA, optional Google sign-in |
-| 0.6 | Claude + you (paste secrets, DNS) | 2–3 h | CI/CD, branch protection, staging + production deploys, Sentry, health check |
+| 0.6 | Claude + you (paste secrets, DNS) | 2–3 h | CI/CD, branch protection, staging + production deploys, health check |
+| 0.6b | Claude | 2–3 h | Own error log, Postgres rate limiter and pg-boss job queue (replaces Sentry, Upstash, Inngest) |
 | 0.7 | Claude | 3–4 h | Design system and app shell |
 | 0.8 | Claude | 20 min | Verifies the whole phase and writes the exit report |
 
@@ -73,7 +74,7 @@ Everything else (pnpm, GitHub CLI, Supabase CLI, jq, Vercel CLI) **Claude instal
 
 - [ ] **GitHub**
 - [ ] **Supabase** — create an organisation only. Claude creates the staging project for you in Step 0.4. Create the **production** project yourself later (Step 0.6): name `tillflow-prod`, region **West EU (Ireland) eu-west-1**, and save its database password in a password manager.
-- [ ] An **SMTP mailbox** for sending (for now a Gmail account with 2-step verification and an app password; later a tillflow.ie mailbox)
+- [ ] An **SMTP mailbox** for sending email (for now a Gmail account with 2-step verification and an app password; later a tillflow.ie mailbox). No Resend account. (No Sentry, Upstash or Inngest accounts: errors, rate limits and background jobs run on Supabase Postgres — see Step 0.6b.)
 - [ ] **Hosting** — decide now and write it down for Step 0.6:
   - `vercel` → create a Vercel account, **or**
   - `hostinger` → make sure your Hostinger Business or Cloud plan has a free **Web Apps (Node.js)** slot and an EU data centre
@@ -120,7 +121,7 @@ PART 4 — Repo and scaffold
    - Drizzle ORM + drizzle-kit
    - `supabase init`, then `supabase start` (local Postgres + Auth in Docker)
    - Folders: src/app/(register), src/app/(admin), src/app/(auth), src/app/api/v1, src/lib/money, src/lib/sync, src/lib/auth, src/db/schema, supabase/migrations, tests/{unit,rls,e2e}, docs/specs
-3. .env.example listing EVERY variable the plan needs, grouped and commented with where each value comes from (Supabase, SMTP, Sentry, Upstash, Inngest, Google OAuth, bank details for invoices, hosting). Create .env.local pre-filled ONLY with the local Supabase values from `supabase status`; leave every cloud key blank. Make sure .env*.local is in .gitignore.
+3. .env.example listing EVERY variable the plan needs, grouped and commented with where each value comes from (Supabase — including JOBS_DATABASE_URL, a direct/session-mode connection string, NOT the transaction pooler; Resend; ALERT_EMAIL for error alerts; Google OAuth; bank details for invoices; hosting). Do not add Sentry, Upstash or Inngest variables. Create .env.local pre-filled ONLY with the local Supabase values from `supabase status`; leave every cloud key blank. Make sure .env*.local is in .gitignore.
 4. package.json scripts: dev, build, start, lint, typecheck, test, test:rls, test:e2e, db:generate, db:migrate, db:reset, verify.
 5. Placeholder home page: "Tillflow POS".
 6. Run lint + typecheck + test + build; fix anything failing.
@@ -174,7 +175,7 @@ Set up this repo's Claude Code configuration. Read docs/PLAN.md first.
    - Validate every input with Zod; check role in every server action
    - Never log personal data; never hard-code secrets; never ask me to paste secrets into chat; never touch production credentials or the production Supabase project
    - Never execute user-supplied SQL
-   - Portability: all auth calls go through src/lib/auth; RLS policies use ONE SQL helper for the current user's orgs; file storage behind src/lib/storage; background jobs in Inngest, not Supabase Edge Functions
+   - Portability: all auth calls go through src/lib/auth; RLS policies use ONE SQL helper for the current user's orgs; file storage behind src/lib/storage; background jobs in pg-boss (Postgres queue), not Supabase Edge Functions; no Sentry, Upstash or Inngest
    - Done = lint + typecheck + unit + RLS tests pass; update docs/STATUS.md at the end of every task
    Also: "@docs/PLAN.md for full context; @docs/STATUS.md for current progress".
 
@@ -252,7 +253,7 @@ Implement authentication with Supabase Auth per docs/PLAN.md section 10. All aut
 - TOTP MFA required for owners before accessing the back office
 - On first sign-up create organisation + owner membership in one transaction
 - Middleware protecting (admin) routes; `requireRole('owner'|'manager')` used in server actions
-- Rate-limit login and reset with Upstash (5/min per IP+email); if Upstash env vars are empty locally, use an in-memory limiter and warn
+- Rate-limit login (5/min per IP+email) and password reset (3/hour per email) with a small Postgres-backed limiter in src/lib/rate-limit: a `rate_limits` table plus an atomic `check_rate_limit()` SQL function (fixed window, keys stored as SHA-256 hashes, executable by the service role only). No Redis. Test it with 20 parallel calls against a limit of 5: exactly 5 must be allowed
 - "Continue with Google" for owners and managers only (never for cashier PIN unlock):
   1. Configure the Google provider in supabase/config.toml for local dev, reading the client id/secret from env vars.
   2. Give me a numbered click-by-click guide to create the OAuth client in Google Cloud Console (consent screen, authorised redirect URIs for local, staging and production), and tell me which env var names to paste the values into (.env.local) and where to enter them in the Supabase staging dashboard. Wait for me to say "done" — never ask me to paste them into chat.
@@ -273,7 +274,7 @@ Before starting, fill in your hosting choice from Step 0.0 in the first line of 
 Session: fresh · plan mode ON
 
 ```text
-HOSTING = <vercel | hostinger>
+HOSTING = hostinger
 
 Set up delivery. Read docs/PLAN.md sections 6, 10 and 11.
 
@@ -291,7 +292,7 @@ Set up delivery. Read docs/PLAN.md sections 6, 10 and 11.
    - If HOSTING = vercel: install/verify the Vercel CLI, `vercel link`, set region dub1 in vercel.json, connect the GitHub repo so every PR gets a preview. For env vars, print `vercel env add <NAME> <environment>` commands for me to run (they prompt for the value). Staging = preview, production = main.
    - If HOSTING = hostinger: there's no CLI, so write docs/DEPLOY-HOSTINGER.md with click-by-click hPanel steps for TWO Web Apps: staging.tillflow.ie (branch develop) and pos.tillflow.ie (branch main) — GitHub connection, Node version, build command, start command, output mode, and the env var names to paste. Set Next.js `output: 'standalone'` if Hostinger needs it, create the develop branch, and adjust ci.yml so staging deploys from develop.
 6. DNS: list the exact records I must add in Hostinger hPanel (pos. and staging. (email goes out over SMTP, so no sending-domain records for now)) in a table I can copy.
-7. Monitoring: add Sentry for Next.js with PII scrubbing (use the Sentry wizard if it needs my browser login — tell me when), create /api/health returning version + commit, and give me the Better Stack uptime-monitor settings to click in.
+7. Monitoring: create /api/health returning JSON with `"status":"ok"`, version and commit (it must check the database), and give me the Better Stack uptime-monitor settings to click in. Do NOT add Sentry — error logging is built in Step 0.6b.
 8. Write docs/DEPLOY.md explaining every environment in plain English.
 9. Push a small test PR and confirm with `gh pr checks` that CI passes; after I've done the hosting steps, confirm staging /api/health returns 200.
 ```
@@ -299,7 +300,100 @@ Set up delivery. Read docs/PLAN.md sections 6, 10 and 11.
 Optional: run `/install-github-app` so you can mention `@claude` on PRs and issues (see <https://code.claude.com/docs/en/github-actions>).
 
 **Done when:** CI passes on a PR, staging answers `/api/health`, and branch protection blocks direct pushes to main.
-**After:** commit → `/clear`.
+**After:** commit → `/clear` → run Step 0.6b.
+
+---
+
+### Step 0.6a — Course change (use this INSTEAD of 0.6b if you are already partway through 0.6)
+
+Session: your current 0.6 session · plan mode ON
+
+Paste this as one message. It tells Claude where you are and what changed, so you can carry on without starting over.
+
+```text
+COURSE CHANGE — please read fully before doing anything, and show me your plan first (don't edit yet).
+
+WHERE WE ARE: Step 0.6 is mostly built. CI/CD workflows, branch protection, the health check and the Hostinger deploy docs exist. The 0.6 entry for docs/STATUS.md is still waiting to go to develop through a main → develop PR. I have NOT created any Upstash, Sentry or Inngest accounts, and I have NOT created the Hostinger staging app yet.
+
+DECISION: I no longer want Sentry, Upstash or Inngest. Their free tiers won't cope with production, and each one adds a sub-processor and secrets. Replace them with things that run on our Supabase Postgres:
+1. Errors → our own logging: pino, an `error_events` table (fingerprint grouping, count, first/last seen, status new|resolved|ignored), an allow-list PII scrubber, instrumentation.ts `onRequestError`, a same-origin size-limited POST /api/log-error for browser errors, email alerts to ALERT_EMAIL via Resend (new fingerprint only, max 1 email per fingerprint per hour, plus a daily digest), 90-day prune. It must never throw. RLS on, no client access.
+2. Rate limits → a `rate_limits` table plus an atomic `check_rate_limit()` SQL function (INSERT … ON CONFLICT, service_role only, keys stored as SHA-256 hashes) behind src/lib/rate-limit. An in-memory limiter for /api/v1/sync/* and /api/log-error. Fail closed on auth routes, open elsewhere. PIN lockout stays as DB counters, not this limiter. Test: 20 parallel calls against a limit of 5 must allow exactly 5.
+3. Background jobs → pg-boss in src/lib/jobs, connected with JOBS_DATABASE_URL (direct/session connection, NOT the port-6543 transaction pooler). Do not let it migrate at runtime: generate its schema SQL into a Supabase migration and start it with migrate/createSchema off. Worker starts from instrumentation.ts when NEXT_RUNTIME is nodejs and JOBS_ENABLED isn't false. Register scheduled jobs for rate_limits cleanup, the error digest and the error prune.
+4. /api/health keeps `"status":"ok"` (app + database) and adds `"jobs":"ok"|"down"` from a worker heartbeat.
+
+WHAT TO DO:
+a) Find everything Sentry/Upstash/Inngest in the repo (code, next.config, CI workflows, docs/DEPLOY.md, docs/DEPLOY-HOSTINGER.md, docs/specs/auth.md, package.json) and tell me what you find. Remove it. At the end a grep for sentry|upstash|inngest must return nothing except one note in docs/DEPLOY.md explaining why they were dropped.
+b) Build the replacements above, with tests. Migration numbers continue after the existing ones (0004 and 0005 are already written for staging).
+c) Check Hostinger's docs on whether a Web Apps (Node.js) app stays running or can sleep/restart. pg-boss needs a running process. Put the answer in docs/DEPLOY.md. If it can sleep, STOP and tell me.
+d) You can't edit .env.example. Give me the exact lines to add and remove by hand instead. Remove SENTRY_*, UPSTASH_*, INNGEST_*. Add NEXT_PUBLIC_APP_ENV=development, JOBS_DATABASE_URL=, ALERT_EMAIL=.
+e) Update the env var table in docs/DEPLOY-HOSTINGER.md (remove the three services, add JOBS_DATABASE_URL and ALERT_EMAIL). In docs/DEPLOY.md add a second Better Stack monitor on /api/health with keyword `"jobs":"ok"` and a short "Where do errors go?" section. Add a 0.6 entry to docs/STATUS.md that mentions this change.
+f) Do NOT touch the uncommitted docs/PROMPTS.md edit. It isn't yours.
+
+ORDER OF WORK (this replaces the old remaining-steps list):
+1. Sync develop first: a main → develop PR. I'll click Squash and merge once CI is green.
+2. Then branch off develop for all of the above and open a PR to develop. Staging deploys from develop, so this must be merged BEFORE I create the Hostinger app.
+3. Me: set staging Supabase auth URLs (Site URL https://staging.tillflow.ie, redirect https://staging.tillflow.ie/auth/callback), then create the Hostinger staging app from section A of docs/DEPLOY-HOSTINGER.md, add the DNS record, wait for SSL, turn on Force HTTPS, and set the GitHub variable STAGING_URL.
+4. You: run migrate-staging as a dry run first, then for real (0004, 0005 and the new migrations).
+5. You: verify staging /api/health returns 200 with the right commit and jobs "ok".
+6. Me: two Better Stack monitors, then trigger a test error on staging and confirm it lands in error_events and the alert email contains no name or email address.
+7. Later, production: create tillflow-prod, set the production GitHub secrets myself (you only check the names), promote-production with my approval, the Hostinger production app, Better Stack for production, then Resend DNS for tillflow.ie. Production needs no Upstash or Sentry.
+
+RULES: I never paste secrets into chat; give me commands to run myself and wait for "done". Steps marked "Me" are mine; tell me when it's my turn. Don't touch production credentials.
+
+Start by listing every Sentry/Upstash/Inngest reference you find and your plan for the change. Then wait for my "go".
+```
+
+**Done when:** you've approved the plan, the change is merged into develop, and `/api/health` on staging shows both `"status":"ok"` and `"jobs":"ok"`. Mark 0.6 done at that point.
+
+---
+
+### Step 0.6b — Replace Sentry, Upstash and Inngest with in-house versions (Claude)
+
+Session: fresh · plan mode ON
+
+Run this straight after Step 0.6 (if you are already partway through 0.6, use Step 0.6a above instead). If Sentry, Upstash or Inngest were already added, this step removes them. If they weren't, it builds the replacements directly.
+
+```text
+Read docs/PLAN.md sections 6, 10 and 11 and docs/STATUS.md. We are NOT using Sentry, Upstash or Inngest (free-tier limits, extra sub-processors). Errors, rate limits and background jobs run on our Supabase Postgres. Work on a branch off develop and open a PR to develop.
+
+1. REMOVE anything already installed: @sentry/nextjs, @upstash/ratelimit, @upstash/redis, inngest. Delete sentry.*.config.ts, the withSentryConfig wrapper in next.config, /api/inngest, and every SENTRY_*, UPSTASH_* and INNGEST_* reference in code, .env.example, CI workflows, docs/DEPLOY.md, docs/DEPLOY-HOSTINGER.md and docs/specs/auth.md. Keep NEXT_PUBLIC_APP_ENV. Grep the whole repo for "sentry", "upstash" and "inngest" at the end — nothing may remain except a note in docs/DEPLOY.md saying why they were dropped.
+
+2. ERROR LOGGING (src/lib/errors, server-only):
+   - logger.ts: pino, JSON to stdout, level from env, redacts cookies, authorization headers, request bodies and any field named email/name/phone/password/token/pin.
+   - scrub.ts: ALLOW-LIST scrubbing. Keep only: error name, message (with emails, phone numbers, long digit runs and tokens masked), stack, route, HTTP method, status, environment, commit, org_id and user_id (UUIDs only). Drop everything else.
+   - capture.ts: captureError(error, context). Compute a fingerprint = sha256(name + normalised message + top 3 stack frames without line numbers). Upsert into `error_events` (new migration: id, fingerprint, env, first_seen, last_seen, count, message, stack, context jsonb, status new|resolved|ignored; unique (fingerprint, env)). It must NEVER throw: on any failure, fall back to logger.error.
+   - RLS on error_events: no client access. Add an explicit policy so our "every table has a policy" CI check passes, e.g. select only for super-admins; writes only through the service role.
+   - instrumentation.ts: export register() and onRequestError() so server errors in route handlers, server actions and server components are captured.
+   - Browser errors: error.tsx / global-error.tsx plus window "error" and "unhandledrejection" listeners POST to /api/log-error. That endpoint is same-origin only, max 8 KB body, Zod-validated, in-memory rate-limited (30/min per IP), and scrubbed with the same function.
+   - Alerts (SMTP via nodemailer): email ALERT_EMAIL when a fingerprint is first seen, or seen again after being marked resolved; at most one email per fingerprint per hour. Add a daily digest email (new + top recurring errors) as a scheduled pg-boss job. Prune events older than 90 days.
+   - No source-map upload. Keep productionBrowserSourceMaps off, but save each build's source maps as a private CI artifact named by commit so I can de-minify a browser stack by hand.
+
+3. RATE LIMITING (src/lib/rate-limit):
+   - New migration: `rate_limits (key text, window_start timestamptz, count int, primary key (key, window_start))` and `check_rate_limit(p_key text, p_limit int, p_window_seconds int)` returning allowed, remaining, retry_after. Use INSERT … ON CONFLICT DO UPDATE so it is atomic under concurrency. SECURITY DEFINER, REVOKE from anon/authenticated, GRANT to service_role only. RLS on with a deny-all policy.
+   - Keys are SHA-256 hashes of IP and/or email — never raw personal data in the table.
+   - rateLimit({ name, key, limit, windowSec }) wrapper. Policies: login 5/min per IP+email; reset 3/hour per email and 10/hour per IP; exports 5/hour per user; imports 5/hour per org. Cashier PIN lockout (5 failures → 15 min) is NOT this limiter — keep it as counters on the device/cashier rows in the database.
+   - A separate in-memory limiter (memoryRateLimit) for /api/v1/sync/* and /api/log-error, where a database write per request isn't worth it. Use generous limits, and say in a comment that it is per-process.
+   - If the database call fails: fail CLOSED for auth routes, fail OPEN for everything else, and log it.
+   - Test: 20 parallel calls with limit 5 → exactly 5 allowed; window rollover; two keys don't interfere.
+
+4. BACKGROUND JOBS (src/lib/jobs) with pg-boss:
+   - Install pg-boss and check the installed version's docs. Connect with JOBS_DATABASE_URL (direct or session-mode connection — NOT the transaction pooler on port 6543). Add it to .env.example (blank) and the staging/production env tables in docs/DEPLOY-HOSTINGER.md.
+   - Our rule is "migrations only via CI", so do NOT let pg-boss migrate itself at runtime. Generate its schema SQL with the library's construction-plan helper into a Supabase migration, and start it with migrate/createSchema disabled. Confirm the pgboss schema is not exposed through the Supabase API, and make our RLS-coverage CI check look at the public schema only.
+   - boss.ts singleton; worker started from instrumentation.ts only when NEXT_RUNTIME === 'nodejs' and JOBS_ENABLED !== 'false'. Handlers in src/lib/jobs/handlers/*: Zod-validated payload with org_id, idempotent, retries with backoff, service-role access only. enqueue() helper.
+   - Register these scheduled jobs now: rate_limits cleanup (hourly, delete rows older than 1 day), error digest (daily), error_events prune (daily). Later steps (import, reports, exports, billing) will add their own handlers.
+   - /api/health keeps `"status":"ok"` meaning app + database are fine, and adds `"jobs":"ok"` or `"jobs":"down"` based on a worker heartbeat (a row or pg-boss state updated at least every minute).
+   - Test: a job enqueued in a test is processed once; a failing job retries then lands in failed state; two workers never run the same job twice.
+
+5. HOSTING CHECK: pg-boss needs a Node process that stays running. Find out from Hostinger's docs whether a Web Apps (Node.js) app is kept alive continuously or can sleep/restart. Write what you find in docs/DEPLOY.md. If it can sleep, STOP and tell me — don't invent a workaround.
+
+6. DOCS: update docs/DEPLOY.md, docs/DEPLOY-HOSTINGER.md, docs/specs/auth.md and docs/STATUS.md (add a "0.6b" entry). In docs/DEPLOY.md add a second Better Stack monitor on /api/health with keyword `"jobs":"ok"`, and a "Where do errors go?" section: the error_events table, how to read it with the Supabase MCP or dashboard, how alerts work, and how to mark an error resolved.
+
+7. Run lint + typecheck + unit + RLS tests + build. Push the branch and open a PR to develop. Show me: the list of removed packages, the new migration file names, and the exact env vars I need to add in Hostinger (names only).
+```
+
+**Done when:** the repo has no Sentry/Upstash/Inngest references, CI is green, the RLS tests pass with the new tables, and after you merge to develop and staging redeploys, `/api/health` shows `"status":"ok"` and `"jobs":"ok"`.
+**You do:** add `JOBS_DATABASE_URL` and `ALERT_EMAIL` to the Hostinger staging app; add the second Better Stack monitor; on staging, trigger a test error and confirm it appears in `error_events` and you get an email with no name or email address in it.
+**After:** `/security-review` → commit → `/clear`.
 
 ---
 
@@ -564,7 +658,7 @@ Implement bulk import per docs/PLAN.md section 5:
 - Column mapping UI with auto-match and saved mappings; presets for Square, Lightspeed, Imonggo, Shopify exports
 - Validation preview with row-level errors and a downloadable error file
 - Create-only vs create-and-update (match on SKU/barcode)
-- Inngest background job in batches with progress; import_jobs table; undo within 24 hours by batch_id
+- pg-boss background job in batches with progress; import_jobs table; undo within 24 hours by batch_id
 - Server-side parsing only (Papa Parse, ExcelJS); file size/type limits; files deleted after 7 days
 - NEVER accept or execute .sql files — show a friendly message explaining how to export to CSV
 Tests: 10k-row file, bad rows, duplicate barcodes, undo.
@@ -578,7 +672,7 @@ Session: `/clear` · plan mode ON
 
 ```text
 Build reports: dashboard (today vs same day last week, top products, low stock), sales by day/product/category/staff/hour, VAT by rate and period (for VAT3), payments by tender, tips, covers & spend per cover (restaurant), serials sold (electronics), sales by size/colour (clothing).
-- Pre-aggregate into daily_sales_summary via an Inngest job; dashboards never scan raw sales
+- Pre-aggregate into daily_sales_summary via a scheduled pg-boss job; dashboards never scan raw sales
 - Every list/report has an Export button: exactly what's filtered on screen → .xlsx (ExcelJS), .csv, .pdf (react-pdf); large exports run in the background and email a signed link
 - Escape cells starting with = + - @ (formula injection)
 - Full-account ZIP export for owners (GDPR portability)
@@ -601,7 +695,7 @@ Implement subscription billing per docs/PLAN.md section 14. There is ONE fixed m
 1. Config: PRICE_CENTS, TRIAL_DAYS, GRACE_DAYS, INVOICE_DUE_DAYS and our bank details (account name, IBAN, BIC) come from env/settings — never hard-coded. There is NO Stripe or other payment provider in v1.
 2. Use the new-table skill for billing_invoices (sequential invoice_no with no gaps, org_id, amount_ex_vat, vat_rate, vat, total, issued_at, due_at, payment_reference, paid_at, bank_reference, marked_paid_by) and extend subscriptions (status trial|active|overdue|paused, price_cents, period_start, period_end).
 3. Payment reference: short, unique, human-typeable (e.g. TF-7K3Q-0925) with a check character so typos are caught when matching.
-4. Inngest jobs: at trial end and each period start, generate the invoice, render it as a PDF (our VAT number, sequential number, VAT rate and amount, IBAN/BIC, payment reference) and email it; reminders at due date and due + 7 days; after GRACE_DAYS unpaid → status paused = read-only (can view and export, can't make sales); never delete data.
+4. pg-boss jobs (scheduled + idempotent): at trial end and each period start, generate the invoice, render it as a PDF (our VAT number, sequential number, VAT rate and amount, IBAN/BIC, payment reference) and email it; reminders at due date and due + 7 days; after GRACE_DAYS unpaid → status paused = read-only (can view and export, can't make sales); never delete data.
 5. Owner-facing Billing page: current status, next invoice date, invoice history with PDF downloads, our bank details and the payment reference with a copy button.
 6. Super-admin (only): invoices list filtered by status (outstanding, overdue, paid); "Mark as paid" requires the bank reference and date; "Unpause"; optional CSV upload of a bank statement that suggests matches by payment reference (a human still confirms each). Every action audit-logged.
 7. Keep billing behind a small interface (src/lib/billing) so an automated provider can be added in v2 without touching the rest of the app — but don't build or install any provider now.
@@ -629,7 +723,7 @@ Session: `/clear` · After: commit → `/clear`.
 ### Step 3.4 — Legal pages and GDPR tools
 
 ```text
-Create pages (content drafts clearly marked "DRAFT – for solicitor review"): Terms of Service, Privacy Policy, Data Processing Agreement, Sub-processor list (Supabase, your hosting provider, your SMTP mail provider, Sentry, Upstash, Inngest), Cookie policy, Accessibility statement. Add cookie consent for non-essential cookies only. Add in-app "Download my data" and "Close account" (30-day grace, then deletion except records Revenue requires us to keep for 6 years).
+Create pages (content drafts clearly marked "DRAFT – for solicitor review"): Terms of Service, Privacy Policy, Data Processing Agreement, Sub-processor list (Supabase, your hosting provider, your SMTP mail provider, Better Stack), Cookie policy, Accessibility statement. Add cookie consent for non-essential cookies only. Add in-app "Download my data" and "Close account" (30-day grace, then deletion except records Revenue requires us to keep for 6 years).
 ```
 
 Session: `/clear` · After: commit → `/clear`.
@@ -717,12 +811,12 @@ Build it in **Higgsfield** (your usual workflow) and deploy to **Hostinger**: he
 ### Step 5.2 — Launch checklist (prompt)
 
 ```text
-Create docs/LAUNCH.md and verify each item, marking pass/fail with evidence: bank details and VAT number correct on a sample invoice PDF; invoice numbering starts at 1 with no gaps; Z-report card totals match a pilot shop's terminal end-of-day report; legal pages reviewed by solicitor; DPA and sub-processor list published; status page live; Sentry alerts to my phone; backups + PITR; restore drill < 30 days old; support email monitored; pricing matches landing page; trial emails firing; accessibility statement published; pen-test findings closed.
+Create docs/LAUNCH.md and verify each item, marking pass/fail with evidence: bank details and VAT number correct on a sample invoice PDF; invoice numbering starts at 1 with no gaps; Z-report card totals match a pilot shop's terminal end-of-day report; legal pages reviewed by solicitor; DPA and sub-processor list published; status page live; error-alert emails reach my phone (send a test error and confirm); backups + PITR; restore drill < 30 days old; support email monitored; pricing matches landing page; trial emails firing; accessibility statement published; pen-test findings closed.
 ```
 
 ### Step 5.3 — After launch
 
-- Weekly: `/clear` → "Summarise last week's Sentry errors and open GitHub issues; propose the top 5 fixes with effort." (connect Sentry MCP if you want this automated).
+- Weekly: `/clear` → "Using the Supabase MCP (read-only), summarise error_events with status = new from the last 7 days plus open GitHub issues; propose the top 5 fixes with effort."
 - Consider Claude Code **routines** or **GitHub Actions** for scheduled dependency updates and nightly test runs: <https://code.claude.com/docs/en/routines>.
 - v2 queue (from the plan): integrated card readers (Stripe Terminal / SumUp), automated billing via Stripe (card / SEPA Direct Debit), multi-location, loyalty & gift cards, KDS, Xero/Sage export, online ordering.
 
