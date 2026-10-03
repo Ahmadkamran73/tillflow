@@ -8,7 +8,7 @@ Tillflow is a multi-tenant SaaS: many shops share one Postgres database. A cross
 - Policies must use the single shared SQL helper for the current user's orgs, not ad-hoc subqueries.
 - Every query on a business table must be scoped by `org_id`. `org_id`, `location_id`, `register_id` and user ids must come from the verified session or device token, never from a request body, query string, header or form field.
 - Loading a record by a client-supplied id without checking it belongs to the caller's org is an IDOR. Flag it.
-- The Supabase service-role key and any service client must never be imported in server actions, route handlers, server components or middleware reached by user requests. It is allowed only in Inngest jobs and scripts. It must never appear in `NEXT_PUBLIC_*` variables or client bundles.
+- Privileged database access (the service-role key, a service client, or the `JOBS_DATABASE_URL` connection, which must log in as the least-privilege `tillflow_ops` role, never `postgres`) is allowed ONLY in `src/lib/ops/db.ts` and the pg-boss job handlers (`src/lib/jobs`). `src/lib/ops/db.ts` may only call `ops.*` SECURITY DEFINER functions, never touch a table, and must keep `import "server-only"`. Anything else importing it, or using the key, is a finding (`pnpm check:imports` fails CI). It must never appear in `NEXT_PUBLIC_*` variables or client bundles.
 - `security definer` functions must set `search_path` and check the caller's org.
 - Exports, search, caches, storage paths and realtime channels must be scoped per org. Uniqueness (SKU, barcode, receipt number) is per org.
 
@@ -35,6 +35,6 @@ Tillflow is a multi-tenant SaaS: many shops share one Postgres database. A cross
 ## Secrets and privacy
 
 - No hard-coded secrets, keys, tokens, passwords or connection strings in source, tests, docs or migrations. Secrets live in environment settings only.
-- Never log personal data (names, emails, phones, addresses, VAT numbers, PINs, tokens, request bodies containing them). Sentry events must scrub PII.
+- Never log personal data (names, emails, phones, addresses, VAT numbers, PINs, tokens, request bodies containing them). Errors go through `src/lib/errors` (allow-list scrubber) before they are logged, stored in `error_events` or emailed.
 - Service-role, database URLs and production credentials must never be used by tests or dev tooling.
 - Rate-limit auth, PIN, sync and export endpoints.

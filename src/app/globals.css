@@ -7,9 +7,10 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-sans);
+  --font-sans: var(--font-instrument), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-display: var(--font-mona), "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-heading: var(--font-display);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -48,76 +49,181 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/*
+ * Tillflow design tokens, taken from tillflow.ie so the product and the marketing site match:
+ * limestone / bone / paper surfaces, ink text, one ember-orange accent, a night dark theme,
+ * hairline rules, pill buttons. Mona Sans for headings, Instrument Sans for text, Geist Mono
+ * for tags, figures and the printed receipt. Text/background pairs are >= 4.5:1 and UI
+ * boundaries >= 3:1 (pnpm exec tsx scripts/check-contrast.ts).
+ * Surfaces: .surface-panel (back office), .surface-glass (sticky top bar), .surface-solid (register).
+ */
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --background: #f1efea; /* limestone */
+  --foreground: #121211; /* ink */
+  --card: #fdfcf9; /* paper */
+  --card-foreground: var(--foreground);
+  --popover: #faf9f6; /* bone */
+  --popover-foreground: var(--foreground);
+  --primary: #121211;
+  --primary-foreground: #faf9f6;
+  --secondary: #e7e4dc; /* limestone-2 */
+  --secondary-foreground: #121211;
+  --muted: #e9e6df;
+  --muted-foreground: #5c5951; /* stone, a touch darker for 4.5:1 on muted */
+  --accent: #e7e4dc;
+  --accent-foreground: #121211;
+  --destructive: #b0432d; /* late */
+  --border: rgb(18 18 17 / 0.12);
+  --input: #85827a;
+  --ring: #2563eb;
+  --ember: #e5561c;
+  --ember-foreground: #121211;
+  --success: #2e845a; /* paid */
+  --success-foreground: #ffffff;
+  --warning: #e2b35a; /* wait */
+  --warning-foreground: #121211;
+  --info: #5f7380; /* pos slate */
+  --info-foreground: #ffffff;
+  --chart-1: #121211;
+  --chart-2: #e5561c;
+  --chart-3: #5f7380;
+  --chart-4: #8c7b63;
+  --chart-5: #2e845a;
+  --radius: 0.75rem;
+  --sidebar: #0f0f0e; /* night */
+  --sidebar-foreground: #eceae4; /* chalk */
+  --sidebar-primary: #e5561c;
+  --sidebar-primary-foreground: #121211;
+  --sidebar-accent: #22211e; /* night-3 */
+  --sidebar-accent-foreground: #eceae4;
+  --sidebar-border: rgb(236 234 228 / 0.12);
+  --sidebar-ring: #9db8ff;
+  --glass: rgb(250 249 246 / 0.82);
+  --glass-border: rgb(18 18 17 / 0.12);
+  --solid: #faf9f6;
+  --solid-border: #121211;
+  --paper: #fdfcf9;
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --background: #0f0f0e;
+  --foreground: #eceae4;
+  --card: #181816; /* night-2 */
+  --popover: #22211e; /* night-3 */
+  --primary: #eceae4;
+  --primary-foreground: #121211;
+  --secondary: #22211e;
+  --secondary-foreground: #eceae4;
+  --muted: #22211e;
+  --muted-foreground: #a8a59d;
+  --accent: #2b2a27;
+  --accent-foreground: #eceae4;
+  --destructive: #e48a73;
+  --border: rgb(236 234 228 / 0.12);
+  --input: #7d7a72;
+  --ring: #9db8ff;
+  --success: #6cc795;
+  --success-foreground: #0f0f0e;
+  --warning: #e2b35a;
+  --info: #9db2bf;
+  --info-foreground: #0f0f0e;
+  --chart-1: #eceae4;
+  --chart-3: #9db2bf;
+  --chart-4: #b8a68a;
+  --chart-5: #6cc795;
+  --sidebar: #0a0a09;
+  --sidebar-accent: #22211e;
+  --glass: rgb(15 15 14 / 0.82);
+  --glass-border: rgb(236 234 228 / 0.12);
+  --solid: #181816;
+  --solid-border: #eceae4;
+  --paper: #22211e;
+}
+
+@theme inline {
+  --color-ember: var(--ember);
+  --color-ember-foreground: var(--ember-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-solid: var(--solid);
+  --color-solid-border: var(--solid-border);
+  --color-paper: var(--paper);
+  /* type scale (steps ~1.25) */
+  --text-caption: 0.8125rem;
+  --text-caption--line-height: 1.25rem;
+  --text-body: 1rem;
+  --text-body--line-height: 1.5rem;
+  --text-heading: 1.25rem;
+  --text-heading--line-height: 1.75rem;
+  --text-title: 1.75rem;
+  --text-title--line-height: 2.25rem;
+  --text-display: 2.5rem;
+  --text-display--line-height: 1.1;
+  --text-amount: 3rem;
+  --text-amount--line-height: 1;
+}
+
+/* One strong, opaque focus ring everywhere (WCAG 2.4.7 / 2.4.13). Unlayered, so it beats utilities. */
+:focus-visible {
+  outline: 3px solid var(--ring);
+  outline-offset: 2px;
+}
+.sidebar-dark :focus-visible {
+  outline-color: var(--sidebar-ring);
+}
+html {
+  scroll-padding-block: 5rem 7rem;
+}
+
+@utility surface-glass {
+  background-color: var(--glass);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(14px) saturate(1.2);
+}
+/* Back-office panel: flat paper, hairline border, no shadow. */
+@utility surface-panel {
+  background-color: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+@utility surface-solid {
+  background-color: var(--solid);
+  color: var(--foreground);
+  border: 2px solid var(--solid-border);
+  backdrop-filter: none;
+}
+/* Receipt paper: the cart pane's torn bottom edge. */
+@utility receipt-edge {
+  --tooth: 10px;
+  padding-bottom: calc(var(--tooth) + 0.5rem);
+  mask:
+    linear-gradient(#000 0 0) top / 100% calc(100% - var(--tooth)) no-repeat,
+    conic-gradient(from -45deg at bottom, #0000, #000 1deg 89deg, #0000 90deg) bottom /
+      calc(var(--tooth) * 2) var(--tooth) repeat-x;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 @layer base {
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    font-weight: 560;
+    font-stretch: 94%;
+    letter-spacing: -0.03em;
+  }
   * {
     @apply border-border outline-ring/50;
   }
@@ -126,5 +232,28 @@
   }
   html {
     @apply font-sans;
+  }
+}
+
+/* Pay keeps its ember fill and gets the same press feedback. */
+@utility till-key-pay {
+  transition: transform 150ms;
+  &:active {
+    transform: scale(0.98);
+  }
+}
+
+/* Register product tile: paper, 3:1 border, ink border on hover, shrinks slightly when pressed. */
+@utility till-key {
+  background-color: var(--card);
+  border: 1.5px solid var(--input);
+  transition:
+    border-color 150ms,
+    transform 150ms;
+  &:hover {
+    border-color: var(--foreground);
+  }
+  &:active {
+    transform: scale(0.97);
   }
 }

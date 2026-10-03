@@ -19,8 +19,10 @@ Do staging first. Do not start production until staging `/api/health` returns 20
 3. Have these ready in your password manager (never paste them into chat):
    - Staging Supabase URL and anon key (Supabase dashboard, `tillflow-staging` > Project Settings > API)
    - Staging service-role key and pooled `DATABASE_URL` (only needed once server code uses them)
-   - Upstash Redis REST URL and token (one database per environment)
-   - Sentry DSN (one Sentry project; the environment is set separately)
+   - Staging `JOBS_DATABASE_URL`, which connects as the least-privilege **`tillflow_ops`** role (migration 0008), never as `postgres`. After the migrations reach staging (step 4 of the release route in `docs/DEPLOY.md`):
+     1. Supabase dashboard > `tillflow-staging` > **SQL Editor**, run `alter role tillflow_ops with login password '<a new strong password>';` (generate it in your password manager and save it there; never paste it into chat).
+     2. Dashboard > **Connect** > **Session pooler** (port **5432**, not the 6543 transaction pooler; not the direct connection, which is IPv6-only). Copy the URI and change the user from `postgres.<project-ref>` to **`tillflow_ops.<project-ref>`** and the password to the one from step 1. **(check)** that the pooler accepts it: the app's `/api/health` says `"database":"ok"`.
+   - A Resend API key, and your Resend account email for `ALERT_EMAIL`
 
 ## A. Create the staging app
 
@@ -29,24 +31,24 @@ Do staging first. Do not start production until staging `/api/health` returns 20
 3. **Branch:** `develop`. If the wizard does not ask for a branch, set it under the app's **Settings > Git** afterwards. **(check)**
 4. Build settings (Hostinger will auto-detect "Next.js"; override these):
 
-   | Field            | Value                                                                           |
-   | ---------------- | ------------------------------------------------------------------------------- |
-   | Framework        | Next.js                                                                         |
-   | Node.js version  | **24.x** (same as CI). 22.x is the fallback.                                    |
-   | Root directory   | `./` (repo root)                                                                |
-   | Package manager  | pnpm if offered; otherwise keep npm and use the build command below **(check)** |
-   | Build command    | `corepack enable && pnpm install --frozen-lockfile && pnpm build`               |
-   | Start command    | `npm start` (runs `next start`)                                                 |
-   | Output directory | `.next`                                                                         |
-   | Entry file       | leave empty                                                                     |
+   | Field            | Value                                                                               |
+   | ---------------- | ----------------------------------------------------------------------------------- |
+   | Framework        | Next.js                                                                             |
+   | Node.js version  | **24.x** (same as CI). 22.x is the fallback.                                        |
+   | Root directory   | `./` (repo root)                                                                    |
+   | Package manager  | **pnpm** (hPanel detects it from `pnpm-lock.yaml` and installs dependencies itself) |
+   | Build command    | `pnpm run build` (pick it from the list; hPanel does not accept free text)          |
+   | Start command    | `pnpm run start` (runs `next start`)                                                |
+   | Output directory | `.next`                                                                             |
+   | Entry file       | leave empty                                                                         |
 
-   If hPanel rejects `corepack`, try `npm install -g pnpm@12.6.0 && pnpm install --frozen-lockfile && pnpm build`. Do not switch to `npm install`: the lockfile is `pnpm-lock.yaml`, so versions would drift.
+   If the build log shows `npm install` instead of `pnpm install`, stop and ask support how to use the pnpm lockfile: an npm install ignores `pnpm-lock.yaml`, so versions would drift.
 
 5. **Environment variables:** open the app's **Settings > Environment variables** and add the staging values from the table below **before the first deploy**. `NEXT_PUBLIC_*` values are baked in at build time, so changing one later means **Redeploy**.
 6. Click **Deploy**. The first build takes a few minutes.
 7. **Auto deploy:** in Settings > Git, make sure automatic deployment on push is ON for the branch. Then every merge to `develop` redeploys staging. **(check)**
 8. **Domain:** Settings > **Domains** > connect `staging.tillflow.ie`. Hostinger shows the DNS record it wants (see the DNS section). Tick **Force HTTPS** once the free SSL certificate is issued.
-9. Open `https://staging.tillflow.ie/api/health`. You should see `{"status":"ok","version":"...","commit":"...","environment":"staging"}`.
+9. Open `https://staging.tillflow.ie/api/health`. You should see `{"status":"ok","database":"ok","jobs":"ok","version":"...","commit":"...","environment":"staging"}`. Right after a deploy `"jobs"` can say `"down"` for up to a minute, until the worker's first heartbeat.
 10. On GitHub: repo > Settings > Secrets and variables > Actions > **Variables** > New repository variable `STAGING_URL` = `https://staging.tillflow.ie`. This turns on the "Staging smoke check" that runs after each push to `develop`.
 
 ## B. Create the production app
@@ -54,40 +56,38 @@ Do staging first. Do not start production until staging `/api/health` returns 20
 Repeat section A with these differences:
 
 - Branch **`main`**, domain **`pos.tillflow.ie`**.
-- Production Supabase (`tillflow-prod`), production Upstash and Sentry values. `NEXT_PUBLIC_APP_ENV=production`.
+- Production Supabase (`tillflow-prod`) values, including its own session-pooler `JOBS_DATABASE_URL` as `tillflow_ops` (run the same `alter role` in the production SQL editor with a different password). `NEXT_PUBLIC_APP_ENV=production`. `ALERT_FROM` must be an address on the verified `tillflow.ie` domain (for example `Tillflow Alerts <alerts@tillflow.ie>`), so do the Resend DNS step first.
 - Consider switching **auto deploy OFF** so production moves only when you press **Redeploy**. Release order: merge `develop` into `main` by PR, run **Promote to production** on GitHub (approve it) so the database is ready, then **Redeploy** the production app.
 
 ## Environment variables to paste into hPanel
 
 Names only. Values come from your password manager. Same names in both apps, different values.
 
-| Name                                                      | Needed now? | Notes                                                                                               |
-| --------------------------------------------------------- | ----------- | --------------------------------------------------------------------------------------------------- |
-| `NEXT_PUBLIC_APP_URL`                                     | yes         | `https://staging.tillflow.ie` / `https://pos.tillflow.ie`                                           |
-| `NEXT_PUBLIC_APP_ENV`                                     | yes         | `staging` / `production`                                                                            |
-| `NEXT_PUBLIC_SUPABASE_URL`                                | yes         | from that environment's Supabase project                                                            |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY`                           | yes         | anon (publishable) key only                                                                         |
-| `AUTH_GOOGLE_ENABLED`                                     | yes         | `true` only after Google is enabled in that Supabase project                                        |
-| `UPSTASH_REDIS_REST_URL`                                  | yes         | without it the app falls back to in-memory rate limits, which is not safe in production             |
-| `UPSTASH_REDIS_REST_TOKEN`                                | yes         |                                                                                                     |
-| `SENTRY_DSN`                                              | yes         | server errors                                                                                       |
-| `NEXT_PUBLIC_SENTRY_DSN`                                  | yes         | browser errors                                                                                      |
-| `SENTRY_AUTH_TOKEN`                                       | optional    | uploads source maps during the build; without it Sentry still works, stack traces are just minified |
-| `SENTRY_ORG`, `SENTRY_PROJECT`                            | optional    | only used with `SENTRY_AUTH_TOKEN`                                                                  |
-| `SUPABASE_SERVICE_ROLE_KEY`                               | later       | server only; add when server code needs it                                                          |
-| `DATABASE_URL`                                            | later       | pooled connection string                                                                            |
-| `RESEND_API_KEY`, `EMAIL_FROM`                            | later       | when the app sends email                                                                            |
-| `INNGEST_EVENT_KEY`, `INNGEST_SIGNING_KEY`                | later       | when Inngest jobs land                                                                              |
-| `BANK_ACCOUNT_NAME`, `BANK_IBAN`, `BANK_BIC`, `BANK_NAME` | later       | billing invoices (phase 3)                                                                          |
+| Name                                                      | Needed now? | Notes                                                                                                                                                                                         |
+| --------------------------------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NEXT_PUBLIC_APP_URL`                                     | yes         | `https://staging.tillflow.ie` / `https://pos.tillflow.ie`                                                                                                                                     |
+| `NEXT_PUBLIC_APP_ENV`                                     | yes         | `staging` / `production`                                                                                                                                                                      |
+| `NEXT_PUBLIC_SUPABASE_URL`                                | yes         | from that environment's Supabase project                                                                                                                                                      |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY`                           | yes         | anon (publishable) key only                                                                                                                                                                   |
+| `AUTH_GOOGLE_ENABLED`                                     | yes         | `true` only after Google is enabled in that Supabase project                                                                                                                                  |
+| `JOBS_DATABASE_URL`                                       | yes         | Supabase **session pooler** URL (port 5432) with user `tillflow_ops.<project-ref>`, never `postgres`. Used for background jobs, rate limits, the error log and the health check. Server only. |
+| `JOBS_ENABLED`                                            | optional    | leave unset (on). `false` stops this app running the job worker.                                                                                                                              |
+| `ALERT_EMAIL`                                             | yes         | where new-error alerts and the daily digest go. Staging: your Resend account email.                                                                                                           |
+| `ALERT_FROM`                                              | yes         | staging `onboarding@resend.dev`; production an address on verified `tillflow.ie`                                                                                                              |
+| `RESEND_API_KEY`                                          | yes         | Resend > API Keys. Without it alerts are skipped (errors are still stored).                                                                                                                   |
+| `SUPABASE_SERVICE_ROLE_KEY`                               | later       | server only; add when server code needs it                                                                                                                                                    |
+| `DATABASE_URL`                                            | later       | pooled connection string                                                                                                                                                                      |
+| `EMAIL_FROM`                                              | later       | receipts and invites (later steps)                                                                                                                                                            |
+| `BANK_ACCOUNT_NAME`, `BANK_IBAN`, `BANK_BIC`, `BANK_NAME` | later       | billing invoices (phase 3)                                                                                                                                                                    |
 
-`SUPABASE_SERVICE_ROLE_KEY` and `DATABASE_URL` must never start with `NEXT_PUBLIC_`.
+`SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL` and `JOBS_DATABASE_URL` must never start with `NEXT_PUBLIC_`.
 
-`.env.example` is write-protected for Claude, so add these three lines to it by hand: `NEXT_PUBLIC_APP_ENV=development`, `SENTRY_ORG=`, `SENTRY_PROJECT=`.
+`.env.example` is write-protected for Claude; its lines are updated by hand to match this table.
 
 ## After each app is live
 
 - Supabase dashboard (that project) > Authentication > URL Configuration: set **Site URL** to the app URL and add `<app URL>/auth/callback` to **Redirect URLs**. See `docs/specs/auth.md` for the rest of the auth settings.
-- Sentry: trigger a test error on staging and confirm it shows up with no email or name in it.
+- Errors: trigger a test error on staging and confirm it lands in the `error_events` table (Supabase > Table Editor) and that the alert email contains no name or email address. See "Where do errors go?" in `docs/DEPLOY.md`.
 
 ## Why not `output: 'standalone'`?
 
@@ -95,7 +95,7 @@ Hostinger runs the build and start commands you give it, and `next start` works 
 
 ## DNS records (hPanel > Domains > tillflow.ie > DNS / Nameservers)
 
-Assumes `tillflow.ie` uses Hostinger's nameservers. For the two app rows, use the value hPanel shows on each app's Domains step; Hostinger generates it.
+`tillflow.ie`'s DNS is at **eLive** (nameservers `dns.elive.ie`), not Hostinger, so add these records in the eLive control panel. For the two app rows, use the value hPanel shows on each app's Domains step (staging: `A` `72.61.204.157`).
 
 | Type       | Name                | Value                                                                     | TTL  | Purpose                             |
 | ---------- | ------------------- | ------------------------------------------------------------------------- | ---- | ----------------------------------- |
