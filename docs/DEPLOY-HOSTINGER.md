@@ -22,7 +22,7 @@ Do staging first. Do not start production until staging `/api/health` returns 20
    - Staging `JOBS_DATABASE_URL`, which connects as the least-privilege **`tillflow_ops`** role (migration 0008), never as `postgres`. After the migrations reach staging (step 4 of the release route in `docs/DEPLOY.md`):
      1. Supabase dashboard > `tillflow-staging` > **SQL Editor**, run `alter role tillflow_ops with login password '<a new strong password>';` (generate it in your password manager and save it there; never paste it into chat).
      2. Dashboard > **Connect** > **Session pooler** (port **5432**, not the 6543 transaction pooler; not the direct connection, which is IPv6-only). Copy the URI and change the user from `postgres.<project-ref>` to **`tillflow_ops.<project-ref>`** and the password to the one from step 1. **(check)** that the pooler accepts it: the app's `/api/health` says `"database":"ok"`.
-   - A Resend API key, and your Resend account email for `ALERT_EMAIL`
+   - SMTP details for alert emails (for now a Gmail account with 2-step verification and an **app password**: `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=465`, `SMTP_USER` = the Gmail address, `SMTP_PASS` = the 16-character app password), and the address that receives alerts for `ALERT_EMAIL`
 
 ## A. Create the staging app
 
@@ -56,7 +56,7 @@ Do staging first. Do not start production until staging `/api/health` returns 20
 Repeat section A with these differences:
 
 - Branch **`main`**, domain **`pos.tillflow.ie`**.
-- Production Supabase (`tillflow-prod`) values, including its own session-pooler `JOBS_DATABASE_URL` as `tillflow_ops` (run the same `alter role` in the production SQL editor with a different password). `NEXT_PUBLIC_APP_ENV=production`. `ALERT_FROM` must be an address on the verified `tillflow.ie` domain (for example `Tillflow Alerts <alerts@tillflow.ie>`), so do the Resend DNS step first.
+- Production Supabase (`tillflow-prod`) values, including its own session-pooler `JOBS_DATABASE_URL` as `tillflow_ops` (run the same `alter role` in the production SQL editor with a different password). `NEXT_PUBLIC_APP_ENV=production`. `ALERT_FROM` is the sending Gmail address for now (Gmail rewrites any other From). Once a `tillflow.ie` mailbox exists, switch the `SMTP_*` values and `ALERT_FROM` to it and publish its SPF/DKIM records.
 - Consider switching **auto deploy OFF** so production moves only when you press **Redeploy**. Release order: merge `develop` into `main` by PR, run **Promote to production** on GitHub (approve it) so the database is ready, then **Redeploy** the production app.
 
 ## Environment variables to paste into hPanel
@@ -72,9 +72,12 @@ Names only. Values come from your password manager. Same names in both apps, dif
 | `AUTH_GOOGLE_ENABLED`                                     | yes         | `true` only after Google is enabled in that Supabase project                                                                                                                                  |
 | `JOBS_DATABASE_URL`                                       | yes         | Supabase **session pooler** URL (port 5432) with user `tillflow_ops.<project-ref>`, never `postgres`. Used for background jobs, rate limits, the error log and the health check. Server only. |
 | `JOBS_ENABLED`                                            | optional    | leave unset (on). `false` stops this app running the job worker.                                                                                                                              |
-| `ALERT_EMAIL`                                             | yes         | where new-error alerts and the daily digest go. Staging: your Resend account email.                                                                                                           |
-| `ALERT_FROM`                                              | yes         | staging `onboarding@resend.dev`; production an address on verified `tillflow.ie`                                                                                                              |
-| `RESEND_API_KEY`                                          | yes         | Resend > API Keys. Without it alerts are skipped (errors are still stored).                                                                                                                   |
+| `ALERT_EMAIL` | yes | where new-error alerts and the daily digest go |
+| `ALERT_FROM` | yes | sender, e.g. `Tillflow Alerts <your-gmail-address>`; must be the SMTP account's own address on Gmail |
+| `SMTP_HOST` | yes | `smtp.gmail.com` (later your tillflow.ie mailbox host) |
+| `SMTP_PORT` | optional | `465` (default, implicit TLS) or `587` (STARTTLS) |
+| `SMTP_USER` | yes | the SMTP login (the Gmail address) |
+| `SMTP_PASS` | yes | Gmail **app password**, never the account password. Without the `SMTP_*` set, alerts are skipped (errors are still stored). |
 | `SUPABASE_SERVICE_ROLE_KEY`                               | later       | server only; add when server code needs it                                                                                                                                                    |
 | `DATABASE_URL`                                            | later       | pooled connection string                                                                                                                                                                      |
 | `EMAIL_FROM`                                              | later       | receipts and invites (later steps)                                                                                                                                                            |
@@ -101,14 +104,6 @@ Hostinger runs the build and start commands you give it, and `next start` works 
 | ---------- | ------------------- | ------------------------------------------------------------------------- | ---- | ----------------------------------- |
 | A or CNAME | `pos`               | shown by hPanel when you connect `pos.tillflow.ie` to the production app  | 300  | Production app                      |
 | A or CNAME | `staging`           | shown by hPanel when you connect `staging.tillflow.ie` to the staging app | 300  | Staging app                         |
-| MX         | `send`              | `feedback-smtp.eu-west-1.amazonses.com` (priority `10`)                   | 3600 | Resend: bounce handling             |
-| TXT        | `send`              | `v=spf1 include:amazonses.com ~all`                                       | 3600 | Resend: SPF                         |
-| TXT        | `resend._domainkey` | the long `p=...` key shown in Resend                                      | 3600 | Resend: DKIM                        |
 | TXT        | `_dmarc`            | `v=DMARC1; p=none; rua=mailto:dmarc@tillflow.ie`                          | 3600 | Recommended DMARC (start at `none`) |
 
-Resend specifics:
-
-1. resend.com > Domains > **Add Domain** > `tillflow.ie`, region **Europe (Ireland, eu-west-1)**.
-2. Resend then lists the exact records for your domain. **Those values win** over the table above: the DKIM key is unique to you and host names can differ. Add them, then click **Verify**.
-3. Do not create a second SPF record on the same name. The record above is on `send`, so it does not clash with any SPF on the root domain.
-4. Leave the existing landing-page records for `tillflow.ie` and `www` alone.
+Email: no sending-domain DNS records are needed while alerts go out through Gmail SMTP. When a `tillflow.ie` mailbox is created, add the SPF, DKIM and DMARC records its provider gives you, and do not create a second SPF record on the same name. Leave the existing landing-page records for `tillflow.ie` and `www` alone.

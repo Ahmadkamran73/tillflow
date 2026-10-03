@@ -112,10 +112,10 @@ Libraries: Papa Parse (CSV), ExcelJS (xlsx), react-pdf (PDF), `import_jobs` tabl
 | Rate limits      | Postgres `check_rate_limit()` (auth, exports) + in-memory (sync); PIN lockout as DB counters | No extra sub-processor or secrets                                        |
 | Card payments    | None integrated in v1 — "Card" tender recorded from the shop's own terminal                  | No card data ever touches Tillflow; Stripe Terminal / SumUp in v2        |
 | Subscriptions    | Manual invoices + bank transfer                                                              | Management's choice; automated card/direct-debit billing is v2           |
-| Email            | Resend + React Email                                                                         | Receipts, Z-reports, invites                                             |
+| Email            | Nodemailer (SMTP) + React Email                                                                     | Receipts, Z-reports, invites                                             |
 | Printing         | ESC/POS via WebUSB/network or local print bridge; browser print fallback                     | Receipts, kitchen tickets, drawer kick                                   |
 | Hosting          | Vercel (`dub1`) or Hostinger Web Apps (Node.js)                                              | Vercel: preview URL per PR · Hostinger: flat price, separate staging app |
-| Monitoring       | Own error log (`error_events`, pino, email alerts via Resend) + Better Stack uptime          | Errors stay in our EU database                                           |
+| Monitoring       | Own error log (`error_events`, pino, email alerts via SMTP) + Better Stack uptime          | Errors stay in our EU database                                           |
 | Testing          | Vitest, Playwright, SQL RLS tests                                                            | Safety net for AI-written code                                           |
 | CI/CD            | GitHub Actions                                                                               | Lint, typecheck, test, migrate                                           |
 
@@ -144,7 +144,7 @@ flowchart TB
     AUTH["Auth + Realtime"]
   end
   subgraph Ext["External"]
-    MAIL["Resend"]
+    MAIL["SMTP mail server"]
   end
   REG -- "sync sales (HTTPS)" --> APP
   BO --> APP
