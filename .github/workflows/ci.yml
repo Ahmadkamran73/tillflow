@@ -41,6 +41,8 @@ jobs:
         run: pnpm typecheck
       - name: Unit tests
         run: pnpm exec vitest run tests/unit src
+      - name: Money library coverage (100%)
+        run: pnpm test:money
 
       - name: Start local Supabase
         run: pnpm exec supabase start -x studio,imgproxy,edge-runtime,logflare,vector,supavisor

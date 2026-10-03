@@ -10,5 +10,10 @@ export default defineConfig({
     setupFiles: ["./tests/setup.ts"],
     include: ["tests/unit/**/*.test.{ts,tsx}", "tests/rls/**/*.test.ts", "src/**/*.test.{ts,tsx}"],
     passWithNoTests: true,
+    coverage: {
+      provider: "v8",
+      include: ["src/lib/money/**"],
+      thresholds: { statements: 100, branches: 100, functions: 100, lines: 100 },
+    },
   },
 });
