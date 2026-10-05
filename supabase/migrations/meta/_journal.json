@@ -85,6 +85,20 @@
       "when": 1791037438769,
       "tag": "0011_organisations_vat_number_check",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1791192043986,
+      "tag": "0012_catalog",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1791198009542,
+      "tag": "0014_vat_rates_confirmed",
+      "breakpoints": true
     }
   ]
 }
