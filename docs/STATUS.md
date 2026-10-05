@@ -38,6 +38,8 @@ _Last updated: 2026-10-05 (Phase 1 · Step 1.3 products and catalogue)_
 
 ## Next step
 
+**Release plan (decided 2026-10-05):** steps 1.1 to 1.x merge into `develop` (staging) one by one; `main` / production gets one "Release: Phase 1" PR only when all of Phase 1 is done and verified on staging. PR #21 (step 1.3) is open into `develop`.
+
 0. **Step 1.3:** open the PR into `develop` after your review; `migrate-staging` applies 0012-0015. Then Step 1.4 (register screen). Open: accessibility minors listed above, Budget 2027 rate check.
 1. **Step 1.2:** owner tries the wizard on a tablet, then commit and PR after the Step 1.1 PR (this branch builds on it). `migrate-staging` applies 0009–0011. Then Step 1.3 (categories table already exists).
 2. **Step 1.1:** owner reviews `src/lib/money` line by line, run `/security-review`, commit and PR into `develop`. Then Step 1.2 (see `docs/PLAN.md` and `docs/PROMPTS_v1.md`).
