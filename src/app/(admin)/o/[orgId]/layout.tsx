@@ -1,7 +1,7 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { BackOfficeShell } from "@/components/back-office/shell";
 import { requireRole } from "@/lib/auth";
-import { getOrganisationName } from "@/lib/org";
+import { getOrganisation } from "@/lib/org";
 
 export default async function OrgLayout({
   children,
@@ -12,11 +12,12 @@ export default async function OrgLayout({
 }) {
   const { orgId } = await params;
   const { role } = await requireRole(["owner", "manager"], orgId);
-  const orgName = await getOrganisationName(orgId);
-  if (!orgName) notFound();
+  const org = await getOrganisation(orgId);
+  if (!org) notFound();
+  if (!org.onboardedAt && role === "owner") redirect("/onboarding");
 
   return (
-    <BackOfficeShell orgId={orgId} orgName={orgName} role={role}>
+    <BackOfficeShell orgId={orgId} orgName={org.name} role={role}>
       {children}
     </BackOfficeShell>
   );
