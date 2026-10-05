@@ -26,7 +26,8 @@ export type MailResult = "sent" | "not_configured" | "failed";
  * should be that address until a tillflow.ie mailbox exists.
  */
 export async function sendMail(m: {
-  from: string | undefined;
+  /** A plain address, or an address with the display name recipients see (the business name). */
+  from: string | { name: string; address: string } | undefined;
   to: string | undefined;
   subject: string;
   text: string;

@@ -15,6 +15,16 @@ import { emailReceiptInput, SaleError } from "@/lib/register/sale-input";
 export type EmailReceiptResult =
   { ok: true } | { ok: false; reason: "invalid" | "prices" | "rate" | "failed" };
 
+/**
+ * Receipts are sent from the platform mailbox (ALERT_FROM) but show the business name as the
+ * sender, as customers expect. Gmail keeps the display name while forcing its own address.
+ */
+function senderFor(businessName: string) {
+  const configured = process.env.ALERT_FROM ?? "";
+  const address = /<([^>]+)>/.exec(configured)?.[1] ?? configured;
+  return address ? { name: businessName.replace(/[\r\n"]/g, " ").trim(), address } : undefined;
+}
+
 const escapeHtml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -83,7 +93,7 @@ export async function emailReceipt(orgId: string, raw: unknown): Promise<EmailRe
   changeDue(receipt.tenderedCents, receipt.dueCents); // throws only if the checks above were skipped
   const text = receiptText(receipt, 42, receiptLabels()).join("\n");
   const result = await sendMail({
-    from: process.env.RECEIPT_FROM ?? process.env.ALERT_FROM,
+    from: senderFor(org.name),
     to: data.to,
     subject: t("receipt.emailSubject", { shop: receipt.business.name }),
     text,
