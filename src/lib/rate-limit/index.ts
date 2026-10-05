@@ -26,8 +26,8 @@ export const RATE_LIMITS = {
   mfa: { limit: 5, windowSec: 60, auth: true }, // per user
   export: { limit: 5, windowSec: 3600, auth: false }, // per user
   import: { limit: 5, windowSec: 3600, auth: false }, // per org
-  "receipt-email": { limit: 30, windowSec: 3600, auth: false }, // per user
-  "receipt-email-org": { limit: 200, windowSec: 3600, auth: false }, // per org
+  "receipt-email": { limit: 30, windowSec: 3600, auth: true }, // per user
+  "receipt-email-org": { limit: 200, windowSec: 3600, auth: true }, // per org
 } as const;
 
 export type RateLimitName = keyof typeof RATE_LIMITS;
