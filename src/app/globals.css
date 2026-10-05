@@ -257,3 +257,33 @@ html {
     transform: scale(0.97);
   }
 }
+
+/* Browser-print fallback for receipts: only the receipt is visible when printing. */
+.print-only {
+  display: none;
+}
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .print-only,
+  .print-only * {
+    visibility: visible;
+  }
+  .print-only {
+    display: block;
+    position: absolute;
+    top: 0;
+    left: 0;
+    max-width: 100vw;
+    margin: 0;
+    padding: 4mm;
+    background: #fff;
+    color: #000;
+    font: 12px/1.3 ui-monospace, "Geist Mono", monospace;
+    white-space: pre-wrap;
+  }
+  @page {
+    margin: 0;
+  }
+}

@@ -38,75 +38,94 @@ export async function getCatalogFeed(orgId: string, since: string | null): Promi
     q: T,
   ) => (since ? q.gt("updated_at", since) : q.is("archived_at", null));
 
-  const [loc, taxRates, categories, products, variants, groups, mods, pgroups] = await Promise.all([
-    supabase.from("locations").select("timezone").eq("org_id", orgId).order("created_at").limit(1),
-    getTaxRates(),
-    all((a, b) =>
+  const [loc, regs, taxRates, categories, products, variants, groups, mods, pgroups] =
+    await Promise.all([
       supabase
-        .from("categories")
-        .select("id, name, colour, sort")
+        .from("locations")
+        .select("id, timezone, address, eircode, receipt_footer")
         .eq("org_id", orgId)
-        .order("sort")
-        .order("id")
-        .range(a, b),
-    ),
-    all((a, b) =>
-      changed(
+        .order("created_at")
+        .limit(1),
+      supabase.from("registers").select("id, name").eq("org_id", orgId).order("name"),
+      getTaxRates(),
+      all((a, b) =>
         supabase
-          .from("products")
-          .select("id, name, category_id, tax_category, takeaway_tax_category, archived_at")
-          .eq("org_id", orgId),
-      )
-        .order("id")
-        .range(a, b),
-    ),
-    all((a, b) =>
-      changed(
+          .from("categories")
+          .select("id, name, colour, sort")
+          .eq("org_id", orgId)
+          .order("sort")
+          .order("id")
+          .range(a, b),
+      ),
+      all((a, b) =>
+        changed(
+          supabase
+            .from("products")
+            .select("id, name, category_id, tax_category, takeaway_tax_category, archived_at")
+            .eq("org_id", orgId),
+        )
+          .order("id")
+          .range(a, b),
+      ),
+      all((a, b) =>
+        changed(
+          supabase
+            .from("variants")
+            .select(
+              "id, product_id, name, sku, barcode, price_incl_vat_cents, sort, attributes, archived_at",
+            )
+            .eq("org_id", orgId),
+        )
+          .order("id")
+          .range(a, b),
+      ),
+      all((a, b) =>
         supabase
-          .from("variants")
-          .select(
-            "id, product_id, name, sku, barcode, price_incl_vat_cents, sort, attributes, archived_at",
-          )
-          .eq("org_id", orgId),
-      )
-        .order("id")
-        .range(a, b),
-    ),
-    all((a, b) =>
-      supabase
-        .from("modifier_groups")
-        .select("id, name, min_choices, max_choices, sort")
-        .eq("org_id", orgId)
-        .order("id")
-        .range(a, b),
-    ),
-    all((a, b) =>
-      supabase
-        .from("modifiers")
-        .select("id, group_id, name, price_delta_cents, sort")
-        .eq("org_id", orgId)
-        .order("id")
-        .range(a, b),
-    ),
-    all((a, b) =>
-      supabase
-        .from("product_modifier_groups")
-        .select("id, product_id, group_id, sort")
-        .eq("org_id", orgId)
-        .order("id")
-        .range(a, b),
-    ),
-  ]);
+          .from("modifier_groups")
+          .select("id, name, min_choices, max_choices, sort")
+          .eq("org_id", orgId)
+          .order("id")
+          .range(a, b),
+      ),
+      all((a, b) =>
+        supabase
+          .from("modifiers")
+          .select("id, group_id, name, price_delta_cents, sort")
+          .eq("org_id", orgId)
+          .order("id")
+          .range(a, b),
+      ),
+      all((a, b) =>
+        supabase
+          .from("product_modifier_groups")
+          .select("id, product_id, group_id, sort")
+          .eq("org_id", orgId)
+          .order("id")
+          .range(a, b),
+      ),
+    ]);
 
-  const timezone = loc.data?.[0]?.timezone;
-  if (!timezone) throw new Error("Could not load the catalogue");
+  const location = loc.data?.[0];
+  const timezone = location?.timezone;
+  if (!timezone || regs.error) throw new Error("Could not load the catalogue");
   const row = z.record(z.string(), z.any());
   const rows = (x: unknown[]) => z.array(row).parse(x);
 
   return feedSchema.parse({
     cursor,
     full: since === null,
-    org: { businessType: org.businessType, timezone, country: "IE" },
+    org: {
+      businessType: org.businessType,
+      timezone,
+      country: "IE",
+      name: org.name,
+      legalName: org.legalName,
+      vatNumber: org.vatNumber,
+      address: location.address,
+      eircode: location.eircode,
+      receiptFooter: location.receipt_footer,
+    },
+    registers: regs.data,
     taxRates,
     categories: rows(categories),
     products: rows(products).map((p) => ({

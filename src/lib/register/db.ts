@@ -3,6 +3,18 @@ import type { Feed } from "./feed";
 import type { Cart } from "./cart";
 
 export type ParkedSale = { id: string; savedAt: number; cart: Cart };
+/** A finished sale, kept on the device (becomes the sync outbox in step 1.6). */
+export type LocalSale = {
+  /** UUIDv7; also the idempotency key. */
+  id: string;
+  registerId: string;
+  receiptSeq: number;
+  completedAt: string;
+  /** Inputs only: totals are always re-derived with `priceCart`. */
+  cart: Cart;
+  tenderedCents: number;
+  invoice?: { name: string; address: string; vatNumber: string };
+};
 export type Meta = { key: string; value: unknown };
 
 /**
@@ -19,6 +31,7 @@ export class RegisterDb extends Dexie {
   productGroups!: Table<Feed["productGroups"][number], string>;
   meta!: Table<Meta, string>;
   parked!: Table<ParkedSale, string>;
+  sales!: Table<LocalSale, string>;
 
   constructor(orgId: string) {
     super(`tillflow-${orgId}`);
@@ -32,6 +45,7 @@ export class RegisterDb extends Dexie {
       meta: "key",
       parked: "id, savedAt",
     });
+    this.version(2).stores({ sales: "id, completedAt" });
   }
 }
 

@@ -45,6 +45,7 @@ export async function refreshCatalog(db: RegisterDb, orgId: string): Promise<voi
         db.productGroups.clear().then(() => db.productGroups.bulkPut(feed.productGroups)),
         db.meta.bulkPut([
           { key: "org", value: feed.org },
+          { key: "registers", value: feed.registers },
           { key: "taxRates", value: feed.taxRates },
           { key: "cursor", value: feed.cursor },
         ]),

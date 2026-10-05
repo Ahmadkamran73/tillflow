@@ -30,7 +30,10 @@ export function Modal({
 }) {
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent showCloseButton={false} className="surface-solid sm:max-w-md">
+      <DialogContent
+        showCloseButton={false}
+        className="surface-solid max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-md"
+      >
         <DialogHeader>
           <DialogTitle className="text-heading">{title}</DialogTitle>
           {description && <DialogDescription>{description}</DialogDescription>}
@@ -41,7 +44,7 @@ export function Modal({
   );
 }
 
-const Cancel = ({ onClick }: { onClick: () => void }) => (
+export const Cancel = ({ onClick }: { onClick: () => void }) => (
   <Button type="button" size="touch" variant="outline" onClick={onClick}>
     {t("common.cancel")}
   </Button>
@@ -354,60 +357,6 @@ export function ParkedList({
         </ul>
       )}
       <Cancel onClick={onClose} />
-    </Modal>
-  );
-}
-
-export function TenderDialog({
-  due,
-  rounding,
-  done,
-  onExact,
-  onNewSale,
-  onClose,
-}: {
-  due: number;
-  rounding: number;
-  done: boolean;
-  onExact: () => void;
-  onNewSale: () => void;
-  onClose: () => void;
-}) {
-  return (
-    <Modal
-      title={done ? t("register.complete") : t("register.tenderTitle")}
-      onClose={done ? onNewSale : onClose}
-    >
-      <dl className="flex flex-col gap-1 tabular-nums">
-        {rounding !== 0 && (
-          <div className="text-muted-foreground flex justify-between text-sm">
-            <dt>{t("register.rounding")}</dt>
-            <dd>{formatCents(rounding)}</dd>
-          </div>
-        )}
-        <div className="flex items-baseline justify-between">
-          <dt className="text-heading font-semibold">{t("register.due")}</dt>
-          <dd className="font-display text-amount font-semibold">{formatCents(due)}</dd>
-        </div>
-      </dl>
-      <p className="text-muted-foreground text-sm">{t("register.tenderStub")}</p>
-      {done ? (
-        <div className="flex flex-col gap-2">
-          <p role="status" className="text-heading font-semibold">
-            {t("register.change", { amount: formatCents(0) })}
-          </p>
-          <Button type="button" size="pay" autoFocus onClick={onNewSale}>
-            {t("register.newSale")}
-          </Button>
-        </div>
-      ) : (
-        <div className="grid grid-cols-2 gap-2">
-          <Cancel onClick={onClose} />
-          <Button type="button" size="touch" onClick={onExact}>
-            {t("register.exactCash")}
-          </Button>
-        </div>
-      )}
     </Modal>
   );
 }

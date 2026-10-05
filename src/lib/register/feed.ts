@@ -11,7 +11,20 @@ export const feedSchema = z.object({
   cursor: z.iso.datetime(),
   /** True for a first load: the device replaces everything it holds. */
   full: z.boolean(),
-  org: z.object({ businessType: z.enum(businessTypes), timezone: z.string(), country: z.string() }),
+  org: z.object({
+    businessType: z.enum(businessTypes),
+    timezone: z.string(),
+    country: z.string(),
+    // Receipt header (printed on every receipt).
+    name: z.string(),
+    legalName: z.string().nullable(),
+    vatNumber: z.string().nullable(),
+    address: z.string().nullable(),
+    eircode: z.string().nullable(),
+    receiptFooter: z.string().nullable(),
+  }),
+  /** The shop's tills; the device picks one once (until pairing, step 1.7). */
+  registers: z.array(z.object({ id: z.string(), name: z.string() })),
   taxRates: z.array(
     z.object({
       country: z.string(),

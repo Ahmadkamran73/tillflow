@@ -474,7 +474,6 @@ Implement onboarding and business types per docs/PLAN.md section 4.
 - Zod schema for variant `attributes` per type (IMEI/serial + warranty for electronics; size/colour for clothing; modifiers + allergens for cafe/restaurant; age_restricted + deposit for general)
 - Unit tests for presets; Playwright: each type completes onboarding and lands on a dashboard with the right starter categories
 ```
-
 After: commit → `/clear`.
 
 ### Step 1.3 — Products, variants, categories
