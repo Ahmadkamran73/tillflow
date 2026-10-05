@@ -69,7 +69,7 @@ export async function emailedLink(
 
 /**
  * Full new-owner journey through the real UI: sign up, confirm by email, enrol an authenticator
- * app, land on the onboarding placeholder. Returns the account's secret so a later test can log in.
+ * app, land on the onboarding wizard. Returns the account's secret so a later test can log in.
  */
 export async function signUpAndEnrol(page: Page, email: string, businessName: string) {
   await page.goto("/signup");
@@ -94,13 +94,23 @@ export async function signUpAndEnrol(page: Page, email: string, businessName: st
   await page.getByRole("button", { name: "Turn on two-step verification" }).click();
 
   await expect(page).toHaveURL(/\/onboarding$/);
-  await expect(page.getByRole("heading", { name: "Welcome to Tillflow POS" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^Step 1 of 4\s*Your business$/ })).toBeVisible();
   return { secret };
 }
 
-/** From /onboarding to the dashboard; returns the org id from the URL. */
-export async function openDashboard(page: Page) {
-  await page.getByRole("link", { name: "Go to dashboard" }).click();
+/** Walks the onboarding wizard to the dashboard; returns the org id from the URL. */
+export async function openDashboard(
+  page: Page,
+  { type = "General / convenience", vat = "", tills = "1" } = {},
+) {
+  if (vat) await page.getByLabel("VAT number (optional)").fill(vat);
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await page.getByText(type, { exact: true }).click();
+  await expect(page.getByRole("radio", { name: type })).toBeChecked();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await page.getByLabel("Number of tills").fill(tills);
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await page.getByRole("button", { name: "Finish setup" }).click();
   await expect(page).toHaveURL(/\/o\/[0-9a-f-]{36}\/dashboard$/);
   return /\/o\/([0-9a-f-]{36})\//.exec(page.url())![1]!;
 }

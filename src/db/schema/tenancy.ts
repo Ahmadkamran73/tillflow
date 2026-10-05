@@ -36,11 +36,20 @@ export const organisations = pgTable(
     country: text("country").notNull().default("IE"),
     plan: text("plan").notNull().default("standard"),
     trialEndsAt: timestamp("trial_ends_at", { withTimezone: true }),
+    /** Set once by public.complete_onboarding; never client-writable. */
+    onboardedAt: timestamp("onboarded_at", { withTimezone: true }),
     status: orgStatus("status").notNull().default("trial"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [check("organisations_country_len", sql`char_length(${t.country}) = 2`)],
+  (t) => [
+    check("organisations_country_len", sql`char_length(${t.country}) = 2`),
+    // Shape only; the mod-23 check digit is verified in src/lib/onboarding.ts.
+    check(
+      "organisations_vat_number_ie",
+      sql`${t.vatNumber} is null or ${t.vatNumber} ~ '^IE([0-9]{7}[A-W][A-IW]?|[0-9][A-Z+*][0-9]{5}[A-W])$'`,
+    ),
+  ],
 );
 
 /**

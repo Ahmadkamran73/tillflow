@@ -64,6 +64,27 @@
       "when": 1790862751413,
       "tag": "0008_ops_least_privilege_role",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1791035557871,
+      "tag": "0009_categories_and_onboarded_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1791035574374,
+      "tag": "0010_categories_rls_and_onboarding",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1791037438769,
+      "tag": "0011_organisations_vat_number_check",
+      "breakpoints": true
     }
   ]
 }

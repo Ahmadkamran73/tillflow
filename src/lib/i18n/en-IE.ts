@@ -99,6 +99,68 @@ export const enIE = {
   "common.openDialog": "Open dialog",
   "common.dialogTitle": "Delete this product?",
   "common.dialogBody": "Past sales keep their lines. The product leaves the register.",
+
+  "businessType.general": "General / convenience",
+  "businessType.general.description": "Scan-first till, age checks, Re-turn deposits and bag levy.",
+  "businessType.electronics": "Electronics & phones",
+  "businessType.electronics.description":
+    "Serial and IMEI on every sale, warranty dates on the receipt.",
+  "businessType.clothing": "Clothing & footwear",
+  "businessType.clothing.description": "Size and colour variants, exchanges and gift receipts.",
+  "businessType.cafe": "Café (counter service)",
+  "businessType.cafe.description":
+    "Quick counter screen, modifiers, allergens, eat-in or take-away.",
+  "businessType.restaurant": "Restaurant (table service)",
+  "businessType.restaurant.description":
+    "Table plan with open tabs, courses, split bills and service charge.",
+
+  "onboarding.title": "Set up your business",
+  "onboarding.step": "Step {n} of {total}",
+  "onboarding.back": "Back",
+  "onboarding.next": "Next",
+  "onboarding.finish": "Finish setup",
+  "onboarding.wait": "Please wait…",
+  "onboarding.error": "We could not finish setting up. Please try again.",
+  "onboarding.business": "Your business",
+  "onboarding.name": "Business name",
+  "onboarding.vat": "VAT number (optional)",
+  "onboarding.vatHint": "For example IE1234567T. Leave it blank if you are not VAT-registered.",
+  "onboarding.type": "What kind of business is it?",
+  "onboarding.typeHint":
+    "This switches on the right product fields and till screens. You can change it later in Settings.",
+  "onboarding.tills": "How many tills?",
+  "onboarding.tillsLabel": "Number of tills",
+  "onboarding.tillsHint": "Each till is a tablet or computer you pair later. From 1 to 20.",
+  "onboarding.products": "Your products",
+  "onboarding.import": "Import products now",
+  "onboarding.importHint":
+    "Bring a spreadsheet from your old till. Import is on its way; we will take you to your dashboard for now.",
+  "onboarding.empty": "Start empty",
+  "onboarding.emptyHint": "Add products one by one when you are ready.",
+
+  "dashboard.categories": "Your categories",
+  "dashboard.categoriesEmpty": "No categories yet.",
+  "tile.salesToday": "Sales today",
+  "tile.transactions": "Transactions",
+  "tile.vatCollected": "VAT collected",
+  "tile.fastestMovers": "Fastest movers",
+  "tile.lowStock": "Low stock",
+  "tile.salesByBrand": "Sales by brand",
+  "tile.serialsSold": "Serials sold",
+  "tile.salesBySizeColour": "Sales by size and colour",
+  "tile.salesByHour": "Sales by hour",
+  "tile.tips": "Tips",
+  "tile.covers": "Covers",
+  "tile.spendPerCover": "Spend per cover",
+  "tile.empty": "No data yet",
+
+  "settings.title": "Settings",
+  "settings.businessType": "Business type",
+  "settings.businessTypeBody":
+    "Changing the type only switches presets. Your products, categories and sales are kept, and any missing starter categories are added.",
+  "settings.save": "Save business type",
+  "settings.saved": "Business type saved.",
+  "settings.error": "We could not save the business type. Please try again.",
 } as const;
 
 export type MessageKey = keyof typeof enIE;
