@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { notFound } from "next/navigation";
+import { buttonVariants } from "@/components/ui/button";
 import { presets } from "@/config/business-type-presets";
 import { requireRole } from "@/lib/auth";
 import { t } from "@/lib/i18n";
@@ -16,7 +18,12 @@ export default async function DashboardPage({ params }: { params: Promise<{ orgI
 
   return (
     <section className="flex max-w-5xl flex-col gap-6">
-      <h1 className="text-title font-semibold tracking-tight">{t("dashboard.title")}</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-title font-semibold tracking-tight">{t("dashboard.title")}</h1>
+        <Link href={`/register/${orgId}`} className={buttonVariants({ size: "touch" })}>
+          {t("dashboard.openRegister")}
+        </Link>
+      </div>
 
       <dl className="surface-panel divide-border grid divide-y sm:grid-cols-3 sm:divide-x sm:divide-y-0">
         {tiles.map((tile) => (
