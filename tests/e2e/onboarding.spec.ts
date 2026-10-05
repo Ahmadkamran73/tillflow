@@ -31,6 +31,8 @@ test("a wrong VAT number or missing type stops the wizard on that step", async (
 
   await page.getByLabel("VAT number (optional)").fill("");
   await page.getByRole("button", { name: "Next", exact: true }).click();
+  // Wait for step 2 before the next click, or it can land while step 1 is still on screen.
+  await expect(page.getByRole("heading", { name: /^Step 2 of 4/ })).toBeVisible();
   await page.getByRole("button", { name: "Next", exact: true }).click();
   await expect(page.getByText("Choose a business type.")).toBeVisible();
 });
