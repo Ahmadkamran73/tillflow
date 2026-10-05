@@ -9,6 +9,8 @@ import type { Feed } from "./feed";
 
 export type CatalogData = {
   org: Feed["org"] | undefined;
+  registers: Feed["registers"];
+  registerId: string | undefined;
   taxRates: RateRow[];
   products: Feed["products"];
   variants: Feed["variants"];
@@ -40,6 +42,8 @@ export function useCatalog(db: RegisterDb | null): CatalogData | null {
         modifiers,
         productGroups,
         parked,
+        registers,
+        registerId,
       ] = await Promise.all([
         db.meta.get("org"),
         db.meta.get("taxRates"),
@@ -50,9 +54,13 @@ export function useCatalog(db: RegisterDb | null): CatalogData | null {
         db.modifiers.toArray(),
         db.productGroups.toArray(),
         db.parked.orderBy("savedAt").toArray(),
+        db.meta.get("registers"),
+        db.meta.get("registerId"),
       ]);
       return {
         org: org?.value as Feed["org"] | undefined,
+        registers: (registers?.value as Feed["registers"] | undefined) ?? [],
+        registerId: registerId?.value as string | undefined,
         taxRates: (taxRates?.value as RateRow[] | undefined) ?? [],
         products,
         variants,

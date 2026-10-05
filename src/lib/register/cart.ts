@@ -4,6 +4,7 @@ import {
   type BasketInput,
   type Discount,
   type RateRow,
+  type ServiceMode,
   type TaxCategory,
 } from "@/lib/money";
 import type { Preset } from "@/config/business-type-presets";
@@ -24,10 +25,18 @@ export type CartLine = {
   /** Re-turn deposit per unit, rung up as its own non-VAT line. */
   depositCents: number;
   serial?: string;
+  /** Electronics: months of warranty, for the end date on the receipt. */
+  warrantyMonths?: number;
   discount?: Discount;
 };
 
-export type Cart = { lines: CartLine[]; discount?: Discount; ageChecked: boolean };
+export type Cart = {
+  lines: CartLine[];
+  discount?: Discount;
+  ageChecked: boolean;
+  /** Cafes and restaurants: eat-in (default) or take-away, which can change the VAT rate. */
+  mode?: ServiceMode;
+};
 
 export const emptyCart: Cart = { lines: [], ageChecked: false };
 
@@ -38,6 +47,7 @@ export type CartAction =
   | { type: "lineDiscount"; id: string; discount: Discount | undefined }
   | { type: "basketDiscount"; discount: Discount | undefined }
   | { type: "ageChecked" }
+  | { type: "mode"; mode: ServiceMode }
   | { type: "stripAmountDiscounts" }
   | { type: "load"; cart: Cart };
 
@@ -81,6 +91,8 @@ export function cartReducer(cart: Cart, a: CartAction): Cart {
       };
     case "basketDiscount":
       return { ...cart, discount: a.discount };
+    case "mode":
+      return { ...cart, mode: a.mode };
     case "ageChecked":
       return { ...cart, ageChecked: true };
     case "stripAmountDiscounts": {
@@ -133,7 +145,7 @@ export function priceCart(
   });
   const basket = calculateBasket({
     ...ctx,
-    mode: "eat_in",
+    mode: cart.mode ?? "eat_in",
     tender,
     basketDiscount: cart.discount,
     lines,
@@ -180,3 +192,14 @@ export const depositOf = (attributes: Record<string, unknown>) =>
   typeof attributes.depositCents === "number" && Number.isInteger(attributes.depositCents)
     ? Math.max(0, attributes.depositCents)
     : 0;
+
+/** Warranty months stored on an electronics variant, 0 for every other type. */
+export const warrantyOf = (attributes: Record<string, unknown>) =>
+  typeof attributes.warrantyMonths === "number" && Number.isInteger(attributes.warrantyMonths)
+    ? Math.max(0, attributes.warrantyMonths)
+    : 0;
+
+/** The variant's own name, or "size / colour" for a clothing matrix row. */
+export const variantLabel = (v: { name: string; attributes: Record<string, unknown> }) =>
+  v.name ||
+  [v.attributes.size, v.attributes.colour].filter((s) => typeof s === "string").join(" / ");

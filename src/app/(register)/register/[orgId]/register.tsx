@@ -5,6 +5,7 @@ import {
   MinusIcon,
   PauseIcon,
   PercentIcon,
+  PrinterIcon,
   PlusIcon,
   SearchIcon,
   Trash2Icon,
@@ -17,35 +18,56 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { presets } from "@/config/business-type-presets";
 import { t } from "@/lib/i18n";
-import { formatCents, localDate, type Discount } from "@/lib/money";
+import { changeDue, formatCents, localDate, type Discount } from "@/lib/money";
 import {
   cartReducer,
   depositOf,
+  warrantyOf,
   emptyCart,
   lineTotal,
   priceCart,
   promptsFor,
   safePriceCart,
   unitWithModifiers,
+  variantLabel,
   type Cart,
   type CartLine,
   type LineModifier,
   type Prompt,
 } from "@/lib/register/cart";
-import { registerDb, type RegisterDb } from "@/lib/register/db";
+import { registerDb, type LocalSale, type RegisterDb } from "@/lib/register/db";
+import type { InvoiceInput } from "@/lib/register/invoice";
+import {
+  defaultPrinter,
+  loadPrinter,
+  printLines,
+  savePrinter,
+  type PrinterSettings,
+} from "@/lib/register/print";
+import { buildReceipt, receiptLabels, receiptText } from "@/lib/register/receipt";
+import { completeSale, setInvoice } from "@/lib/register/sale";
 import type { FeedProduct, FeedVariant } from "@/lib/register/feed";
 import { useCatalog, useCatalogRefresh } from "@/lib/register/use-catalog";
 import { useScanner } from "@/lib/register/use-scanner";
+import { PrintArea } from "@/components/register/print-area";
+import { emailReceipt } from "./actions";
 import {
   AgeCheck,
   DiscountDialog,
   ModifierPicker,
   ParkedList,
   SerialPrompt,
-  TenderDialog,
   VariantPicker,
   type ModifierGroupView,
 } from "./dialogs";
+import {
+  DoneDialog,
+  EmailDialog,
+  InvoiceDialog,
+  PrinterDialog,
+  TenderDialog,
+  TillDialog,
+} from "./sale-dialogs";
 
 type Flow = {
   product: FeedProduct;
@@ -61,11 +83,12 @@ type Dialog =
   | { kind: "flow"; flow: Flow }
   | { kind: "discount"; target: "basket" | string }
   | { kind: "parked" }
-  | { kind: "tender"; done: boolean };
-
-const variantLabel = (v: FeedVariant) =>
-  v.name ||
-  [v.attributes.size, v.attributes.colour].filter((s) => typeof s === "string").join(" / ");
+  | { kind: "tender" }
+  | { kind: "till" }
+  | { kind: "printer" }
+  | { kind: "done"; sale: LocalSale; status: string }
+  | { kind: "email"; sale: LocalSale; status: string; sending: boolean }
+  | { kind: "invoice"; sale: LocalSale };
 
 const ratePercent = (bp: number) => `${bp / 100}%`; // display only
 
@@ -83,6 +106,13 @@ export function Register({ orgId }: { orgId: string }) {
   const [query, setQuery] = useState("");
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [message, setMessage] = useState({ text: "", n: 0 });
+  const [printer, setPrinter] = useState<PrinterSettings>(defaultPrinter);
+  const [printJob, setPrintJob] = useState<{ n: number; lines: string[] } | null>(null);
+
+  useEffect(() => {
+    if (!db) return;
+    void loadPrinter(db).then(setPrinter);
+  }, [db]);
 
   const preset = data?.org ? presets[data.org.businessType] : null;
 
@@ -128,17 +158,25 @@ export function Register({ orgId }: { orgId: string }) {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [index, query, categoryId]);
 
+  // The shop-local day, re-read every minute so a till left open past midnight (or a rate
+  // change) never prices with yesterday's rates.
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
+
   // Prices. The money library does all the maths; a missing VAT rate is shown, not guessed.
   const ctx = useMemo(
     () =>
       data?.org
         ? {
             country: data.org.country,
-            date: localDate(new Date(), data.org.timezone),
+            date: localDate(now, data.org.timezone),
             rates: data.taxRates,
           }
         : null,
-    [data],
+    [data, now],
   );
   const pricing = useMemo(() => {
     if (!ctx) return null;
@@ -179,6 +217,7 @@ export function Register({ orgId }: { orgId: string }) {
       takeawayTaxCategory: product.takeawayTaxCategory,
       depositCents: depositOf(variant.attributes),
       serial: flow.serial,
+      warrantyMonths: warrantyOf(variant.attributes),
     };
     dispatch({ type: "add", line });
     say(t("register.added", { name: line.name }));
@@ -240,6 +279,80 @@ export function Register({ orgId }: { orgId: string }) {
     });
     dispatch({ type: "load", cart: sale.cart });
     setDialog(null);
+  }
+
+  // The till this device is: the one it picked, or the shop's only till.
+  const tills = data?.registers ?? [];
+  const till =
+    tills.find((r) => r.id === data?.registerId) ?? (tills.length === 1 ? tills[0] : undefined);
+  const tillName = (id: string) => tills.find((r) => r.id === id)?.name ?? "Till";
+
+  /** Prices a finished sale with the VAT rates of the day it was sold, never today's. */
+  const priceSale = (sale: LocalSale) =>
+    priceCart(sale.cart, {
+      ...ctx!,
+      date: localDate(new Date(sale.completedAt), data!.org!.timezone),
+    });
+
+  function receiptOf(sale: LocalSale, asInvoice = false) {
+    if (!ctx || !data?.org || !preset) return null;
+    return buildReceipt({
+      sale,
+      priced: priceSale(sale),
+      registerName: tillName(sale.registerId),
+      header: data.org,
+      options: preset.receipt,
+      asInvoice,
+    });
+  }
+
+  /** Prints on the configured printer; browser mode or a failure opens the browser print window. */
+  async function print(
+    sale: LocalSale,
+    opts: { asInvoice?: boolean; kick?: boolean } = {},
+  ): Promise<string> {
+    const receipt = receiptOf(sale, opts.asInvoice);
+    if (!receipt) return "";
+    const lines = receiptText(receipt, printer.cols, receiptLabels());
+    const result = await printLines(printer, lines, opts.kick ?? false);
+    if (result === "printed") return t("register.printed");
+    setPrintJob((j) => ({ n: (j?.n ?? 0) + 1, lines }));
+    return result === "failed" ? t("register.printFallback") : t("register.printed");
+  }
+
+  async function tender(tenderedCents: number) {
+    if (!db || !till || !priced || !ctx || !data?.org) return;
+    // The sale is stamped with the real time: if the day changed since the cart was priced, the
+    // amount may differ, so show the new amount instead of taking cash against the old one.
+    const nowDate = new Date();
+    const today = localDate(nowDate, data.org.timezone);
+    if (today !== ctx.date) {
+      setNow(nowDate);
+      setDialog(null);
+      say(t("register.ratesChanged"));
+      return;
+    }
+    let sale: LocalSale;
+    try {
+      sale = await completeSale(db, { registerId: till.id, cart, tenderedCents });
+    } catch {
+      say(t("register.saveFailed"));
+      return;
+    }
+    // A cash sale: the drawer opens with the receipt.
+    const status = `${t("register.saved")} ${await print(sale, { kick: true })}`;
+    setDialog({ kind: "done", sale, status });
+    say(status);
+  }
+
+  function newSale() {
+    dispatch({ type: "load", cart: emptyCart });
+    setDialog(null);
+    focusCart();
+  }
+
+  function pay() {
+    setDialog(till ? { kind: "tender" } : { kind: "till" });
   }
 
   const itemCount = cart.lines.reduce((n, l) => n + l.qty, 0);
@@ -357,16 +470,125 @@ export function Register({ orgId }: { orgId: string }) {
           <TenderDialog
             due={due}
             rounding={priced?.basket.cashRounding ?? 0}
-            done={dialog.done}
             onClose={close}
-            onExact={() => setDialog({ kind: "tender", done: true })}
-            onNewSale={() => {
-              dispatch({ type: "load", cart: emptyCart });
-              close();
-              focusCart();
+            onTender={tender}
+          />
+        );
+      case "till":
+        return (
+          <TillDialog
+            tills={tills}
+            onClose={close}
+            onPick={async (id) => {
+              await db?.meta.put({ key: "registerId", value: id });
+              setDialog({ kind: "tender" });
             }}
           />
         );
+      case "printer":
+        return (
+          <PrinterDialog
+            value={printer}
+            onClose={close}
+            onSave={async (p) => {
+              if (db) await savePrinter(db, p);
+              setPrinter(p);
+              close();
+            }}
+            onTest={async (p) => {
+              const lines = ["Tillflow", "Test print", "EUR \u20ac"];
+              if ((await printLines(p, lines, false)) === "printed") say(t("register.printed"));
+              else {
+                setPrintJob((j) => ({ n: (j?.n ?? 0) + 1, lines }));
+                say(t("register.printFallback"));
+              }
+            }}
+          />
+        );
+      case "done": {
+        const { sale } = dialog;
+        const change = ctx ? changeDue(sale.tenderedCents, priceSale(sale).basket.amountDue) : 0;
+        return (
+          <DoneDialog
+            change={change}
+            status={dialog.status}
+            invoiceIssued={!!sale.invoice}
+            onNewSale={newSale}
+            onPrint={async () =>
+              setDialog({ ...dialog, status: await print(sale, { asInvoice: !!sale.invoice }) })
+            }
+            onEmail={() => setDialog({ kind: "email", sale, status: "", sending: false })}
+            onInvoice={() => setDialog({ kind: "invoice", sale })}
+          />
+        );
+      }
+      case "email": {
+        const { sale } = dialog;
+        return (
+          <EmailDialog
+            status={dialog.status}
+            sending={dialog.sending}
+            onClose={() => setDialog({ kind: "done", sale, status: "" })}
+            onSend={async (to) => {
+              if (!ctx) return;
+              if (!navigator.onLine)
+                return setDialog({ ...dialog, status: t("register.emailOffline") });
+              setDialog({ ...dialog, sending: true, status: "" });
+              let ok = false;
+              try {
+                const r = await emailReceipt(orgId, {
+                  lines: sale.cart.lines.map((l) => ({
+                    variantId: l.variantId,
+                    qty: l.qty,
+                    modifierIds: l.modifiers.map((m) => m.id),
+                    serial: l.serial,
+                    discount: l.discount,
+                  })),
+                  basketDiscount: sale.cart.discount,
+                  mode: sale.cart.mode ?? "eat_in",
+                  expectedDueCents: priceSale(sale).basket.amountDue,
+                  tenderedCents: sale.tenderedCents,
+                  receiptSeq: sale.receiptSeq,
+                  registerName: tillName(sale.registerId),
+                  completedAt: sale.completedAt,
+                  to,
+                  invoice: sale.invoice,
+                });
+                ok = r.ok;
+              } catch {
+                ok = false; // offline, or the server could not be reached
+              }
+              if (ok) setDialog({ kind: "done", sale, status: t("register.emailSent") });
+              else
+                setDialog({
+                  kind: "email",
+                  sale,
+                  sending: false,
+                  status: t("register.emailFailed"),
+                });
+            }}
+          />
+        );
+      }
+      case "invoice": {
+        const { sale } = dialog;
+        return (
+          <InvoiceDialog
+            shopHasVat={!!data?.org?.vatNumber}
+            initial={sale.invoice}
+            onClose={() => setDialog({ kind: "done", sale, status: "" })}
+            onDone={async (invoice: InvoiceInput) => {
+              if (db) await setInvoice(db, sale.id, invoice);
+              const issued = { ...sale, invoice };
+              setDialog({
+                kind: "done",
+                sale: issued,
+                status: await print(issued, { asInvoice: true }),
+              });
+            }}
+          />
+        );
+      }
     }
   }
 
@@ -378,7 +600,16 @@ export function Register({ orgId }: { orgId: string }) {
         header={
           <>
             <h1 className="text-heading font-semibold">{t("register.title")}</h1>
-            <SyncStatusPill state={pill} waiting={0} className="ml-auto" />
+            <Button
+              size="touch"
+              variant="outline"
+              className="ml-auto"
+              onClick={() => setDialog({ kind: "printer" })}
+            >
+              <PrinterIcon aria-hidden /> {t("register.printer")}:{" "}
+              {t(`register.printer.${printer.type}`)}
+            </Button>
+            <SyncStatusPill state={pill} waiting={0} />
           </>
         }
         tiles={
@@ -493,6 +724,29 @@ export function Register({ orgId }: { orgId: string }) {
             >
               {t("register.cart")}
             </h2>
+            {preset?.register.eatInToggle && (
+              <div
+                role="group"
+                aria-label={t("register.serviceMode")}
+                className="mb-3 grid grid-cols-2 gap-2"
+              >
+                {(["eat_in", "take_away"] as const).map((m) => {
+                  const on = (cart.mode ?? "eat_in") === m;
+                  return (
+                    <Button
+                      key={m}
+                      size="touch"
+                      variant={on ? "default" : "outline"}
+                      aria-pressed={on}
+                      onClick={() => dispatch({ type: "mode", mode: m })}
+                    >
+                      {on && <CheckIcon aria-hidden />}
+                      {t(m === "eat_in" ? "register.eatIn" : "register.takeAway")}
+                    </Button>
+                  );
+                })}
+              </div>
+            )}
             <div className="min-h-0 flex-1 overflow-y-auto">
               {cart.lines.length === 0 ? (
                 <p className="text-muted-foreground">{t("register.cartEmpty")}</p>
@@ -634,12 +888,7 @@ export function Register({ orgId }: { orgId: string }) {
                   <PercentIcon aria-hidden /> {t("register.discount")}
                 </Button>
               </div>
-              <Button
-                size="pay"
-                className="hidden lg:inline-flex"
-                disabled={!canPay}
-                onClick={() => setDialog({ kind: "tender", done: false })}
-              >
+              <Button size="pay" className="hidden lg:inline-flex" disabled={!canPay} onClick={pay}>
                 {payLabel}
               </Button>
             </div>
@@ -648,18 +897,14 @@ export function Register({ orgId }: { orgId: string }) {
         bar={
           <>
             <p className="font-display text-title font-semibold tabular-nums">{formatCents(due)}</p>
-            <Button
-              size="pay"
-              className="flex-1"
-              disabled={!canPay}
-              onClick={() => setDialog({ kind: "tender", done: false })}
-            >
+            <Button size="pay" className="flex-1" disabled={!canPay} onClick={pay}>
               {payLabel}
             </Button>
           </>
         }
       />
       {renderDialog()}
+      <PrintArea job={printJob} cols={printer.cols} />
     </>
   );
 }

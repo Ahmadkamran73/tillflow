@@ -5,6 +5,8 @@ import { createSupabaseServerClient } from "@/lib/auth";
 
 const orgRow = z.object({
   name: z.string(),
+  legal_name: z.string().nullable(),
+  vat_number: z.string().nullable(),
   business_type: z.enum(businessTypes),
   onboarded_at: z.string().nullable(),
   vat_rates_confirmed_at: z.string().nullable(),
@@ -15,13 +17,15 @@ export async function getOrganisation(orgId: string) {
   const supabase = await createSupabaseServerClient();
   const { data } = await supabase
     .from("organisations")
-    .select("name, business_type, onboarded_at, vat_rates_confirmed_at")
+    .select("name, legal_name, vat_number, business_type, onboarded_at, vat_rates_confirmed_at")
     .eq("id", orgId)
     .maybeSingle();
   if (!data) return null;
   const row = orgRow.parse(data);
   return {
     name: row.name,
+    legalName: row.legal_name,
+    vatNumber: row.vat_number,
     businessType: row.business_type,
     onboardedAt: row.onboarded_at,
     vatRatesConfirmedAt: row.vat_rates_confirmed_at,

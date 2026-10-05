@@ -82,6 +82,10 @@ export function applyDiscount(base: number, discount: Discount): number {
   return base < 0 ? base + amount : base - amount;
 }
 
+/** What a line lost to line and basket discounts: its full price less what it came to. */
+export const lineDiscountOf = (unitPrice: number, qty: number, gross: number) =>
+  lineGross(unitPrice, qty) - assertInt(gross, "gross");
+
 const lineGross = (unitPrice: number, qty: number) =>
   assertInt(assertInt(unitPrice, "unitPrice") * assertInt(qty, "qty"), "line gross");
 
