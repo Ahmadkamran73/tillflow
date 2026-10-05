@@ -33,7 +33,9 @@ describe("business-type presets", () => {
   });
 
   it("product fields match the type", () => {
-    expect(presets.electronics.productFields).toEqual(expect.arrayContaining(["imei", "warranty"]));
+    expect(presets.electronics.productFields).toEqual(
+      expect.arrayContaining(["serial", "warranty"]),
+    );
     expect(presets.clothing.productFields).toContain("variantMatrix");
     expect(presets.cafe.productFields).toContain("allergens");
     expect(presets.general.productFields).toContain("deposit");
@@ -44,16 +46,18 @@ describe("variant attributes", () => {
   it("accepts valid attributes per type", () => {
     expect(variantAttributes.general.parse({})).toEqual({ ageRestricted: false, depositCents: 0 });
     expect(
-      variantAttributes.electronics.parse({ imei: "356938035643809", warrantyMonths: 24 }),
+      variantAttributes.electronics.parse({ serialRequired: true, warrantyMonths: 24 }),
     ).toMatchObject({ warrantyMonths: 24 });
     expect(variantAttributes.clothing.parse({ size: "M", colour: "Navy" })).toBeTruthy();
     expect(variantAttributes.cafe.parse({ allergens: ["milk", "nuts"] }).allergens).toHaveLength(2);
     expect(variantAttributes.restaurant.parse({ course: "main" }).course).toBe("main");
   });
 
-  it("refuses unknown keys, bad IMEIs, missing sizes and unknown allergens", () => {
+  it("refuses unknown keys, per-unit serial/IMEI, missing sizes and unknown allergens", () => {
     expect(variantAttributes.general.safeParse({ imei: "1" }).success).toBe(false);
-    expect(variantAttributes.electronics.safeParse({ imei: "12345" }).success).toBe(false);
+    expect(variantAttributes.electronics.safeParse({ imei: "356938035643809" }).success).toBe(
+      false,
+    );
     expect(variantAttributes.clothing.safeParse({ colour: "Red" }).success).toBe(false);
     expect(variantAttributes.cafe.safeParse({ allergens: ["chocolate"] }).success).toBe(false);
     expect(variantAttributes.general.safeParse({ depositCents: 1.5 }).success).toBe(false);

@@ -9,6 +9,7 @@ export default defineConfig({
   fullyParallel: true,
   reporter: process.env.CI ? [["list"]] : "list",
   globalTimeout: process.env.CI ? 10 * 60_000 : undefined,
+  expect: { timeout: 10_000 }, // the dev server compiles routes on first hit
   use: { baseURL, trace: "on-first-retry" },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {

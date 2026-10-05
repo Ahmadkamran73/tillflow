@@ -22,6 +22,14 @@ export default async function SettingsPage({ params }: { params: Promise<{ orgId
               {t("settings.businessType")}
             </Link>
           </li>
+          <li>
+            <Link
+              href={`/o/${orgId}/settings/vat`}
+              className="flex min-h-12 items-center px-5 py-3 font-medium underline-offset-4 hover:underline"
+            >
+              {t("settings.vat")}
+            </Link>
+          </li>
         </ul>
       ) : null}
     </section>

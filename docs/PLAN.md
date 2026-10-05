@@ -171,6 +171,7 @@ Every business table carries `org_id`; RLS allows a row only when `org_id` match
 | `tax_rates`                     | country, code, rate_bp, valid_from, valid_to                                                                                              | 2300 = 23%; effective-dated                                                              |
 | `products` / `variants`         | sku, barcode, name, price_incl_vat, tax_category, cost, track_stock, attributes (JSONB)                                                   | VAT-inclusive prices                                                                     |
 | `categories`                    | name, parent_id, colour, sort                                                                                                             | Register tiles                                                                           |
+| `product_modifier_groups`       | product_id, group_id, sort                                                                                                                | Which groups a product offers                                                            |
 | `modifier_groups` / `modifiers` | name, min/max choices, price_delta                                                                                                        | Cafés & restaurants                                                                      |
 | `tables` / `tabs`               | floor, seats, status; tab lines, course                                                                                                   | Restaurants                                                                              |
 | `stock_movements`               | variant_id, location_id, qty_delta, reason, ref_id                                                                                        | Append-only ledger                                                                       |
@@ -240,7 +241,7 @@ Not legal advice — have an Irish accountant and solicitor review before launch
 | Consumer law            | Consumer Rights Act 2022; VAT-inclusive prices                                                                                                                                                       | Refund flows with reasons                                                                           |
 | Food allergens          | Allergen info for the 14 regulated allergens on non-prepacked food (FSAI)                                                                                                                            | Allergen tags per item on register, menus, tickets, receipts                                        |
 
-Open: confirm current Re-turn deposit amounts/VAT treatment and any Budget 2027 rate changes before go-live.
+Confirmed 2026-10-05: hot take-away food and tea/coffee (on or off premises) 9%; cold take-away food 0%; alcohol, soft drinks and bottled water 23%; Re-turn deposit (15c for 150ml-500ml, 25c above 500ml up to 3L) sits outside VAT (s.92A VATCA 2010). Open: any Budget 2027 rate changes before go-live, and accountant sign-off.
 
 ---
 

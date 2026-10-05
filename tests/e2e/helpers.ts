@@ -120,3 +120,14 @@ export async function signOut(page: Page) {
   await page.getByRole("button", { name: "Account menu" }).click();
   await page.getByRole("menuitem", { name: "Sign out" }).click();
 }
+
+/**
+ * Waits until React has hydrated the page's form. Typing into a controlled input before that is
+ * lost when hydration resets it to its initial state (slow on a cold dev server).
+ */
+export async function hydrated(page: Page) {
+  await page.waitForFunction(() => {
+    const form = document.querySelector("main form, form");
+    return !!form && Object.keys(form).some((k) => k.startsWith("__reactProps$"));
+  });
+}

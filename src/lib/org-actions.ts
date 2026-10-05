@@ -55,6 +55,24 @@ export async function completeOnboardingAction(
   redirect(`/o/${orgId.data}/dashboard`);
 }
 
+export async function confirmVatRatesAction(formData: FormData): Promise<void> {
+  const orgId = z.uuid().safeParse(str(formData, "orgId"));
+  if (!orgId.success) redirect("/o");
+  await requireRole("owner", orgId.data);
+  const page = `/o/${orgId.data}/settings/vat`;
+
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase.rpc("confirm_vat_rates", {
+    p_org_id: orgId.data,
+    p_audit_id: uuidv7(),
+  });
+  if (error) {
+    logger.error({ code: error.code }, "confirm_vat_rates failed");
+    redirect(`${page}?result=error`);
+  }
+  redirect(`${page}?result=saved`);
+}
+
 export async function setBusinessTypeAction(formData: FormData): Promise<void> {
   const orgId = z.uuid().safeParse(str(formData, "orgId"));
   if (!orgId.success) redirect("/o");

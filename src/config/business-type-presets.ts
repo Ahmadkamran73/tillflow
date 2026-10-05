@@ -14,7 +14,6 @@ export type ProductField =
   | "deposit"
   | "bagLevy"
   | "serial"
-  | "imei"
   | "warranty"
   | "brand"
   | "model"
@@ -114,7 +113,7 @@ export const presets: Record<BusinessType, Preset> = {
     receipt: receiptOff,
   },
   electronics: {
-    productFields: ["barcode", "serial", "imei", "warranty", "brand", "model"],
+    productFields: ["barcode", "serial", "warranty", "brand", "model"],
     register: { ...registerOff, scanFirst: true, serialPrompt: true },
     starterCategories: [
       { name: "Phones", colour: "#2F6690" },
@@ -199,7 +198,6 @@ export const allergens = [
 
 const shortText = z.string().trim().min(1).max(60);
 const hospitality = {
-  modifierGroupIds: z.array(z.uuid()).max(20).default([]),
   allergens: z.array(z.enum(allergens)).max(allergens.length).default([]),
 };
 
@@ -210,11 +208,8 @@ export const variantAttributes = {
     depositCents: z.int().min(0).max(10_000).default(0),
   }),
   electronics: z.strictObject({
-    serial: shortText.optional(),
-    imei: z
-      .string()
-      .regex(/^\d{15}$/, "IMEI is 15 digits")
-      .optional(),
+    // Serial/IMEI is per unit: captured on the sale line, not stored per variant.
+    serialRequired: z.boolean().default(false),
     warrantyMonths: z.int().min(0).max(120).default(0),
     brand: shortText.optional(),
     model: shortText.optional(),

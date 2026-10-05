@@ -38,6 +38,9 @@ export const organisations = pgTable(
     trialEndsAt: timestamp("trial_ends_at", { withTimezone: true }),
     /** Set once by public.complete_onboarding; never client-writable. */
     onboardedAt: timestamp("onboarded_at", { withTimezone: true }),
+    /** Set by public.confirm_vat_rates (owner, audit-logged); never client-writable. */
+    vatRatesConfirmedAt: timestamp("vat_rates_confirmed_at", { withTimezone: true }),
+    vatRatesConfirmedBy: uuid("vat_rates_confirmed_by"),
     status: orgStatus("status").notNull().default("trial"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),

@@ -1,3 +1,5 @@
+import { catalogEnIE } from "./catalog-en-IE";
+
 /** Source language. Add a key here first; other locales may be partial and fall back to this. */
 export const enIE = {
   "app.name": "Tillflow POS",
@@ -161,6 +163,7 @@ export const enIE = {
   "settings.save": "Save business type",
   "settings.saved": "Business type saved.",
   "settings.error": "We could not save the business type. Please try again.",
+  ...catalogEnIE,
 } as const;
 
 export type MessageKey = keyof typeof enIE;
