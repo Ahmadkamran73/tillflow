@@ -1,4 +1,5 @@
 import { catalogEnIE } from "./catalog-en-IE";
+import { registerEnIE } from "./register-en-IE";
 
 /** Source language. Add a key here first; other locales may be partial and fall back to this. */
 export const enIE = {
@@ -164,6 +165,7 @@ export const enIE = {
   "settings.saved": "Business type saved.",
   "settings.error": "We could not save the business type. Please try again.",
   ...catalogEnIE,
+  ...registerEnIE,
 } as const;
 
 export type MessageKey = keyof typeof enIE;

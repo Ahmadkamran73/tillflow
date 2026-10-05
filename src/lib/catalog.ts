@@ -21,7 +21,6 @@ const variantRow = z.object({
   sku: z.string().nullable(),
   barcode: z.string().nullable(),
   price_incl_vat_cents: z.number(),
-  cost_cents: z.number().nullable(),
   attributes: z.record(z.string(), z.unknown()),
 });
 
@@ -117,7 +116,7 @@ export async function listProducts(
   const { data: vdata } = ids.length
     ? await supabase
         .from("variants")
-        .select("id, product_id, name, sku, barcode, price_incl_vat_cents, cost_cents, attributes")
+        .select("id, product_id, name, sku, barcode, price_incl_vat_cents, attributes")
         .eq("org_id", orgId)
         .is("archived_at", null)
         .in("product_id", ids)
@@ -171,11 +170,22 @@ export async function getProduct(orgId: string, productId: string) {
   const p = productRow.parse(data);
   const { data: vdata } = await supabase
     .from("variants")
-    .select("id, product_id, name, sku, barcode, price_incl_vat_cents, cost_cents, attributes")
+    .select("id, product_id, name, sku, barcode, price_incl_vat_cents, attributes")
     .eq("org_id", orgId)
     .eq("product_id", productId)
     .is("archived_at", null)
     .order("sort");
+  // Cost prices sit in their own table that only managers and owners can read (this page is theirs).
+  const { data: cdata } = await supabase
+    .from("variant_costs")
+    .select("variant_id, cost_cents")
+    .eq("org_id", orgId);
+  const costOf = new Map(
+    z
+      .array(z.object({ variant_id: uuid, cost_cents: z.number() }))
+      .parse(cdata ?? [])
+      .map((c) => [c.variant_id, c.cost_cents]),
+  );
   const { data: gdata } = await supabase
     .from("product_modifier_groups")
     .select("group_id")
@@ -201,7 +211,7 @@ export async function getProduct(orgId: string, productId: string) {
         sku: v.sku,
         barcode: v.barcode,
         priceInclVatCents: v.price_incl_vat_cents,
-        costCents: v.cost_cents,
+        costCents: costOf.get(v.id) ?? null,
         attributes: v.attributes,
       })),
   };

@@ -76,7 +76,6 @@ export const variants = pgTable(
     sku: text("sku"),
     barcode: text("barcode"),
     priceInclVatCents: integer("price_incl_vat_cents").notNull(),
-    costCents: integer("cost_cents"),
     attributes: jsonb("attributes")
       .notNull()
       .default(sql`'{}'::jsonb`),
@@ -97,14 +96,33 @@ export const variants = pgTable(
     index("variants_org_product_idx").on(t.orgId, t.productId),
     check("variants_price_range", sql`${t.priceInclVatCents} between 0 and 100000000`),
     check(
-      "variants_cost_range",
-      sql`${t.costCents} is null or ${t.costCents} between 0 and 100000000`,
-    ),
-    check(
       "variants_barcode_shape",
       sql`${t.barcode} is null or ${t.barcode} ~ '^[0-9A-Za-z-]{1,32}$'`,
     ),
     check("variants_sku_len", sql`${t.sku} is null or char_length(${t.sku}) between 1 and 40`),
+  ],
+);
+
+/**
+ * What a variant costs the shop. Its own table, not a column on `variants`, so that cashiers (who
+ * may read variants) cannot read it: only managers and owners can select from here.
+ */
+export const variantCosts = pgTable(
+  "variant_costs",
+  {
+    variantId: uuid("variant_id").primaryKey(),
+    orgId: orgCol(),
+    costCents: integer("cost_cents").notNull(),
+    updatedAt: updatedAtCol(),
+  },
+  (t) => [
+    foreignKey({
+      name: "variant_costs_org_variant_fk",
+      columns: [t.orgId, t.variantId],
+      foreignColumns: [variants.orgId, variants.id],
+    }),
+    index("variant_costs_org_idx").on(t.orgId),
+    check("variant_costs_range", sql`${t.costCents} between 0 and 100000000`),
   ],
 );
 

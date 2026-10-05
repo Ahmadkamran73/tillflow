@@ -99,6 +99,13 @@
       "when": 1791198009542,
       "tag": "0014_vat_rates_confirmed",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1791204575931,
+      "tag": "0016_variant_costs",
+      "breakpoints": true
     }
   ]
 }
