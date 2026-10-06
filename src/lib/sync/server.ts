@@ -19,13 +19,11 @@ export async function syncSales(rawSales: unknown[], ctx: SyncCtx): Promise<Sync
   const deps: SyncDeps = {
     now: () => new Date(),
     async existingIds(ids) {
-      const { data, error } = await supabase
-        .from("sales")
-        .select("id")
-        .eq("org_id", ctx.orgId)
-        .in("id", ids);
+      // Not a plain select: a cashier's RLS hides other cashiers' sales, but a replay must still be
+      // recognised as a duplicate.
+      const { data, error } = await supabase.rpc("sales_known", { p_org: ctx.orgId, p_ids: ids });
       if (error) throw new Error("Could not check existing sales");
-      return new Set((data ?? []).map((r) => r.id as string));
+      return new Set((data ?? []) as string[]);
     },
     async priceAt(sale, at) {
       const rows = await loadRowsAsOf(ctx.orgId, sale, at);

@@ -22,7 +22,7 @@ export async function getAttention(orgId: string): Promise<{ open: number; stale
       .select("name")
       .eq("org_id", orgId)
       .not("paired_at", "is", null)
-      .lt("last_seen_at", dayAgo),
+      .or(`last_seen_at.is.null,last_seen_at.lt.${dayAgo}`),
   ]);
   if (open.error || stale.error) throw new Error("Could not load sales needing attention");
   return { open: open.count ?? 0, staleTills: (stale.data ?? []).map((r) => r.name as string) };

@@ -204,7 +204,7 @@ describe("drainOutbox", () => {
     expect(await states()).toEqual(["pending", "pending"]);
   });
 
-  it("splits a batch the server calls too big, and flags a single unreadable sale", async () => {
+  it("splits a batch the server calls too big, and keeps a single refused sale pending", async () => {
     for (let i = 0; i < 4; i++) {
       await completeSale(db, {
         registerId: REG,
@@ -218,19 +218,17 @@ describe("drainOutbox", () => {
     const picky = (async (_u: string, init: RequestInit) => {
       const body = JSON.parse(init.body as string) as Call;
       sizes.push(body.sales.length);
-      if (body.sales.length > 1) return new Response("{}", { status: 413 });
-      return new Response("{}", { status: 400 });
+      return new Response("{}", { status: body.sales.length > 1 ? 413 : 400 });
     }) as unknown as typeof fetch;
     const res = await drainOutbox(db, ORG, { fetchFn: picky });
-    expect(res.state).toBe("idle");
+    expect(res.state).toBe("backoff");
     expect(sizes[0]).toBe(4);
-    expect(sizes).toContain(1);
-    // Each unreadable sale is marked rejected on the till, and still stored.
-    expect(await states()).toEqual(["rejected", "rejected", "rejected", "rejected"]);
-    expect(await db.sales.count()).toBe(4);
+    expect(sizes.at(-1)).toBe(1);
+    // The server never judged these sales, so none is marked rejected and none is lost.
+    expect(await states()).toEqual(["pending", "pending", "pending", "pending"]);
   });
 
-  it("sends a sale only once when two drains race (replays are the server's job)", async () => {
+  it("two overlapping drains leave every sale synced", async () => {
     await sell(2);
     const s = server();
     const [x, y] = await Promise.all([

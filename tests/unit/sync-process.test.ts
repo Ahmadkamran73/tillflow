@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { priceCart } from "@/lib/register/cart";
 import { buildServerCart, SaleError, type SaleRows } from "@/lib/register/sale-input";
 import { MAX_AGE_MS, processBatch, type SyncDeps } from "@/lib/sync/process";
@@ -237,5 +238,46 @@ describe("hostile ids and payloads", () => {
     }));
     await processBatch([sale({ lines, expectedDueCents: 1 })], ctx, d);
     expect(rejections[0]!.payload).toMatchObject({ truncated: true });
+  });
+});
+
+describe("errors that would repeat forever", () => {
+  it("a constraint or permission error from the database becomes a rejection, not a retry", async () => {
+    for (const code of ["23505", "23514", "22P02", "42501"]) {
+      const { d, rejections } = deps(() => 1234, {
+        recordSale: async () => {
+          throw Object.assign(new Error("db"), { code });
+        },
+      });
+      const [r] = await processBatch([sale()], ctx, d);
+      expect(r).toMatchObject({ status: "rejected", reason: "invalid" });
+      expect(rejections).toHaveLength(1);
+    }
+  });
+
+  it("a connection error still throws so the device retries", async () => {
+    const { d } = deps(() => 1234, {
+      recordSale: async () => {
+        throw Object.assign(new Error("db"), { code: "ECONNRESET" });
+      },
+    });
+    await expect(processBatch([sale()], ctx, d)).rejects.toThrow("db");
+  });
+
+  it("an unreadable catalogue row becomes a rejection", async () => {
+    const { d } = deps(() => 1234, {
+      priceAt: async () => {
+        throw new z.ZodError([]);
+      },
+    });
+    const [r] = await processBatch([sale()], ctx, d);
+    expect(r).toMatchObject({ status: "rejected", reason: "cannot_price" });
+  });
+
+  it("an invalid sale keeps what the till sent", async () => {
+    const { d, rejections } = deps(() => 1234);
+    const bad = { ...sale(), tenderedCents: -1 };
+    await processBatch([bad], ctx, d);
+    expect(rejections[0]!.payload).toMatchObject({ invalid: true, raw: { raw: { id: bad.id } } });
   });
 });

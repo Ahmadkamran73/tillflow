@@ -552,3 +552,27 @@ describe("stock ledger scoping for cashiers", () => {
       );
     }));
 });
+
+describe("sales_known (replay dedupe)", () => {
+  it("tells a cashier a sale already exists even when RLS hides it, but only inside their own shop", () =>
+    inWorld(async (ctx) => {
+      const { sql, world, as } = ctx;
+      const a = await seedProduct(ctx, world.a.orgId);
+      const b = await seedProduct(ctx, world.b.orgId);
+      const theirs = salePayload(world.a, a.vid, a.pid, { user_id: world.a.manager.userId });
+      const other = salePayload(world.b, b.vid, b.pid);
+      await record(ctx, theirs);
+      await record(ctx, other);
+      const known = (actor: Shop["owner"], org: string, ids: string[]) =>
+        as(actor, () => sql`select * from public.sales_known(${org}, ${ids}::uuid[])`);
+
+      expect(await as(world.a.cashier, () => sql`select 1 from sales`)).toHaveLength(0); // hidden
+      expect(
+        (await known(world.a.cashier, world.a.orgId, [theirs.sale.id])).map((r) => r.sales_known),
+      ).toEqual([theirs.sale.id]);
+      // Another shop's member learns nothing, whichever org they name.
+      expect(await known(world.b.cashier, world.a.orgId, [theirs.sale.id])).toHaveLength(0);
+      expect(await known(world.a.cashier, world.b.orgId, [other.sale.id])).toHaveLength(0);
+      expect(await known(world.a.cashier, world.a.orgId, [other.sale.id])).toHaveLength(0);
+    }));
+});

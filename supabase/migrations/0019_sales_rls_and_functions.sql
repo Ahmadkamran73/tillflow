@@ -205,6 +205,17 @@ $$;
 revoke all on function public.register_last_seqs(uuid) from public, anon;
 grant execute on function public.register_last_seqs(uuid) to authenticated;
 
+-- ---------------------------------------------------------------- membership helper for ops.*
+-- The ops functions run on the privileged connection (no JWT), so they are told which user is
+-- acting. This is the ONE place they look that user up in memberships.
+create function app.is_member(p_user uuid, p_org uuid) returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (select 1 from public.memberships m where m.org_id = p_org and m.user_id = p_user)
+$$;
+revoke all on function app.is_member(uuid, uuid) from public, anon, authenticated;
+grant execute on function app.is_member(uuid, uuid) to service_role, tillflow_ops;
+
 -- ---------------------------------------------------------------- ops.record_sale
 -- p: {sale:{id, org_id, register_id, user_id, receipt_seq, mode, completed_at, priced_as_of,
 --           items_total, vat, non_vat, cash_rounding, amount_due, client_due},
@@ -227,7 +238,7 @@ declare
   v_inserted int;
   v_existing public.sales%rowtype;
 begin
-  if not exists (select 1 from public.memberships m where m.org_id = v_org and m.user_id = v_user) then
+  if not app.is_member(v_user, v_org) then
     raise exception 'not a member' using errcode = '42501';
   end if;
   select r.location_id into v_loc from public.registers r where r.id = v_reg and r.org_id = v_org;
@@ -301,7 +312,7 @@ declare
   v_user uuid := (p ->> 'user_id')::uuid;
   v_inserted int;
 begin
-  if not exists (select 1 from public.memberships m where m.org_id = v_org and m.user_id = v_user) then
+  if not app.is_member(v_user, v_org) then
     raise exception 'not a member' using errcode = '42501';
   end if;
   if not exists (select 1 from public.registers r where r.id = v_reg and r.org_id = v_org) then
@@ -329,7 +340,7 @@ create function ops.touch_register(p_org uuid, p_register uuid, p_user uuid) ret
 language plpgsql volatile security definer set search_path = ''
 as $$
 begin
-  if not exists (select 1 from public.memberships m where m.org_id = p_org and m.user_id = p_user) then
+  if not app.is_member(p_user, p_org) then
     raise exception 'not a member' using errcode = '42501';
   end if;
   update public.registers set last_seen_at = now() where id = p_register and org_id = p_org;
@@ -375,3 +386,15 @@ end
 $$;
 revoke all on function public.resolve_sync_rejection(uuid, text, uuid) from public, anon;
 grant execute on function public.resolve_sync_rejection(uuid, text, uuid) to authenticated;
+
+-- Which of these sale ids are already recorded in the shop. SECURITY DEFINER because a cashier's
+-- RLS hides other cashiers' sales, but a replay of a queued sale must still be recognised as a
+-- duplicate. Answers only for the caller's own shop and returns nothing but ids they just sent.
+create function public.sales_known(p_org uuid, p_ids uuid[]) returns setof uuid
+language sql stable security definer set search_path = ''
+as $$
+  select s.id from public.sales s
+  where s.org_id = p_org and s.id = any (p_ids) and p_org in (select app.current_org_ids())
+$$;
+revoke all on function public.sales_known(uuid, uuid[]) from public, anon;
+grant execute on function public.sales_known(uuid, uuid[]) to authenticated;

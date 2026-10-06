@@ -50,6 +50,16 @@ const reasonOf = (e: SaleError): SyncReason => {
   }
 };
 
+/**
+ * A database error that will happen again for the same sale (constraint, bad value, permission),
+ * as opposed to the database being unreachable. The first kind must become a rejection a manager
+ * sees; if it were retried it would block every sale queued behind it.
+ */
+const isDeterministic = (e: unknown) =>
+  e instanceof z.ZodError ||
+  (typeof (e as { code?: unknown })?.code === "string" &&
+    /^(22|23|42501)/.test((e as { code: string }).code));
+
 type Rejection = { reason: SyncReason; detail: Record<string, unknown> };
 
 /** Prices a sale at each plausible catalogue moment and returns the first that matches the till. */
@@ -108,7 +118,7 @@ async function processOne(raw: unknown, ctx: SyncCtx, deps: SyncDeps): Promise<S
       user_id: ctx.userId,
       reason: "invalid",
       detail: {},
-      payload: { invalid: true },
+      payload: { invalid: true, raw: storable({ raw }) },
     });
     return { id, status: "rejected", reason: "invalid" };
   }
@@ -133,7 +143,16 @@ async function processOne(raw: unknown, ctx: SyncCtx, deps: SyncDeps): Promise<S
     return reject({ reason: "bad_time", detail: { ageDays: Math.round(age / DAY) } });
   }
 
-  const match = await priceMatching(sale, deps);
+  let match;
+  try {
+    match = await priceMatching(sale, deps);
+  } catch (e) {
+    if (!isDeterministic(e)) throw e;
+    return reject({
+      reason: "cannot_price",
+      detail: { message: "catalogue row could not be read" },
+    });
+  }
   if (!match.ok) return reject(match.rejection);
 
   const due = match.priced.basket.amountDue;
@@ -144,17 +163,24 @@ async function processOne(raw: unknown, ctx: SyncCtx, deps: SyncDeps): Promise<S
     });
   }
 
-  const outcome = await deps.recordSale(
-    buildSaleRecord({
-      orgId: ctx.orgId,
-      registerId: ctx.registerId,
-      userId: ctx.userId,
-      sale,
-      cart: match.cart,
-      priced: match.priced,
-      pricedAsOf: match.at,
-    }),
-  );
+  let outcome;
+  try {
+    outcome = await deps.recordSale(
+      buildSaleRecord({
+        orgId: ctx.orgId,
+        registerId: ctx.registerId,
+        userId: ctx.userId,
+        sale,
+        cart: match.cart,
+        priced: match.priced,
+        pricedAsOf: match.at,
+      }),
+    );
+  } catch (e) {
+    if (!isDeterministic(e) && !(e instanceof Error && e.message.startsWith("item line must")))
+      throw e;
+    return reject({ reason: "invalid", detail: { message: "sale could not be recorded" } });
+  }
   if (outcome === "receipt_clash") {
     return reject({ reason: "receipt_number_used", detail: { receiptSeq: sale.receiptSeq } });
   }

@@ -119,14 +119,15 @@ export function drainOutbox(
 
         if (res.status === 401 || res.status === 403) return { state: "signed-out", sent };
         if ((res.status === 400 || res.status === 413) && batch.length > 1) {
-          batchSize = Math.max(1, Math.floor(batch.length / 2)); // too big or one bad sale: split
+          batchSize = Math.max(1, Math.floor(batch.length / 2)); // too big: send fewer at once
           continue;
         }
         if (res.status === 400 || res.status === 413) {
-          // A single sale the server cannot even read. Flag it on the till and move on: it stays
-          // in the outbox, marked rejected, and is never deleted.
-          await db.sales.update(batch[0]!.id, { syncState: "rejected", rejectReason: "invalid" });
-          continue;
+          // One sale and still refused: the server never judged the sale (it answers per sale), so
+          // this is the request itself. Keep the sale pending and try again later; marking it
+          // rejected here would hide a sale the server has no record of.
+          await fail(db, { now, random });
+          return { state: "backoff", sent };
         }
 
         let results;
