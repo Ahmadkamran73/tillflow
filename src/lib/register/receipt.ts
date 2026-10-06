@@ -2,7 +2,7 @@ import type { ReceiptOptions } from "@/config/business-type-presets";
 import { t } from "@/lib/i18n";
 import { changeDue, formatCents, lineDiscountOf, localDate } from "@/lib/money";
 import { lineTotal, unitWithModifiers, type PricedCart } from "./cart";
-import type { LocalSale } from "./db";
+import type { ReceiptSale } from "./db";
 import { receiptNo } from "./sale";
 
 export type ReceiptHeader = {
@@ -65,7 +65,7 @@ const ddmmyyyy = (iso: string) => iso.split("-").reverse().join("/");
  * basket (`priced`); nothing is recalculated here.
  */
 export function buildReceipt(args: {
-  sale: LocalSale;
+  sale: ReceiptSale;
   priced: PricedCart;
   registerName: string;
   header: ReceiptHeader;

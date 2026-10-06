@@ -1,5 +1,6 @@
 import { catalogEnIE } from "./catalog-en-IE";
 import { registerEnIE } from "./register-en-IE";
+import { salesEnIE } from "./sales-en-IE";
 
 /** Source language. Add a key here first; other locales may be partial and fall back to this. */
 export const enIE = {
@@ -69,6 +70,7 @@ export const enIE = {
   "sync.online": "Online",
   "sync.offline": "Offline ({count} waiting)",
   "sync.syncing": "Syncing",
+  "sync.syncingCount": "Syncing ({count} waiting)",
 
   "design.title": "Design system",
   "design.intro":
@@ -166,6 +168,7 @@ export const enIE = {
   "settings.error": "We could not save the business type. Please try again.",
   ...catalogEnIE,
   ...registerEnIE,
+  ...salesEnIE,
 } as const;
 
 export type MessageKey = keyof typeof enIE;

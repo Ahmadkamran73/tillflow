@@ -1,4 +1,5 @@
 import { execSync } from "node:child_process";
+import withSerwistInit from "@serwist/next";
 import type { NextConfig } from "next";
 import pkg from "./package.json";
 
@@ -14,7 +15,26 @@ function commitSha() {
   }
 }
 
+// The register service worker (src/sw/sw.ts): precaches the build and finishes sending the sale
+// outbox in the background. Only built by `next build --webpack`; off in `next dev`.
+const withSerwist = withSerwistInit({
+  swSrc: "src/sw/sw.ts",
+  swDest: "public/sw.js",
+  disable: process.env.NODE_ENV !== "production",
+  reloadOnOnline: false,
+});
+
 const nextConfig: NextConfig = {
+  // `next dev` runs Turbopack, which ignores the webpack-only Serwist plugin; say so explicitly.
+  turbopack: {},
+  async headers() {
+    return [
+      {
+        source: "/sw.js",
+        headers: [{ key: "Cache-Control", value: "no-cache, no-store, must-revalidate" }],
+      },
+    ];
+  },
   // Loaded at runtime from node_modules, not bundled (pg and pino are external by default).
   serverExternalPackages: ["pg-boss"],
   // Off on Hostinger, so maps are never served. CI sets SOURCE_MAPS=true in the source-maps
@@ -27,4 +47,4 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+export default withSerwist(nextConfig);

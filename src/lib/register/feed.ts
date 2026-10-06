@@ -24,7 +24,16 @@ export const feedSchema = z.object({
     receiptFooter: z.string().nullable(),
   }),
   /** The shop's tills; the device picks one once (until pairing, step 1.7). */
-  registers: z.array(z.object({ id: z.string(), name: z.string() })),
+  registers: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      /** Highest receipt number the server holds for this till (0 = none), so numbering carries on after it. */
+      lastSeq: z.int().min(0).default(0),
+    }),
+  ),
+  /** Server clock when the feed was read; the device shows a warning if its own clock is far off. */
+  serverTime: z.iso.datetime(),
   taxRates: z.array(
     z.object({
       country: z.string(),

@@ -1,0 +1,85 @@
+import { changeDue, lineDiscountOf } from "@/lib/money";
+import { unitWithModifiers, type Cart, type PricedCart } from "@/lib/register/cart";
+import type { SyncSale } from "./protocol";
+
+/**
+ * Turns a priced sale into the JSON that `ops.record_sale` stores. No maths of its own: every
+ * amount comes from the money library's basket (`vatLines`, `nonVatLines`, totals). The VAT rate
+ * and amounts are copied onto each line, so a completed sale is never re-priced (refunds use them).
+ */
+export function buildSaleRecord(args: {
+  orgId: string;
+  registerId: string;
+  userId: string;
+  sale: SyncSale;
+  cart: Cart;
+  priced: PricedCart;
+  pricedAsOf: Date;
+}) {
+  const { sale, cart, priced } = args;
+  const { basket } = priced;
+  const lines: Record<string, unknown>[] = [];
+
+  cart.lines.forEach((l, i) => {
+    const at = priced.itemIndex[i]!;
+    const taxed = basket.vatLines.filter((v) => v.index === at);
+    const gross = taxed.reduce((s, v) => s + v.gross, 0);
+    const first = taxed[0];
+    if (!first || taxed.length !== 1) throw new Error("item line must have exactly one VAT line");
+    const unit = unitWithModifiers(l);
+    lines.push({
+      kind: "item",
+      variant_id: l.variantId,
+      product_id: l.productId,
+      name: l.name,
+      qty: l.qty,
+      unit_price_cents: unit,
+      modifiers: l.modifiers,
+      serial: l.serial ?? null,
+      discount_cents: lineDiscountOf(unit, l.qty, gross),
+      tax_category: first.taxCategory,
+      tax_rate_bp: first.rateBp,
+      net_cents: first.net,
+      vat_cents: first.vat,
+      gross_cents: gross,
+    });
+    const deposit = basket.nonVatLines.find((n) => n.index === at + 1 && n.kind === "deposit");
+    if (l.depositCents > 0 && deposit) {
+      lines.push({
+        kind: "deposit",
+        variant_id: l.variantId,
+        product_id: l.productId,
+        name: l.name,
+        qty: l.qty,
+        unit_price_cents: l.depositCents,
+        gross_cents: deposit.gross,
+      });
+    }
+  });
+
+  return {
+    sale: {
+      id: sale.id,
+      org_id: args.orgId,
+      register_id: args.registerId,
+      user_id: args.userId,
+      receipt_seq: sale.receiptSeq,
+      mode: sale.mode,
+      completed_at: sale.completedAt,
+      priced_as_of: args.pricedAsOf.toISOString(),
+      items_total: basket.itemsTotal,
+      vat: basket.vatTotal,
+      non_vat: basket.nonVatTotal,
+      cash_rounding: basket.cashRounding,
+      amount_due: basket.amountDue,
+      client_due: sale.expectedDueCents,
+    },
+    lines,
+    payment: {
+      method: "cash",
+      amount: basket.amountDue,
+      tendered: sale.tenderedCents,
+      change: changeDue(sale.tenderedCents, basket.amountDue),
+    },
+  };
+}

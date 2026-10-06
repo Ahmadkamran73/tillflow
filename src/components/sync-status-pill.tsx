@@ -34,7 +34,9 @@ export function SyncStatusPill({
         aria-hidden
         className={cn("size-4", state === "syncing" && "motion-safe:animate-spin")}
       />
-      {t(`sync.${state}`, { count: waiting })}
+      {state === "syncing" && waiting > 0
+        ? t("sync.syncingCount", { count: waiting })
+        : t(`sync.${state}`, { count: waiting })}
     </p>
   );
 }

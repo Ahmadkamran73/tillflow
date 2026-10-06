@@ -6,6 +6,7 @@ import { presets } from "@/config/business-type-presets";
 import { requireRole } from "@/lib/auth";
 import { t } from "@/lib/i18n";
 import { getOrganisation, listCategories } from "@/lib/org";
+import { getAttention } from "@/lib/sync/attention";
 
 export const metadata: Metadata = { title: `${t("dashboard.title")} · ${t("app.name")}` };
 
@@ -14,6 +15,7 @@ export default async function DashboardPage({ params }: { params: Promise<{ orgI
   await requireRole(["owner", "manager"], orgId); // layouts do not protect the page on their own
   const [org, categories] = await Promise.all([getOrganisation(orgId), listCategories(orgId)]);
   if (!org) notFound();
+  const attention = await getAttention(orgId);
   const tiles = presets[org.businessType].dashboardTiles;
 
   return (
@@ -35,6 +37,26 @@ export default async function DashboardPage({ params }: { params: Promise<{ orgI
           </div>
         ))}
       </dl>
+
+      {(attention.open > 0 || attention.staleTills.length > 0) && (
+        <section aria-labelledby="attention" className="surface-panel flex flex-col gap-2 p-5">
+          <h2 id="attention" className="text-heading font-semibold">
+            {t("tile.attention")}
+          </h2>
+          {attention.open > 0 && (
+            <p>
+              <Link href={`/o/${orgId}/sales/attention`} className="font-medium underline">
+                {t("sales.attentionLink", { count: attention.open })}
+              </Link>
+            </p>
+          )}
+          {attention.staleTills.map((till) => (
+            <p key={till} className="text-sm">
+              {t("tile.attentionStale", { till })}
+            </p>
+          ))}
+        </section>
+      )}
 
       <section aria-labelledby="categories" className="surface-panel flex flex-col gap-3 p-5">
         <h2 id="categories" className="text-heading font-semibold">

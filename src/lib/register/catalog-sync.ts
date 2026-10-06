@@ -48,6 +48,8 @@ export async function refreshCatalog(db: RegisterDb, orgId: string): Promise<voi
           { key: "registers", value: feed.registers },
           { key: "taxRates", value: feed.taxRates },
           { key: "cursor", value: feed.cursor },
+          // When this device last saw the server’s prices: sent with each sale (`catalogAsOf`).
+          { key: "pulledAt", value: feed.serverTime },
         ]),
       ]);
     },

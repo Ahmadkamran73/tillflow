@@ -99,6 +99,28 @@ export async function requireRole(allowed: Role | readonly Role[], orgId: string
   return { user, orgId, role: membership.role };
 }
 
+export type ApiAuth =
+  { ok: true; user: AuthUser; orgId: string; role: Role } | { ok: false; status: 401 | 403 | 404 };
+
+/**
+ * `requireRole` for route handlers that are called with fetch (the register’s sync and catalogue):
+ * it answers with a status instead of redirecting to a login page, so the device can tell
+ * “signed out” (401), “finish MFA” (403) and “not yours” (404) apart from a network failure.
+ */
+export async function authorizeApi(
+  allowed: Role | readonly Role[],
+  orgId: string,
+): Promise<ApiAuth> {
+  const allow: readonly Role[] = typeof allowed === "string" ? [allowed] : allowed;
+  if (!z.uuid().safeParse(orgId).success) return { ok: false, status: 404 };
+  const user = await getAuthUser();
+  if (!user) return { ok: false, status: 401 };
+  const membership = (await getMemberships(user.id)).find((m) => m.orgId === orgId);
+  if (!membership || !allow.includes(membership.role)) return { ok: false, status: 404 };
+  if (mfaRequired(user, membership.role) && user.aal !== "aal2") return { ok: false, status: 403 };
+  return { ok: true, user, orgId, role: membership.role };
+}
+
 /**
  * Entry point for pages that are not tied to a URL org (/o, /onboarding). Picks the user’s
  * back-office membership (owner first) and applies the MFA gate. A user with no membership at all is

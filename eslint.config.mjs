@@ -13,6 +13,9 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
     "coverage/**",
+    // Built by @serwist/next from src/sw/sw.ts.
+    "public/sw.js",
+    "public/swe-worker-*.js",
   ]),
 ]);
 

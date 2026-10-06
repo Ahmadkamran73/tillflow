@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { presets } from "@/config/business-type-presets";
 import { priceCart, type Cart, type CartLine } from "@/lib/register/cart";
-import type { LocalSale } from "@/lib/register/db";
+import type { ReceiptSale } from "@/lib/register/db";
 import { encodeEscpos, DRAWER_KICK } from "@/lib/register/print/escpos";
 import { invoiceInput } from "@/lib/register/invoice";
 import {
@@ -41,7 +41,7 @@ const line = (over: Partial<CartLine> = {}): CartLine => ({
   ...over,
 });
 
-const saleOf = (lines: CartLine[], over: Partial<LocalSale> = {}): LocalSale => ({
+const saleOf = (lines: CartLine[], over: Partial<ReceiptSale> = {}): ReceiptSale => ({
   id: "s1",
   registerId: "r1",
   receiptSeq: 42,
@@ -51,7 +51,7 @@ const saleOf = (lines: CartLine[], over: Partial<LocalSale> = {}): LocalSale => 
   ...over,
 });
 
-const build = (sale: LocalSale, asInvoice = false, preset = presets.general) =>
+const build = (sale: ReceiptSale, asInvoice = false, preset = presets.general) =>
   buildReceipt({
     sale,
     priced: priceCart(sale.cart, ctx),

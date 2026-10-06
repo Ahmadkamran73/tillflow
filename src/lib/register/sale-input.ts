@@ -3,12 +3,12 @@ import { depositOf, variantLabel, warrantyOf, type Cart } from "./cart";
 import { invoiceInput } from "./invoice";
 import { TAX_CATEGORIES, type TaxCategory } from "@/lib/money";
 
-const discount = z.union([
+export const discount = z.union([
   z.strictObject({ amount: z.int().min(0).max(100_000_000) }),
   z.strictObject({ percentBp: z.int().min(0).max(10_000) }),
 ]);
 
-const saleLine = z.strictObject({
+export const saleLine = z.strictObject({
   variantId: z.uuid(),
   qty: z.int().min(1).max(999),
   modifierIds: z.array(z.uuid()).max(30),

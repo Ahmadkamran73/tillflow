@@ -9,6 +9,7 @@ import {
   PlusIcon,
   SearchIcon,
   Trash2Icon,
+  TriangleAlertIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
 import { v7 as uuidv7 } from "uuid";
@@ -48,6 +49,7 @@ import { buildReceipt, receiptLabels, receiptText } from "@/lib/register/receipt
 import { completeSale, setInvoice } from "@/lib/register/sale";
 import type { FeedProduct, FeedVariant } from "@/lib/register/feed";
 import { useCatalog, useCatalogRefresh } from "@/lib/register/use-catalog";
+import { useSync } from "@/lib/sync/use-sync";
 import { useScanner } from "@/lib/register/use-scanner";
 import { PrintArea } from "@/components/register/print-area";
 import { emailReceipt } from "./actions";
@@ -286,6 +288,8 @@ export function Register({ orgId }: { orgId: string }) {
   const till =
     tills.find((r) => r.id === data?.registerId) ?? (tills.length === 1 ? tills[0] : undefined);
   const tillName = (id: string) => tills.find((r) => r.id === id)?.name ?? "Till";
+  // The outbox: sales wait here until the server has confirmed them.
+  const outbox = useSync(db, orgId, till?.id, sync.failed);
 
   /** Prices a finished sale with the VAT rates of the day it was sold, never today's. */
   const priceSale = (sale: LocalSale) =>
@@ -334,7 +338,12 @@ export function Register({ orgId }: { orgId: string }) {
     }
     let sale: LocalSale;
     try {
-      sale = await completeSale(db, { registerId: till.id, cart, tenderedCents });
+      sale = await completeSale(db, {
+        registerId: till.id,
+        cart,
+        tenderedCents,
+        expectedDueCents: priced.basket.amountDue,
+      });
     } catch {
       say(t("register.saveFailed"));
       return;
@@ -343,6 +352,7 @@ export function Register({ orgId }: { orgId: string }) {
     const status = `${t("register.saved")} ${await print(sale, { kick: true })}`;
     setDialog({ kind: "done", sale, status });
     say(status);
+    outbox.kick(); // only now, after the receipt: the sale never waits for the network
   }
 
   function newSale() {
@@ -359,7 +369,6 @@ export function Register({ orgId }: { orgId: string }) {
   const due = priced ? priced.basket.amountDue : 0;
   const payLabel = t("register.pay", { amount: formatCents(due) });
   const canPay = !!priced && cart.lines.length > 0;
-  const pill = sync.syncing ? "syncing" : sync.failed ? "offline" : "online";
 
   // `valid` for the discount dialog: would the cart still price with this discount?
   const discountTarget = dialog?.kind === "discount" ? dialog.target : null;
@@ -609,11 +618,32 @@ export function Register({ orgId }: { orgId: string }) {
               <PrinterIcon aria-hidden /> {t("register.printer")}:{" "}
               {t(`register.printer.${printer.type}`)}
             </Button>
-            <SyncStatusPill state={pill} waiting={0} />
+            <SyncStatusPill state={outbox.pill} waiting={outbox.waiting} />
           </>
         }
         tiles={
           <>
+            {/* One live region that is always on the page, so notices that appear are announced. */}
+            <div role="status" className="flex flex-col gap-2">
+              {outbox.staleHours !== null && (
+                <p className="border-warning bg-warning text-warning-foreground flex items-center gap-2 rounded-lg border-2 p-3 text-sm font-semibold">
+                  <TriangleAlertIcon aria-hidden className="size-5 shrink-0" />
+                  {t("register.staleWarning", { count: outbox.waiting, hours: outbox.staleHours })}
+                </p>
+              )}
+              {outbox.signedOut && (
+                <p className="border-solid-border bg-paper flex items-center gap-2 rounded-lg border-2 p-3 text-sm font-semibold">
+                  <TriangleAlertIcon aria-hidden className="size-5 shrink-0" />
+                  {t("register.signedOutNotice")}
+                </p>
+              )}
+              {outbox.rejected > 0 && (
+                <p className="border-solid-border bg-paper flex items-center gap-2 rounded-lg border-2 p-3 text-sm font-semibold">
+                  <TriangleAlertIcon aria-hidden className="size-5 shrink-0" />
+                  {t("register.rejectedNotice", { count: outbox.rejected })}
+                </p>
+              )}
+            </div>
             <div className="relative">
               <SearchIcon
                 aria-hidden
