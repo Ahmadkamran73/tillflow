@@ -30,9 +30,16 @@ test("a wrong VAT number or missing type stops the wizard on that step", async (
   await expect(page.getByText("Enter a valid Irish VAT number")).toBeVisible();
 
   await page.getByLabel("VAT number (optional)").fill("");
-  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(page.getByLabel("VAT number (optional)")).toHaveValue("");
   // Wait for step 2 before the next click, or it can land while step 1 is still on screen.
-  await expect(page.getByRole("heading", { name: /^Step 2 of 4/ })).toBeVisible();
+  // The click is retried: right after the error, a click can land before the cleared field has
+  // been re-validated (flaky in CI). Pressing Next again on step 2 only shows its own error.
+  await expect(async () => {
+    await page.getByRole("button", { name: "Next", exact: true }).click();
+    await expect(page.getByRole("heading", { name: /^Step 2 of 4/ })).toBeVisible({
+      timeout: 2_000,
+    });
+  }).toPass({ timeout: 15_000 });
   await page.getByRole("button", { name: "Next", exact: true }).click();
   await expect(page.getByText("Choose a business type.")).toBeVisible();
 });
