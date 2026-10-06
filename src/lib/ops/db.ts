@@ -110,3 +110,24 @@ export async function heartbeatAgeSeconds(): Promise<number | null> {
   const [row] = await db()<{ age: number | null }[]>`select ops.heartbeat_age_seconds() as age`;
   return row?.age ?? null;
 }
+
+// ---------------------------------------------------------------- sale sync (step 1.6)
+// The sync route has authenticated the user and re-priced the sale; these functions re-check
+// membership and register ownership themselves and write in one transaction.
+
+export type RecordSaleResult = "created" | "duplicate" | "receipt_clash";
+
+export async function recordSale(payload: unknown): Promise<RecordSaleResult> {
+  const [row] = await db()<{ r: RecordSaleResult }[]>`
+    select ops.record_sale(${db().json(payload as postgres.JSONValue)}) as r`;
+  if (!row) throw new Error("record_sale returned no row");
+  return row.r;
+}
+
+export async function recordSyncRejection(payload: unknown): Promise<void> {
+  await db()`select ops.record_sync_rejection(${db().json(payload as postgres.JSONValue)})`;
+}
+
+export async function touchRegister(orgId: string, registerId: string, userId: string) {
+  await db()`select ops.touch_register(${orgId}, ${registerId}, ${userId})`;
+}

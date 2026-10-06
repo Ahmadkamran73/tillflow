@@ -38,7 +38,7 @@ export async function getCatalogFeed(orgId: string, since: string | null): Promi
     q: T,
   ) => (since ? q.gt("updated_at", since) : q.is("archived_at", null));
 
-  const [loc, regs, taxRates, categories, products, variants, groups, mods, pgroups] =
+  const [loc, regs, seqs, taxRates, categories, products, variants, groups, mods, pgroups] =
     await Promise.all([
       supabase
         .from("locations")
@@ -47,6 +47,7 @@ export async function getCatalogFeed(orgId: string, since: string | null): Promi
         .order("created_at")
         .limit(1),
       supabase.from("registers").select("id, name").eq("org_id", orgId).order("name"),
+      supabase.rpc("register_last_seqs", { p_org: orgId }),
       getTaxRates(),
       all((a, b) =>
         supabase
@@ -107,7 +108,7 @@ export async function getCatalogFeed(orgId: string, since: string | null): Promi
 
   const location = loc.data?.[0];
   const timezone = location?.timezone;
-  if (!timezone || regs.error) throw new Error("Could not load the catalogue");
+  if (!timezone || regs.error || seqs.error) throw new Error("Could not load the catalogue");
   const row = z.record(z.string(), z.any());
   const rows = (x: unknown[]) => z.array(row).parse(x);
 
@@ -125,7 +126,15 @@ export async function getCatalogFeed(orgId: string, since: string | null): Promi
       eircode: location.eircode,
       receiptFooter: location.receipt_footer,
     },
-    registers: regs.data,
+    serverTime: new Date().toISOString(),
+    registers: (regs.data ?? []).map((r) => ({
+      id: r.id,
+      name: r.name,
+      lastSeq:
+        ((seqs.data ?? []) as { register_id: string; last_seq: number }[]).find(
+          (q) => q.register_id === r.id,
+        )?.last_seq ?? 0,
+    })),
     taxRates,
     categories: rows(categories),
     products: rows(products).map((p) => ({

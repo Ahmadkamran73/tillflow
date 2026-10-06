@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { z } from "zod";
-import { requireRole } from "@/lib/auth";
+import { authorizeApi } from "@/lib/auth";
 import { getCatalogFeed } from "@/lib/register/feed-server";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +16,9 @@ export async function GET(
   { params }: { params: Promise<{ orgId: string }> },
 ) {
   const { orgId } = await params;
-  await requireRole(["owner", "manager", "cashier"], orgId);
+  // A status, not a redirect: the device must tell "signed out" from "offline".
+  const auth = await authorizeApi(["owner", "manager", "cashier"], orgId);
+  if (!auth.ok) return Response.json({ error: "not allowed" }, { status: auth.status });
   const parsed = since.safeParse(request.nextUrl.searchParams.get("since"));
   if (!parsed.success) return Response.json({ error: "bad since" }, { status: 400 });
   const feed = await getCatalogFeed(orgId, parsed.data);

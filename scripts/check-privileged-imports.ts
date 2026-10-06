@@ -29,6 +29,7 @@ const RULES: { name: string; pattern: RegExp; allowed: string[] }[] = [
     allowed: [
       "src/lib/errors/index.ts",
       "src/lib/rate-limit/index.ts",
+      "src/lib/sync/server.ts",
       "src/lib/jobs/handlers/", // every pg-boss job handler
       "src/app/api/health/route.ts",
     ],

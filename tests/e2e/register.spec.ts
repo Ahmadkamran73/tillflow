@@ -3,7 +3,9 @@ import { hydrated, openDashboard, signUpAndEnrol, uniqueEmail } from "./helpers"
 
 // Needs the local Supabase stack (`supabase start`) and its .env.local values.
 
-test.use({ viewport: { width: 1024, height: 768 } });
+test.use({ viewport: { width: 1024, height: 768 }, serviceWorkers: "block" });
+// serviceWorkers: "block" so page.route() below sees the requests (with the service worker on,
+// register-sync.spec.ts covers the real offline behaviour).
 test.setTimeout(120_000); // signs up and creates products through the UI first
 
 async function addProduct(

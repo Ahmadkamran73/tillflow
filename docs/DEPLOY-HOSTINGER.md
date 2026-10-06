@@ -72,12 +72,12 @@ Names only. Values come from your password manager. Same names in both apps, dif
 | `AUTH_GOOGLE_ENABLED`                                     | yes         | `true` only after Google is enabled in that Supabase project                                                                                                                                  |
 | `JOBS_DATABASE_URL`                                       | yes         | Supabase **session pooler** URL (port 5432) with user `tillflow_ops.<project-ref>`, never `postgres`. Used for background jobs, rate limits, the error log and the health check. Server only. |
 | `JOBS_ENABLED`                                            | optional    | leave unset (on). `false` stops this app running the job worker.                                                                                                                              |
-| `ALERT_EMAIL` | yes | where new-error alerts and the daily digest go |
-| `ALERT_FROM` | yes | sender, e.g. `Tillflow Alerts <your-gmail-address>`; must be the SMTP account's own address on Gmail |
-| `SMTP_HOST` | yes | `smtp.gmail.com` (later your tillflow.ie mailbox host) |
-| `SMTP_PORT` | optional | `465` (default, implicit TLS) or `587` (STARTTLS) |
-| `SMTP_USER` | yes | the SMTP login (the Gmail address) |
-| `SMTP_PASS` | yes | Gmail **app password**, never the account password. Without the `SMTP_*` set, alerts are skipped (errors are still stored). |
+| `ALERT_EMAIL`                                             | yes         | where new-error alerts and the daily digest go                                                                                                                                                |
+| `ALERT_FROM`                                              | yes         | sender, e.g. `Tillflow Alerts <your-gmail-address>`; must be the SMTP account's own address on Gmail                                                                                          |
+| `SMTP_HOST`                                               | yes         | `smtp.gmail.com` (later your tillflow.ie mailbox host)                                                                                                                                        |
+| `SMTP_PORT`                                               | optional    | `465` (default, implicit TLS) or `587` (STARTTLS)                                                                                                                                             |
+| `SMTP_USER`                                               | yes         | the SMTP login (the Gmail address)                                                                                                                                                            |
+| `SMTP_PASS`                                               | yes         | Gmail **app password**, never the account password. Without the `SMTP_*` set, alerts are skipped (errors are still stored).                                                                   |
 | `SUPABASE_SERVICE_ROLE_KEY`                               | later       | server only; add when server code needs it                                                                                                                                                    |
 | `DATABASE_URL`                                            | later       | pooled connection string                                                                                                                                                                      |
 | `EMAIL_FROM`                                              | later       | receipts and invites (later steps)                                                                                                                                                            |
@@ -100,10 +100,10 @@ Hostinger runs the build and start commands you give it, and `next start` works 
 
 `tillflow.ie`'s DNS is at **eLive** (nameservers `dns.elive.ie`), not Hostinger, so add these records in the eLive control panel. For the two app rows, use the value hPanel shows on each app's Domains step (staging: `A` `72.61.204.157`).
 
-| Type       | Name                | Value                                                                     | TTL  | Purpose                             |
-| ---------- | ------------------- | ------------------------------------------------------------------------- | ---- | ----------------------------------- |
-| A or CNAME | `pos`               | shown by hPanel when you connect `pos.tillflow.ie` to the production app  | 300  | Production app                      |
-| A or CNAME | `staging`           | shown by hPanel when you connect `staging.tillflow.ie` to the staging app | 300  | Staging app                         |
-| TXT        | `_dmarc`            | `v=DMARC1; p=none; rua=mailto:dmarc@tillflow.ie`                          | 3600 | Recommended DMARC (start at `none`) |
+| Type       | Name      | Value                                                                     | TTL  | Purpose                             |
+| ---------- | --------- | ------------------------------------------------------------------------- | ---- | ----------------------------------- |
+| A or CNAME | `pos`     | shown by hPanel when you connect `pos.tillflow.ie` to the production app  | 300  | Production app                      |
+| A or CNAME | `staging` | shown by hPanel when you connect `staging.tillflow.ie` to the staging app | 300  | Staging app                         |
+| TXT        | `_dmarc`  | `v=DMARC1; p=none; rua=mailto:dmarc@tillflow.ie`                          | 3600 | Recommended DMARC (start at `none`) |
 
 Email: no sending-domain DNS records are needed while alerts go out through Gmail SMTP. When a `tillflow.ie` mailbox is created, add the SPF, DKIM and DMARC records its provider gives you, and do not create a second SPF record on the same name. Leave the existing landing-page records for `tillflow.ie` and `www` alone.

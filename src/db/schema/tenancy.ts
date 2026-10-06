@@ -127,6 +127,8 @@ export const registers = pgTable(
       foreignColumns: [locations.orgId, locations.id],
     }),
     unique("registers_org_location_name_key").on(t.orgId, t.locationId, t.name),
+    // Target for composite FKs so a sale can never point at another org's register.
+    unique("registers_org_id_id_key").on(t.orgId, t.id),
   ],
 );
 

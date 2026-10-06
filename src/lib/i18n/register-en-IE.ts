@@ -61,6 +61,12 @@ export const registerEnIE = {
   "register.printed": "Receipt printed.",
   "register.printFallback": "Printer not reached: the browser print window was opened instead.",
   "register.saved": "Sale saved on this device.",
+  "register.staleWarning":
+    "{count} sales are still waiting to be sent and this till has not reached the server for {hours} hours. Connect it to the internet.",
+  "register.signedOutNotice":
+    "You are signed out. Sales are safe on this device; sign in again to send them.",
+  "register.rejectedNotice":
+    "{count} sale(s) were not accepted by the server and were sent to a manager to check.",
   "register.saveFailed":
     "The sale could not be saved on this device. Do not hand over the goods; try again.",
   "register.tillTitle": "Which till is this?",
