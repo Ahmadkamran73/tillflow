@@ -14,6 +14,10 @@ export type LocalSale = {
   /** UUIDv7; also the idempotency key. Sorts by time, so the outbox drains oldest first. */
   id: string;
   registerId: string;
+  /** Who rang it up (their PIN unlocked the till). Missing only on sales queued before step 1.7. */
+  cashierUserId?: string;
+  /** The server's proof of a manager PIN for a discount above the shop's limit (online approvals only). */
+  approvalId?: string;
   receiptSeq: number;
   completedAt: string;
   /** Inputs only: totals are always re-derived with `priceCart`. */
@@ -38,6 +42,27 @@ export type ReceiptSale = Pick<
 export type Meta = { key: string; value: unknown };
 
 /**
+ * Something a manager approved outside a sale (drawer opened with no sale, refund override),
+ * queued like a sale and sent to /api/v1/sync/events. Becomes an audit_log row on the server.
+ */
+export type RegisterEvent = {
+  /** UUIDv7; also the audit row's id on the server, so a replay writes nothing twice. */
+  id: string;
+  kind: "no_sale" | "refund_override";
+  at: string;
+  cashierUserId: string;
+  /** The server's proof of the manager's PIN; absent when it was checked offline. */
+  approvalId?: string;
+  /** Who the till says approved it (offline only): sent as a claim, never trusted. */
+  claimedApprover?: string;
+  detail: Record<string, string | number | boolean>;
+  syncState: SyncState;
+};
+
+/** PIN failures counted on this device, so the 5-failure lockout also holds while offline. */
+export type PinAttempts = { userId: string; failed: number; lockedUntil?: number };
+
+/**
  * The register's local copy of the shop's catalogue (docs/PLAN.md section 9). The screens read
  * only from here; `catalog-sync.ts` is the only writer. One database per shop, so two shops on a
  * shared device never see each other's data. Holds no customer data and no cost prices.
@@ -52,6 +77,8 @@ export class RegisterDb extends Dexie {
   meta!: Table<Meta, string>;
   parked!: Table<ParkedSale, string>;
   sales!: Table<LocalSale, string>;
+  events!: Table<RegisterEvent, string>;
+  pinAttempts!: Table<PinAttempts, string>;
 
   constructor(orgId: string) {
     super(`tillflow-${orgId}`);
@@ -94,6 +121,12 @@ export class RegisterDb extends Dexie {
             }
           });
       });
+    // v4 (step 1.7): staff PINs. Sales queued before this have no cashier; the server will not
+    // accept them as anyone's and a manager sees them under Needs attention.
+    this.version(4).stores({
+      events: "id, syncState",
+      pinAttempts: "userId",
+    });
   }
 }
 

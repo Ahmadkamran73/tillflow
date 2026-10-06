@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { LocalSale, RegisterDb } from "@/lib/register/db";
 import { MAX_BATCH, syncResponse, type SyncSale } from "./protocol";
 
@@ -8,6 +9,7 @@ import { MAX_BATCH, syncResponse, type SyncSale } from "./protocol";
 // never deleted before then; a rejected sale is marked rejected and the queue moves on; any
 // network or server failure stops the drain and backs off, losing nothing.
 
+/** "signed-out" now means this till is no longer paired (revoked, or the device token is gone). */
 export type DrainState = "idle" | "backoff" | "signed-out" | "locked";
 export type DrainResult = { state: DrainState; sent: number };
 
@@ -38,8 +40,16 @@ async function withLock<T>(name: string, fn: () => Promise<T>, busy: T): Promise
 export const pendingSales = (db: RegisterDb) =>
   db.sales.where("syncState").equals("pending").sortBy("id");
 
+/**
+ * Stands in for the cashier of a sale queued before step 1.7 (nobody's PIN unlocked the till). The
+ * server refuses it as "not staff of this shop" and a manager sees it under Needs attention.
+ */
+export const LEGACY_CASHIER = "00000000-0000-4000-8000-000000000000";
+
 const toWire = (s: LocalSale): SyncSale => ({
   id: s.id,
+  cashierUserId: s.cashierUserId ?? LEGACY_CASHIER,
+  approvalId: s.approvalId,
   receiptSeq: s.receiptSeq,
   completedAt: s.completedAt,
   catalogAsOf: s.catalogAsOf,
@@ -96,6 +106,9 @@ export function drainOutbox(
 
         const pending = await pendingSales(db);
         if (pending.length === 0) {
+          // Approvals the manager gave outside a sale (drawer opens) go after the sales.
+          const events = await drainEvents(db, fetchFn, { now, random });
+          if (events !== "ok") return { state: events, sent };
           await db.meta.delete("syncBackoff"); // nothing waiting, so nothing to back off from
           await prune(db, now());
           return { state: "idle", sent };
@@ -164,6 +177,72 @@ export function drainOutbox(
     },
     { state: "locked", sent: 0 },
   );
+}
+
+const eventResponse = z.object({
+  results: z.array(z.object({ id: z.string(), status: z.enum(["recorded", "rejected"]) })),
+});
+
+/**
+ * Sends queued register events (no-sale drawer opens, refund approvals), oldest first. The server
+ * answers per event: `recorded` leaves the device, `rejected` (the approver is no longer a manager,
+ * say) stays flagged and is never retried. Any other failure keeps everything and backs off.
+ */
+async function drainEvents(
+  db: RegisterDb,
+  fetchFn: typeof fetch,
+  opts: Required<Pick<DrainOptions, "now" | "random">>,
+): Promise<"ok" | "backoff" | "signed-out"> {
+  for (;;) {
+    const batch = (await db.events.where("syncState").equals("pending").sortBy("id")).slice(0, 25);
+    if (batch.length === 0) return "ok";
+    let res: Response;
+    try {
+      res = await fetchFn("/api/v1/sync/events", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        cache: "no-store",
+        body: JSON.stringify({
+          events: batch.map((e) => ({
+            id: e.id,
+            kind: e.kind,
+            at: e.at,
+            cashierUserId: e.cashierUserId,
+            approvalId: e.approvalId,
+            claimedApprover: e.claimedApprover,
+            detail: e.detail,
+          })),
+        }),
+      });
+    } catch {
+      await fail(db, opts);
+      return "backoff";
+    }
+    if (res.status === 401 || res.status === 403 || res.status === 404) return "signed-out";
+    let results;
+    try {
+      if (!res.ok) throw new Error(String(res.status));
+      results = eventResponse.parse(await res.json()).results;
+    } catch {
+      await fail(db, opts);
+      return "backoff";
+    }
+    const byId = new Map(results.map((r) => [r.id, r.status]));
+    let unresolved = 0;
+    await db.transaction("rw", db.events, async () => {
+      for (const e of batch) {
+        const status = byId.get(e.id);
+        if (status === "recorded") await db.events.delete(e.id);
+        else if (status === "rejected") await db.events.update(e.id, { syncState: "rejected" });
+        else unresolved++;
+      }
+    });
+    if (unresolved > 0) {
+      await fail(db, opts);
+      return "backoff";
+    }
+  }
 }
 
 /** Tells the server this till is alive (an empty batch), so managers see when it last synced. */

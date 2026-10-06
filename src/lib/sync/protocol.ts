@@ -11,6 +11,14 @@ export const MAX_BODY_BYTES = 256 * 1024;
 export const syncSale = z.strictObject({
   /** UUIDv7 made on the device; the idempotency key. */
   id: z.uuid(),
+  /** Who rang it up: the person whose PIN unlocked the till. The server checks they are staff of this shop. */
+  cashierUserId: z.uuid(),
+  /**
+   * Proof (from the server, see register_approvals) that a manager or owner entered their PIN for
+   * this till. The till never says WHO approved: the database derives the approver from this id.
+   * Absent (or made offline, where it cannot be issued): a discount above the limit is held.
+   */
+  approvalId: z.uuid().optional(),
   receiptSeq: z.int().min(1).max(99_999_999),
   completedAt: z.iso.datetime(),
   /** When the till's catalogue was last pulled: a second chance to match its prices. */
@@ -40,6 +48,7 @@ export const SYNC_REASONS = [
   "bad_time",
   "receipt_number_used",
   "cannot_price",
+  "discount_needs_approval",
 ] as const;
 export type SyncReason = (typeof SYNC_REASONS)[number];
 
@@ -64,4 +73,6 @@ export const reasonText: Record<SyncReason, string> = {
   receipt_number_used: "Another sale already used this receipt number on this till.",
   cannot_price:
     "The sale could not be priced (a discount that does not fit, or a missing VAT rate).",
+  discount_needs_approval:
+    "The discount was above the shop's limit and no manager approved it on the till.",
 };

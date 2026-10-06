@@ -3,13 +3,14 @@
 import { liveQuery } from "dexie";
 import { useEffect, useRef, useState } from "react";
 import type { RateRow } from "@/lib/money";
-import { refreshCatalog } from "./catalog-sync";
+import { refreshCatalog, UnpairedError } from "./catalog-sync";
 import type { RegisterDb, ParkedSale } from "./db";
 import type { Feed } from "./feed";
 
 export type CatalogData = {
   org: Feed["org"] | undefined;
   registers: Feed["registers"];
+  staff: Feed["staff"];
   registerId: string | undefined;
   taxRates: RateRow[];
   products: Feed["products"];
@@ -43,6 +44,7 @@ export function useCatalog(db: RegisterDb | null): CatalogData | null {
         productGroups,
         parked,
         registers,
+        staff,
         registerId,
       ] = await Promise.all([
         db.meta.get("org"),
@@ -55,11 +57,13 @@ export function useCatalog(db: RegisterDb | null): CatalogData | null {
         db.productGroups.toArray(),
         db.parked.orderBy("savedAt").toArray(),
         db.meta.get("registers"),
+        db.meta.get("staff"),
         db.meta.get("registerId"),
       ]);
       return {
         org: org?.value as Feed["org"] | undefined,
         registers: (registers?.value as Feed["registers"] | undefined) ?? [],
+        staff: (staff?.value as Feed["staff"] | undefined) ?? [],
         registerId: registerId?.value as string | undefined,
         taxRates: (taxRates?.value as RateRow[] | undefined) ?? [],
         products,
@@ -80,7 +84,7 @@ const REFRESH_MS = 60_000;
 
 /** Refreshes the local catalogue now, every minute and when the network comes back. Never throws. */
 export function useCatalogRefresh(db: RegisterDb | null, orgId: string) {
-  const [state, setState] = useState({ syncing: false, failed: false });
+  const [state, setState] = useState({ syncing: false, failed: false, unpaired: false });
   const busy = useRef(false);
   useEffect(() => {
     if (!db) return;
@@ -90,9 +94,9 @@ export function useCatalogRefresh(db: RegisterDb | null, orgId: string) {
       setState((s) => ({ ...s, syncing: true }));
       try {
         await refreshCatalog(db, orgId);
-        setState({ syncing: false, failed: false });
-      } catch {
-        setState({ syncing: false, failed: true });
+        setState({ syncing: false, failed: false, unpaired: false });
+      } catch (e) {
+        setState({ syncing: false, failed: true, unpaired: e instanceof UnpairedError });
       } finally {
         busy.current = false;
       }

@@ -29,6 +29,7 @@ const record = (cart: Cart, tendered = 5000) => {
     userId: "u",
     sale: {
       id: "00000000-0000-7000-8000-000000000001",
+      cashierUserId: "00000000-0000-4000-8000-0000000000d1",
       receiptSeq: 1,
       completedAt: "2026-10-06T12:00:00.000Z",
       mode: "eat_in",
@@ -114,6 +115,7 @@ describe("protocol", () => {
   it("a sale takes only inputs: unknown keys (such as a client total) are refused", () => {
     const ok = {
       id: "00000000-0000-7000-8000-000000000001",
+      cashierUserId: "00000000-0000-4000-8000-0000000000d1",
       receiptSeq: 1,
       completedAt: "2026-10-06T12:00:00.000Z",
       lines: [{ variantId: "00000000-0000-4000-8000-000000000001", qty: 1, modifierIds: [] }],

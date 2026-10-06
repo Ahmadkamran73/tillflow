@@ -1,4 +1,5 @@
 import { catalogEnIE } from "./catalog-en-IE";
+import { deviceEnIE } from "./device-en-IE";
 import { registerEnIE } from "./register-en-IE";
 import { salesEnIE } from "./sales-en-IE";
 
@@ -168,6 +169,7 @@ export const enIE = {
   "settings.error": "We could not save the business type. Please try again.",
   ...catalogEnIE,
   ...registerEnIE,
+  ...deviceEnIE,
   ...salesEnIE,
 } as const;
 

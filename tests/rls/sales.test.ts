@@ -334,8 +334,23 @@ describe("sync_rejections", () => {
       await record(ctx, p);
       await reject(ctx, rejection(world.a, { id: p.sale.id }));
       expect(await sql`select 1 from sync_rejections where id = ${p.sale.id}`).toHaveLength(0);
-      await denied(() => reject(ctx, rejection(world.a, { user_id: world.b.owner.userId })));
       await denied(() => reject(ctx, rejection(world.a, { register_id: world.b.registerId })));
+    }));
+
+  it("a sale naming someone who is not staff here is still recorded as a rejection, with no actor", () =>
+    inWorld(async (ctx) => {
+      const { sql, world } = ctx;
+      // The till is authenticated by its device token, so a bad cashier id must not block the queue.
+      const r = rejection(world.a, { user_id: world.b.owner.userId });
+      await reject(ctx, r);
+      expect(await sql`select 1 from sync_rejections where id = ${r.id}`).toHaveLength(1);
+      const audit = await sql`select actor_user_id from audit_log
+        where entity_id = ${r.id} and action = 'sale.sync_rejected'`;
+      expect(audit).toEqual([{ actor_user_id: null }]); // Shop B's owner is never named in Shop A's log
+      // Nor a missing id.
+      const none = rejection(world.a, { user_id: null });
+      await reject(ctx, none);
+      expect(await sql`select 1 from sync_rejections where id = ${none.id}`).toHaveLength(1);
     }));
 
   it("only a manager of that shop can resolve it, with a note, once, with an audit row", () =>

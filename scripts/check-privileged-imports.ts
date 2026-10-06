@@ -30,6 +30,7 @@ const RULES: { name: string; pattern: RegExp; allowed: string[] }[] = [
       "src/lib/errors/index.ts",
       "src/lib/rate-limit/index.ts",
       "src/lib/sync/server.ts",
+      "src/lib/device/", // device-token auth, pairing, PIN attempts, till feed and events
       "src/lib/jobs/handlers/", // every pg-boss job handler
       "src/app/api/health/route.ts",
     ],

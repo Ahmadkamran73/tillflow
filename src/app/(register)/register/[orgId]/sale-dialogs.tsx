@@ -140,41 +140,6 @@ export function DoneDialog({
   );
 }
 
-export function TillDialog({
-  tills,
-  onPick,
-  onClose,
-}: {
-  tills: { id: string; name: string }[];
-  onPick: (id: string) => void;
-  onClose: () => void;
-}) {
-  return (
-    <Modal title={t("register.tillTitle")} description={t("register.tillBody")} onClose={onClose}>
-      {tills.length === 0 ? (
-        <p role="status">{t("register.noTills")}</p>
-      ) : (
-        <ul className="flex max-h-[50dvh] flex-col gap-2 overflow-y-auto">
-          {tills.map((r) => (
-            <li key={r.id}>
-              <Button
-                type="button"
-                size="touch"
-                variant="outline"
-                className="w-full"
-                onClick={() => onPick(r.id)}
-              >
-                {r.name}
-              </Button>
-            </li>
-          ))}
-        </ul>
-      )}
-      <Cancel onClick={onClose} />
-    </Modal>
-  );
-}
-
 /** Moves focus to the first field the person has to fix. */
 function focusInvalid(root: HTMLElement | null) {
   root?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();

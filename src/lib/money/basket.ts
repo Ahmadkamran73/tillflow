@@ -86,6 +86,56 @@ export function applyDiscount(base: number, discount: Discount): number {
 export const lineDiscountOf = (unitPrice: number, qty: number, gross: number) =>
   lineGross(unitPrice, qty) - assertInt(gross, "gross");
 
+/**
+ * Half-up rounding of a percentage discount, and largest-remainder sharing of a basket discount,
+ * can leave a line up to 2 cents over its exact share. The override rule allows for that.
+ */
+export const DISCOUNT_ROUNDING_SLACK_CENTS = 2;
+
+/**
+ * The manager-override rule for one price: is `discount` cents off `full` cents more than
+ * `thresholdBp` (basis points) of `full`? Exact integer maths (BigInt, no division, no floats):
+ * (discount - slack) * 10000 > thresholdBp * full. A discount of at most the slack never counts,
+ * and an exact threshold (say 10% of €10.00 = 100c) is not "above" it.
+ */
+export function discountExceedsThreshold(
+  full: number,
+  discount: number,
+  thresholdBp: number,
+): boolean {
+  assertInt(full, "full");
+  assertInt(discount, "discount");
+  assertInt(thresholdBp, "thresholdBp");
+  if (thresholdBp < 0 || thresholdBp > 10000) {
+    throw new RangeError(`thresholdBp must be 0..10000, got ${thresholdBp}`);
+  }
+  if (full <= 0 || discount <= DISCOUNT_ROUNDING_SLACK_CENTS) return false;
+  return (
+    BigInt(discount - DISCOUNT_ROUNDING_SLACK_CENTS) * BigInt(10_000) > BigInt(thresholdBp) * BigInt(full)
+  );
+}
+
+/**
+ * Does this sale need a manager's approval? True when any item line, or the sale as a whole, lost
+ * more than `thresholdBp` of its full price to line and basket discounts together. `gross` is what
+ * the line came to after discounts (the basket's own figure), `unitPrice` includes modifiers.
+ */
+export function discountNeedsOverride(
+  lines: readonly { unitPrice: number; qty: number; gross: number }[],
+  thresholdBp: number,
+): boolean {
+  let full = 0;
+  let discount = 0;
+  for (const l of lines) {
+    const lineFull = lineGross(l.unitPrice, l.qty);
+    const lineLost = lineDiscountOf(l.unitPrice, l.qty, l.gross);
+    if (discountExceedsThreshold(lineFull, lineLost, thresholdBp)) return true;
+    full += lineFull;
+    discount += lineLost;
+  }
+  return discountExceedsThreshold(full, discount, thresholdBp);
+}
+
 const lineGross = (unitPrice: number, qty: number) =>
   assertInt(assertInt(unitPrice, "unitPrice") * assertInt(qty, "qty"), "line gross");
 

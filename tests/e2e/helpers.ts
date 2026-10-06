@@ -1,5 +1,7 @@
 import { expect, type Page } from "@playwright/test";
+import { config } from "dotenv";
 import { createHmac, randomUUID } from "node:crypto";
+import postgres from "postgres";
 
 /** Local Supabase catches every auth email here (Mailpit). Tests never touch a real inbox. */
 const MAIL_API = process.env.E2E_MAIL_API ?? "http://127.0.0.1:54324/api/v1";
@@ -130,4 +132,75 @@ export async function hydrated(page: Page) {
     const form = document.querySelector("main form, form");
     return !!form && Object.keys(form).some((k) => k.startsWith("__reactProps$"));
   });
+}
+
+// ---------------------------------------------------------------- till pairing and PINs (step 1.7)
+
+export const TILL_NAME = "Maeve";
+export const TILL_PIN = "2580";
+
+/** The signed-in owner or manager sets their till name and PIN in the back office. */
+export async function setMyPin(page: Page, orgId: string, name = TILL_NAME, pin = TILL_PIN) {
+  await page.goto(`/o/${orgId}/settings/pin`);
+  await page.getByLabel("Name shown on the till").fill(name);
+  await page.getByLabel("New PIN").fill(pin);
+  await page.getByLabel("Repeat the PIN").fill(pin);
+  await page.getByRole("button", { name: "Save PIN" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "PIN saved" })).toBeVisible();
+}
+
+/** A manager makes a pairing code for the till called `till` and returns it as typed (ABCD-EFGH). */
+export async function makePairingCode(page: Page, orgId: string, till = "Till 1") {
+  await page.goto(`/o/${orgId}/settings/tills`);
+  // "Pair Till 1" the first time, "Pair again Till 1" once it has been paired.
+  await page.getByRole("button", { name: new RegExp(`^Pair (again )?${till}$`) }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByText(`Pairing code for ${till}`)).toBeVisible();
+  const code = (await dialog.locator("p.font-mono span[aria-hidden]").textContent())!.trim();
+  expect(code).toMatch(/^[A-Z2-9]{4}-[A-Z2-9]{4}$/);
+  return code;
+}
+
+/**
+ * Every test comes from the same IP, and pairing is limited to 10 tries per 15 minutes per IP, so
+ * a run of tests would lock itself out. Clears that one bucket (as an administrator, local only).
+ */
+export async function resetPairingLimit() {
+  config({ path: ".env.local", quiet: true });
+  const sql = postgres(process.env.DIRECT_URL ?? "", { max: 1, onnotice: () => {} });
+  try {
+    await sql`delete from rate_limits where bucket = 'pair'`;
+  } finally {
+    await sql.end();
+  }
+}
+
+/** Types a pairing code on the till's pair page; ends on the till's lock screen. */
+export async function pairWithCode(page: Page, code: string) {
+  await resetPairingLimit();
+  await page.goto("/register/pair");
+  await hydrated(page);
+  await page.getByLabel("Pairing code").fill(code);
+  await page.getByRole("button", { name: "Pair this till" }).click();
+}
+
+/** Picks `name` on the lock screen and enters the PIN; ends on the till. */
+export async function unlockTill(page: Page, name = TILL_NAME, pin = TILL_PIN) {
+  await page.getByRole("button", { name: new RegExp(`^${name}`) }).click();
+  await page.getByLabel(`PIN for ${name}`).fill(pin);
+  await page.getByRole("button", { name: "Unlock" }).click();
+  await expect(page.getByRole("button", { name: /^Lock till/ })).toBeVisible();
+}
+
+/**
+ * The whole journey for a till under test: PIN, pairing code, pair this browser, unlock. Leaves
+ * the page on the register. (The browser keeps its back-office session too; the till itself only
+ * ever uses the device cookie.)
+ */
+export async function openTill(page: Page, orgId: string) {
+  await setMyPin(page, orgId);
+  const code = await makePairingCode(page, orgId);
+  await pairWithCode(page, code);
+  await expect(page).toHaveURL(new RegExp(`/register/${orgId}$`));
+  await unlockTill(page);
 }

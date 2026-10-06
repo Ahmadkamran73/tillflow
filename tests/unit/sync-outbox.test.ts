@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import Dexie from "dexie";
 import { v7 as uuidv7 } from "uuid";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Cart } from "@/lib/register/cart";
 import { RegisterDb } from "@/lib/register/db";
 import { completeSale } from "@/lib/register/sale";
@@ -41,10 +41,12 @@ beforeEach(async () => {
   db = new RegisterDb(ORG);
 });
 
+const CASHIER = "00000000-0000-4000-8000-0000000000d1";
+
 const sell = (n = 1) =>
   Promise.all(
     Array.from({ length: n }, () =>
-      completeSale(db, { registerId: REG, cart, tenderedCents: 2000, expectedDueCents: 1235 }),
+      completeSale(db, { registerId: REG, cashierUserId: CASHIER, cart, tenderedCents: 2000, expectedDueCents: 1235 }),
     ),
   );
 
@@ -85,12 +87,14 @@ describe("completeSale (the outbox write)", () => {
     });
     await db.meta.put({ key: "pulledAt", value: "2026-10-06T11:00:00.000Z" });
     const a = await completeSale(db, {
+      cashierUserId: CASHIER,
       registerId: REG,
       cart,
       tenderedCents: 2000,
       expectedDueCents: 1,
     });
     const b = await completeSale(db, {
+      cashierUserId: CASHIER,
       registerId: REG,
       cart,
       tenderedCents: 2000,
@@ -106,6 +110,7 @@ describe("drainOutbox", () => {
     // Real UUIDv7 ids are minted a moment apart, so insertion order is id order.
     for (let i = 0; i < 30; i++) {
       await completeSale(db, {
+        cashierUserId: CASHIER,
         registerId: REG,
         cart,
         tenderedCents: 2000,
@@ -169,6 +174,7 @@ describe("drainOutbox", () => {
   it("a rejected sale is flagged and the queue moves on", async () => {
     for (let i = 0; i < 3; i++) {
       await completeSale(db, {
+        cashierUserId: CASHIER,
         registerId: REG,
         cart,
         tenderedCents: 2000,
@@ -207,6 +213,7 @@ describe("drainOutbox", () => {
   it("splits a batch the server calls too big, and keeps a single refused sale pending", async () => {
     for (let i = 0; i < 4; i++) {
       await completeSale(db, {
+        cashierUserId: CASHIER,
         registerId: REG,
         cart,
         tenderedCents: 2000,
@@ -250,6 +257,7 @@ describe("drainOutbox", () => {
     const sale = (JSON.parse(body) as { sales: Record<string, unknown>[] }).sales[0]!;
     expect(Object.keys(sale).sort()).toEqual(
       [
+        "cashierUserId",
         "completedAt",
         "expectedDueCents",
         "id",
@@ -265,6 +273,7 @@ describe("drainOutbox", () => {
   it("drops synced sales after 30 days, never pending or rejected ones", async () => {
     const old = uuidv7();
     const base = await completeSale(db, {
+      cashierUserId: CASHIER,
       registerId: REG,
       cart,
       tenderedCents: 2000,
@@ -345,5 +354,72 @@ describe("Dexie upgrade from v2", () => {
     expect(await pendingSales(upgraded)).toHaveLength(1);
     upgraded.close();
     await Dexie.delete(name);
+  });
+});
+
+describe("register events outbox", () => {
+  const event = (over: Record<string, unknown> = {}) => ({
+    id: uuidv7(),
+    kind: "no_sale" as const,
+    at: new Date().toISOString(),
+    cashierUserId: CASHIER,
+    approvalId: "00000000-0000-4000-8000-0000000000c1",
+    detail: {},
+    syncState: "pending" as const,
+    ...over,
+  });
+  const answer = (status: number, results: unknown[] = []) =>
+    vi.fn(async (url: string) =>
+      url.includes("/events")
+        ? Response.json({ results }, { status })
+        : Response.json({ results: [] }),
+    ) as unknown as typeof fetch;
+
+  it("sends queued events after the sales and removes the recorded ones", async () => {
+    const a = event();
+    const b = event();
+    await db.events.bulkAdd([a, b]);
+    const fetchFn = answer(200, [
+      { id: a.id, status: "recorded" },
+      { id: b.id, status: "recorded" },
+    ]);
+    expect((await drainOutbox(db, ORG, { fetchFn })).state).toBe("idle");
+    expect(await db.events.count()).toBe(0);
+    const [, init] = (fetchFn as unknown as { mock: { calls: [string, RequestInit][] } }).mock
+      .calls[0]!;
+    const wire = (JSON.parse(init.body as string) as { events: Record<string, unknown>[] }).events;
+    expect(Object.keys(wire[0]!).sort()).toEqual(
+      ["approvalId", "at", "cashierUserId", "detail", "id", "kind"].sort(),
+    );
+  });
+
+  it("keeps a rejected event flagged and does not send it again", async () => {
+    const a = event();
+    await db.events.add(a);
+    await drainOutbox(db, ORG, { fetchFn: answer(200, [{ id: a.id, status: "rejected" }]) });
+    expect((await db.events.get(a.id))?.syncState).toBe("rejected");
+    const again = answer(200);
+    await drainOutbox(db, ORG, { fetchFn: again, force: true });
+    expect(again).not.toHaveBeenCalled();
+  });
+
+  it("keeps everything and backs off when the server cannot be reached or fails", async () => {
+    const a = event();
+    await db.events.add(a);
+    const down = (async () => {
+      throw new TypeError("offline");
+    }) as unknown as typeof fetch;
+    expect((await drainOutbox(db, ORG, { fetchFn: down })).state).toBe("backoff");
+    expect((await drainOutbox(db, ORG, { fetchFn: answer(503), force: true })).state).toBe(
+      "backoff",
+    );
+    expect((await db.events.get(a.id))?.syncState).toBe("pending");
+  });
+
+  it("an unpaired till is reported and its events stay queued", async () => {
+    const a = event();
+    await db.events.add(a);
+    expect((await drainOutbox(db, ORG, { fetchFn: answer(401) })).state).toBe("signed-out");
+    expect(await db.events.count()).toBe(1);
   });
 });

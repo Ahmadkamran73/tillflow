@@ -158,6 +158,7 @@ export const syncRejectionReasons = [
   "bad_time",
   "receipt_number_used",
   "cannot_price",
+  "discount_needs_approval",
 ] as const;
 
 /** A sale the server refused: the manager's "Needs attention" list. `id` is the sale id. */

@@ -10,7 +10,12 @@ import type { SyncSale } from "./protocol";
 export function buildSaleRecord(args: {
   orgId: string;
   registerId: string;
+  /** The cashier who rang the sale up (their PIN unlocked the till). */
   userId: string;
+  /** Trusted callers only: the manager who approved it from the back office (no till supplies this). */
+  approverUserId?: string;
+  /** A till's proof of a manager PIN (register_approvals.id); the database derives the approver. */
+  approvalId?: string;
   sale: SyncSale;
   cart: Cart;
   priced: PricedCart;
@@ -63,6 +68,8 @@ export function buildSaleRecord(args: {
       org_id: args.orgId,
       register_id: args.registerId,
       user_id: args.userId,
+      approved_by: args.approverUserId ?? null,
+      approval_id: args.approvalId ?? null,
       receipt_seq: sale.receiptSeq,
       mode: sale.mode,
       completed_at: sale.completedAt,

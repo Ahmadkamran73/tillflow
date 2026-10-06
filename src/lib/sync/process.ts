@@ -1,5 +1,6 @@
 import { z } from "zod";
-import type { Cart, PricedCart } from "@/lib/register/cart";
+import { discountNeedsOverride } from "@/lib/money";
+import { lineTotal, unitWithModifiers, type Cart, type PricedCart } from "@/lib/register/cart";
 import { SaleError } from "@/lib/register/sale-input";
 import { buildSaleRecord } from "./sale-record";
 import { syncSale, type SyncReason, type SyncResult, type SyncSale } from "./protocol";
@@ -15,7 +16,18 @@ export type SyncDeps = {
   recordRejection: (payload: unknown) => Promise<void>;
 };
 
-export type SyncCtx = { orgId: string; registerId: string; userId: string };
+/** The shop and till come from the authenticated device (or the manager's session), never from the payload. */
+export type SyncCtx = {
+  orgId: string;
+  registerId: string;
+  /** A discount above this share (basis points) of a line or the sale needs a manager's approval. */
+  discountOverrideBp: number;
+  /**
+   * TRUSTED callers only (the back office re-running a held sale: the signed-in manager). The sync
+   * route for tills never sets this; a till can only present an approvalId.
+   */
+  approverUserId?: string;
+};
 
 const DAY = 86_400_000;
 /** A till's clock may be wrong, but not by months, and never far in the future. */
@@ -27,10 +39,11 @@ export const MAX_CATALOG_AGE_MS = 30 * DAY;
 export const TOLERANCE_CENTS = 1;
 
 /** A real UUID, or undefined: an id that only looks like one would make the database throw and block the till. */
-const uuidOf = (raw: unknown): string | undefined => {
-  const id = (raw as { id?: unknown } | null)?.id;
+const uuidOfField = (raw: unknown, field: string): string | undefined => {
+  const id = (raw as Record<string, unknown> | null)?.[field];
   return z.uuid().safeParse(id).success ? (id as string) : undefined;
 };
+const uuidOf = (raw: unknown) => uuidOfField(raw, "id");
 
 /** The database refuses rejection payloads over 64 KB; a huge sale keeps only its identity. */
 const storable = (payload: Record<string, unknown>) =>
@@ -115,7 +128,7 @@ async function processOne(raw: unknown, ctx: SyncCtx, deps: SyncDeps): Promise<S
       id,
       org_id: ctx.orgId,
       register_id: ctx.registerId,
-      user_id: ctx.userId,
+      user_id: uuidOfField(raw, "cashierUserId") ?? null,
       reason: "invalid",
       detail: {},
       payload: { invalid: true, raw: storable({ raw }) },
@@ -129,11 +142,11 @@ async function processOne(raw: unknown, ctx: SyncCtx, deps: SyncDeps): Promise<S
       id: sale.id,
       org_id: ctx.orgId,
       register_id: ctx.registerId,
-      user_id: ctx.userId,
+      user_id: sale.cashierUserId,
       reason: r.reason,
       detail: r.detail,
       // Cart inputs only: the VAT invoice (customer data) is never part of a sale on the wire.
-      payload: storable({ ...sale, cashierUserId: ctx.userId }),
+      payload: storable({ ...sale }),
     });
     return { id: sale.id, status: "rejected", reason: r.reason };
   };
@@ -155,6 +168,23 @@ async function processOne(raw: unknown, ctx: SyncCtx, deps: SyncDeps): Promise<S
   }
   if (!match.ok) return reject(match.rejection);
 
+  // A discount above the shop's limit needs a manager's PIN on the till (sale.approvedBy). The
+  // database re-checks that the approver really is a manager or owner of this shop.
+  const needsApproval = discountNeedsOverride(
+    match.cart.lines.map((l, i) => ({
+      unitPrice: unitWithModifiers(l),
+      qty: l.qty,
+      gross: lineTotal(match.priced, match.priced.itemIndex[i]!),
+    })),
+    ctx.discountOverrideBp,
+  );
+  if (needsApproval && !sale.approvalId && !ctx.approverUserId) {
+    return reject({
+      reason: "discount_needs_approval",
+      detail: { thresholdBp: ctx.discountOverrideBp },
+    });
+  }
+
   const due = match.priced.basket.amountDue;
   if (sale.tenderedCents < due) {
     return reject({
@@ -169,7 +199,9 @@ async function processOne(raw: unknown, ctx: SyncCtx, deps: SyncDeps): Promise<S
       buildSaleRecord({
         orgId: ctx.orgId,
         registerId: ctx.registerId,
-        userId: ctx.userId,
+        userId: sale.cashierUserId,
+        approverUserId: needsApproval ? ctx.approverUserId : undefined,
+        approvalId: needsApproval && !ctx.approverUserId ? sale.approvalId : undefined,
         sale,
         cart: match.cart,
         priced: match.priced,
@@ -179,6 +211,14 @@ async function processOne(raw: unknown, ctx: SyncCtx, deps: SyncDeps): Promise<S
   } catch (e) {
     if (!isDeterministic(e) && !(e instanceof Error && e.message.startsWith("item line must")))
       throw e;
+    // An approval the database does not accept (used, expired, another till's, forged) is the same
+    // outcome as none: the sale is held for a manager.
+    if (needsApproval && (e as { code?: string }).code === "42501") {
+      return reject({
+        reason: "discount_needs_approval",
+        detail: { thresholdBp: ctx.discountOverrideBp, approval: "not valid" },
+      });
+    }
     return reject({ reason: "invalid", detail: { message: "sale could not be recorded" } });
   }
   if (outcome === "receipt_clash") {

@@ -4,7 +4,7 @@ import { reportError } from "@/lib/errors";
 import { createMemoryLimiter } from "@/lib/rate-limit/memory";
 import { authenticateRegister } from "@/lib/sync/auth";
 import { MAX_BODY_BYTES, syncBatch } from "@/lib/sync/protocol";
-import { syncSales } from "@/lib/sync/server";
+import { syncSalesFromDevice } from "@/lib/sync/server";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +12,8 @@ export const dynamic = "force-dynamic";
 const limiter = createMemoryLimiter(120, 60_000);
 
 /**
- * POST /api/v1/sync/sales?orgId=<uuid>: the register's outbox. Authenticates, validates each sale,
+ * POST /api/v1/sync/sales?orgId=<uuid>: the register's outbox. Authenticates the paired device by
+ * its token (httpOnly cookie), validates each sale,
  * has the server re-price it, and records it once (idempotent on the sale id). An empty batch is a
  * heartbeat. Answers 2xx with a result per sale (created | duplicate | rejected); anything else
  * means "nothing was lost, try again".
@@ -38,12 +39,12 @@ export async function POST(request: NextRequest) {
 
   const auth = await authenticateRegister(orgId.data, batch.data.registerId);
   if (!auth.ok) return Response.json({ error: "not allowed" }, { status: auth.status });
-  if (!limiter.take(auth.userId)) {
+  if (!limiter.take(auth.registerId)) {
     return Response.json({ error: "slow down" }, { status: 429, headers: { "Retry-After": "30" } });
   }
 
   try {
-    const results = await syncSales(batch.data.sales, auth);
+    const results = await syncSalesFromDevice(batch.data.sales, auth);
     return Response.json({ results }, { headers: { "Cache-Control": "no-store" } });
   } catch (e) {
     await reportError(e, { source: "server", route: "/api/v1/sync/sales" });

@@ -16,7 +16,15 @@ export const receiptNo = (registerName: string, seq: number) =>
  */
 export async function completeSale(
   db: RegisterDb,
-  input: { registerId: string; cart: Cart; tenderedCents: number; expectedDueCents: number },
+  input: {
+    registerId: string;
+    cashierUserId: string;
+    /** Set only when a discount above the shop's limit was approved with a manager's PIN (online). */
+    approvalId?: string;
+    cart: Cart;
+    tenderedCents: number;
+    expectedDueCents: number;
+  },
 ): Promise<LocalSale> {
   return db.transaction("rw", db.meta, db.sales, async () => {
     const key = `receiptSeq:${input.registerId}`;
@@ -28,6 +36,8 @@ export async function completeSale(
     const sale: LocalSale = {
       id: uuidv7(),
       registerId: input.registerId,
+      cashierUserId: input.cashierUserId,
+      approvalId: input.approvalId,
       receiptSeq: seq,
       completedAt: new Date().toISOString(),
       cart: input.cart,
