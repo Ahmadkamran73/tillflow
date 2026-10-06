@@ -520,3 +520,35 @@ describe("register_last_seqs", () => {
       ).toHaveLength(0);
     }));
 });
+
+describe("stock ledger scoping for cashiers", () => {
+  it("a cashier sees opening stock, adjustments and their own sales, not other cashiers' sales", () =>
+    inWorld(async (ctx) => {
+      const { sql, world, as } = ctx;
+      const { pid, vid } = await seedProduct(ctx, world.a.orgId);
+      await sql`insert into stock_movements (id, org_id, variant_id, location_id, qty_delta, reason)
+                values (${randomUUID()}, ${world.a.orgId}, ${vid}, ${world.a.locationId}, 20, 'opening')`;
+      await record(ctx, salePayload(world.a, vid, pid, { receipt_seq: 1 })); // by the cashier
+      await record(
+        ctx,
+        salePayload(world.a, vid, pid, {
+          id: randomUUID(),
+          receipt_seq: 2,
+          user_id: world.a.manager.userId,
+        }),
+      );
+      const reasons = async (actor: Shop["owner"]) =>
+        (await as(actor, () => sql`select reason, actor_user_id from stock_movements`)).map(
+          (r) => `${r.reason}:${r.actor_user_id === actor.userId ? "me" : "other"}`,
+        );
+      expect((await reasons(world.a.cashier)).sort()).toEqual(["opening:other", "sale:me"]);
+      expect((await reasons(world.a.manager)).sort()).toEqual([
+        "opening:other",
+        "sale:me",
+        "sale:other",
+      ]);
+      expect(await as(world.a.cashier, () => sql`select on_hand from stock_levels`)).toHaveLength(
+        1,
+      );
+    }));
+});

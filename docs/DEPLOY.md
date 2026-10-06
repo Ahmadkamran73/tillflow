@@ -125,7 +125,7 @@ They were planned and then dropped in step 0.6: their free tiers would not cope 
 
 ## Sale sync and the service worker (step 1.6)
 
-- Migrations 0018-0019 (sales, price history, `ops.record_sale`) are applied by `migrate-staging` like any other.
+- Migrations 0018-0020 (sales, price history, `ops.record_sale`, cashier-scoped reads) are applied by `migrate-staging` like any other.
 - The register's service worker (`public/sw.js`) is built by `next build --webpack` (the build command already used on Hostinger) and served with `Cache-Control: no-cache`. It is not committed. A deploy replaces it and clients pick it up on the next load.
 - Sync needs `JOBS_DATABASE_URL` (the `tillflow_ops` role, as for jobs) on every app; without it `POST /api/v1/sync/sales` answers 503 and tills keep their sales and retry.
 - A till that has not reached the server for 24 hours shows a warning on the register; managers see open items under Sales > Needs attention.
