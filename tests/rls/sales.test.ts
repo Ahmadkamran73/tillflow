@@ -172,6 +172,43 @@ describe("ops.record_sale", () => {
 });
 
 describe("sales tables: RLS and append-only", () => {
+  it("a cashier reads only the sales they rang up; managers and owners read the shop's", () =>
+    inWorld(async (ctx) => {
+      const { sql, world, as } = ctx;
+      const { pid, vid } = await seedProduct(ctx, world.a.orgId);
+      const mine = salePayload(world.a, vid, pid, { receipt_seq: 1 });
+      const theirs = salePayload(world.a, vid, pid, {
+        id: randomUUID(),
+        receipt_seq: 2,
+        user_id: world.a.manager.userId,
+      });
+      await record(ctx, mine);
+      await record(ctx, theirs);
+
+      const ids = async (actor: Shop["owner"], table: string) =>
+        (
+          await as(
+            actor,
+            () => sql`select ${sql(table === "sales" ? "id" : "sale_id")} as k from ${sql(table)}`,
+          )
+        ).map((r) => r.k as string);
+      for (const table of ["sales", "sale_lines", "payments"]) {
+        expect(await ids(world.a.cashier, table)).toEqual([mine.sale.id]);
+        expect((await ids(world.a.manager, table)).sort()).toEqual(
+          [mine.sale.id, theirs.sale.id].sort(),
+        );
+        expect((await ids(world.a.owner, table)).sort()).toEqual(
+          [mine.sale.id, theirs.sale.id].sort(),
+        );
+      }
+      // The cashier still gets the shop's real last receipt number, so numbers are never reused.
+      const seqs = await as(
+        world.a.cashier,
+        () => sql`select * from public.register_last_seqs(${world.a.orgId})`,
+      );
+      expect(seqs).toEqual([{ register_id: world.a.registerId, last_seq: 2 }]);
+    }));
+
   it("members read their shop's sales; Shop B and anon see nothing of Shop A", () =>
     inWorld(async (ctx) => {
       const { sql, world, as } = ctx;
@@ -446,6 +483,7 @@ describe("price history and as-of catalogue", () => {
       const { sql, world, as, denied } = ctx;
       const a = await seedProduct(ctx, world.a.orgId);
       await seedProduct(ctx, world.b.orgId);
+      await seedGroup(ctx, world.a.orgId); // so modifier_price_history has a row for the trigger to refuse
       for (const table of ["variant_price_history", "modifier_price_history"] as const) {
         const rows = await as(world.a.cashier, () => sql`select org_id from ${sql(table)}`);
         expect(rows.every((r) => r.org_id === world.a.orgId)).toBe(true);

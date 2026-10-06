@@ -20,12 +20,17 @@ alter table public.payments enable row level security;
 revoke all on public.sales, public.sale_lines, public.payments from anon, authenticated;
 grant select on public.sales, public.sale_lines, public.payments to authenticated;
 
+-- Managers and owners read every sale of the shop; a cashier reads only the sales they rang up.
+-- Lines and payments follow their sale (the subquery on sales is itself filtered by the policy).
 create policy sales_select on public.sales for select to authenticated
-  using (org_id in (select app.current_org_ids()));
+  using (
+    org_id in (select app.manager_org_ids())
+    or (org_id in (select app.current_org_ids()) and cashier_user_id = (select app.current_user_id()))
+  );
 create policy sale_lines_select on public.sale_lines for select to authenticated
-  using (org_id in (select app.current_org_ids()));
+  using (org_id in (select app.current_org_ids()) and sale_id in (select s.id from public.sales s));
 create policy payments_select on public.payments for select to authenticated
-  using (org_id in (select app.current_org_ids()));
+  using (org_id in (select app.current_org_ids()) and sale_id in (select s.id from public.sales s));
 
 create trigger sales_append_only before update or delete on public.sales
   for each row execute function app.forbid_change();
@@ -185,13 +190,17 @@ revoke all on function public.sale_catalog_as_of(uuid, uuid[], uuid[], timestamp
 grant execute on function public.sale_catalog_as_of(uuid, uuid[], uuid[], timestamptz) to authenticated;
 
 -- The highest receipt number each till has on the server, so a device whose browser data was
--- cleared carries on after it instead of repeating numbers. SECURITY INVOKER (RLS applies).
+-- cleared carries on after it instead of repeating numbers. SECURITY DEFINER because a cashier
+-- cannot read other cashiers' sales but must still not reuse their numbers; it returns only
+-- numbers, and only to a member of the shop.
 create function public.register_last_seqs(p_org uuid)
 returns table (register_id uuid, last_seq integer)
-language sql stable security invoker set search_path = ''
+language sql stable security definer set search_path = ''
 as $$
   select s.register_id, max(s.receipt_seq)::integer
-  from public.sales s where s.org_id = p_org group by s.register_id
+  from public.sales s
+  where s.org_id = p_org and p_org in (select app.current_org_ids())
+  group by s.register_id
 $$;
 revoke all on function public.register_last_seqs(uuid) from public, anon;
 grant execute on function public.register_last_seqs(uuid) to authenticated;
