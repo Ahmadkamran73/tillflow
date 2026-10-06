@@ -382,10 +382,14 @@ describe("price history and as-of catalogue", () => {
     inWorld(async (ctx) => {
       const { sql, world, as } = ctx;
       const { pid, vid } = await seedProduct(ctx, world.a.orgId);
+      await sql`select pg_sleep(0.02)`; // a JS Date keeps milliseconds, the database microseconds
       const t0 = (await sql`select clock_timestamp() as t`)[0]!.t as Date;
       await sql`select pg_sleep(0.02)`;
+      await sql`select pg_sleep(0.02)`;
       await sql`update variants set price_incl_vat_cents = 500 where id = ${vid}`;
+      await sql`select pg_sleep(0.02)`; // a JS Date keeps milliseconds, the database microseconds
       const t1 = (await sql`select clock_timestamp() as t`)[0]!.t as Date;
+      await sql`select pg_sleep(0.02)`;
       await sql`select pg_sleep(0.02)`;
       await sql`update variants set price_incl_vat_cents = 500 where id = ${vid}`; // no change: no row
       await sql`update variants set price_incl_vat_cents = 900 where id = ${vid}`;
@@ -416,7 +420,9 @@ describe("price history and as-of catalogue", () => {
     inWorld(async (ctx) => {
       const { sql, world, as } = ctx;
       const { pid, vid } = await seedProduct(ctx, world.a.orgId);
+      await sql`select pg_sleep(0.02)`; // a JS Date keeps milliseconds, the database microseconds
       const before = (await sql`select clock_timestamp() as t`)[0]!.t as Date;
+      await sql`select pg_sleep(0.02)`;
       await sql`select pg_sleep(0.02)`;
       await sql`update products set tax_category = 'CATERING', takeaway_tax_category = 'ZERO' where id = ${pid}`;
       await sql`update variants set attributes = '{"depositCents": 15}'::jsonb where id = ${vid}`;
