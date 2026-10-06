@@ -131,3 +131,135 @@ export async function recordSyncRejection(payload: unknown): Promise<void> {
 export async function touchRegister(orgId: string, registerId: string, userId: string) {
   await db()`select ops.touch_register(${orgId}, ${registerId}, ${userId})`;
 }
+
+// ---------------------------------------------------------------- device pairing and PINs (step 1.7)
+// A paired till holds only a device token; the app passes its SHA-256 hash. Each function resolves
+// the shop and the till from that hash itself and never trusts an org or register id from the till.
+
+export type DeviceContext = { orgId: string; registerId: string; locationId: string };
+
+/** Who is this token? null when unknown, revoked or the shop is closed. Also the till's heartbeat. */
+export async function deviceAuth(tokenHash: string): Promise<DeviceContext | null> {
+  const [row] = await db()<{ org_id: string; register_id: string; location_id: string }[]>`
+    select * from ops.device_auth(${tokenHash})`;
+  return row
+    ? { orgId: row.org_id, registerId: row.register_id, locationId: row.location_id }
+    : null;
+}
+
+/** Exchanges a pairing code (hashed) for the till it was issued for. null: unknown, used or expired. */
+export async function pairRegister(
+  codeHash: string,
+  tokenHash: string,
+): Promise<{ orgId: string; registerId: string } | null> {
+  const [row] = await db()<{ org_id: string; register_id: string }[]>`
+    select * from ops.pair_register(${codeHash}, ${tokenHash})`;
+  return row ? { orgId: row.org_id, registerId: row.register_id } : null;
+}
+
+export async function deviceFeedMeta(tokenHash: string): Promise<unknown> {
+  const [row] = await db()<{ m: unknown }[]>`select ops.device_feed_meta(${tokenHash}) as m`;
+  return row?.m ?? null;
+}
+
+/** Timezone, VAT rates and the discount threshold of the till's shop, for re-pricing synced sales. */
+export async function deviceSyncMeta(tokenHash: string): Promise<unknown> {
+  const [row] = await db()<{ m: unknown }[]>`select ops.device_sync_meta(${tokenHash}) as m`;
+  return row?.m ?? null;
+}
+
+export type FeedTable =
+  | "categories"
+  | "products"
+  | "variants"
+  | "modifier_groups"
+  | "modifiers"
+  | "product_modifier_groups";
+
+export async function deviceFeedTable(
+  tokenHash: string,
+  table: FeedTable,
+  since: Date | null,
+  after: string | null,
+  limit: number,
+): Promise<unknown[] | null> {
+  const [row] = await db()<{ t: unknown[] | null }[]>`
+    select ops.device_feed_table(${tokenHash}, ${table}, ${since}, ${after}, ${limit}) as t`;
+  return row?.t ?? null;
+}
+
+export async function deviceSaleCatalogAsOf(
+  tokenHash: string,
+  variantIds: string[],
+  modifierIds: string[],
+  at: Date,
+): Promise<unknown> {
+  const [row] = await db()<{ c: unknown }[]>`
+    select ops.device_sale_catalog_as_of(${tokenHash}, ${variantIds}::uuid[], ${modifierIds}::uuid[], ${at}) as c`;
+  return row?.c ?? null;
+}
+
+export async function deviceSalesKnown(tokenHash: string, ids: string[]): Promise<string[]> {
+  const rows = await db()<{ id: string }[]>`
+    select ops.device_sales_known(${tokenHash}, ${ids}::uuid[]) as id`;
+  return rows.map((r) => r.id);
+}
+
+export type PinAttemptBegin =
+  | { status: "ok"; pinHash: string; role: "owner" | "manager" | "cashier" }
+  | { status: "locked"; lockedUntil: Date }
+  | { status: "no_pin" };
+
+/** Reserves one attempt BEFORE the PIN is checked (see migration 0022), so parallel guesses cannot beat the limit. */
+export async function pinAttemptBegin(tokenHash: string, userId: string): Promise<PinAttemptBegin> {
+  const [row] = await db()<
+    {
+      status: string;
+      pin_hash: string | null;
+      role: "owner" | "manager" | "cashier" | null;
+      locked_until: Date | null;
+    }[]
+  >`select * from ops.pin_attempt_begin(${tokenHash}, ${userId})`;
+  if (!row) throw new Error("pin_attempt_begin returned no row");
+  if (row.status === "ok" && row.pin_hash && row.role) {
+    return { status: "ok", pinHash: row.pin_hash, role: row.role };
+  }
+  if (row.status === "locked" && row.locked_until) {
+    return { status: "locked", lockedUntil: row.locked_until };
+  }
+  return { status: "no_pin" };
+}
+
+export async function pinAttemptFinish(
+  tokenHash: string,
+  userId: string,
+  ok: boolean,
+): Promise<{ locked: boolean; lockedUntil: Date | null }> {
+  const [row] = await db()<{ locked: boolean; locked_until: Date | null }[]>`
+    select * from ops.pin_attempt_finish(${tokenHash}, ${userId}, ${ok})`;
+  return { locked: row?.locked === true, lockedUntil: row?.locked_until ?? null };
+}
+
+export type ApprovalPurpose = "discount" | "no_sale" | "refund";
+
+/**
+ * Turns a manager PIN the server just verified into a single-use proof (register_approvals) for one
+ * sale or event on this till. The sale/event carries only the returned id; the database derives the
+ * approver from it.
+ */
+export async function issueApproval(
+  tokenHash: string,
+  userId: string,
+  purpose: ApprovalPurpose,
+): Promise<string> {
+  const [row] = await db()<{ id: string }[]>`
+    select ops.issue_approval(${tokenHash}, ${userId}, ${purpose}) as id`;
+  if (!row) throw new Error("issue_approval returned no row");
+  return row.id;
+}
+
+export async function recordRegisterEvents(tokenHash: string, events: unknown): Promise<string[]> {
+  const rows = await db()<{ id: string }[]>`
+    select ops.record_register_events(${tokenHash}, ${db().json(events as postgres.JSONValue)}) as id`;
+  return rows.map((r) => r.id);
+}

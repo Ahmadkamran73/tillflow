@@ -1,19 +1,20 @@
 "use server";
 
-import { requireRole, createSupabaseServerClient } from "@/lib/auth";
 import { presets } from "@/config/business-type-presets";
+import { authenticateDevice } from "@/lib/device/auth";
+import { parseFeedMeta, mapTaxRates } from "@/lib/device/meta";
+import { deviceFeedMeta, deviceSaleCatalogAsOf } from "@/lib/device/service";
 import { sendMail } from "@/lib/email";
 import { t } from "@/lib/i18n";
-import { getLocation } from "@/lib/catalog";
-import { getOrganisation } from "@/lib/org";
 import { rateLimit } from "@/lib/rate-limit";
 import { changeDue } from "@/lib/money";
-import { priceSaleOnServer } from "@/lib/register/price-server";
+import { priceRows } from "@/lib/register/price-server";
 import { buildReceipt, receiptLabels, receiptText } from "@/lib/register/receipt";
 import { emailReceiptInput, SaleError } from "@/lib/register/sale-input";
+import { rowsFromAsOf } from "@/lib/sync/as-of";
 
 export type EmailReceiptResult =
-  { ok: true } | { ok: false; reason: "invalid" | "prices" | "rate" | "failed" };
+  { ok: true } | { ok: false; reason: "invalid" | "prices" | "rate" | "failed" | "unpaired" };
 
 /**
  * Receipts are sent from the platform mailbox (ALERT_FROM) but show the business name as the
@@ -29,12 +30,13 @@ const escapeHtml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 /**
- * Emails a receipt or VAT invoice. The sale is not on the server yet (sync is step 1.6), so the
- * cart is re-priced here from the server catalogue; if that differs from what the till showed
- * the email is refused. The customer's address is used once and never stored or logged.
+ * Emails a receipt or VAT invoice for a paired till (identified by its device token, not a user
+ * session). The cart is re-priced here from the server catalogue; if that differs from what the
+ * till showed the email is refused. The customer's address is used once and never stored or logged.
  */
 export async function emailReceipt(orgId: string, raw: unknown): Promise<EmailReceiptResult> {
-  const { user } = await requireRole(["owner", "manager", "cashier"], orgId);
+  const device = await authenticateDevice(orgId);
+  if (!device.ok) return { ok: false, reason: "unpaired" };
   const input = emailReceiptInput.safeParse(raw);
   if (!input.success) return { ok: false, reason: "invalid" };
   const data = input.data;
@@ -42,23 +44,26 @@ export async function emailReceipt(orgId: string, raw: unknown): Promise<EmailRe
   const age = Date.now() - new Date(data.completedAt).getTime();
   if (age > 7 * 86_400_000 || age < -86_400_000) return { ok: false, reason: "invalid" };
 
-  const limit = await rateLimit("receipt-email", user.id);
-  const orgLimit = await rateLimit("receipt-email-org", orgId);
+  const limit = await rateLimit("receipt-email", device.registerId);
+  const orgLimit = await rateLimit("receipt-email-org", device.orgId);
   if (!limit.allowed || !orgLimit.allowed) return { ok: false, reason: "rate" };
 
-  const [org, location] = await Promise.all([getOrganisation(orgId), getLocation(orgId)]);
-  if (!org || !location) return { ok: false, reason: "failed" };
-  const supabase = await createSupabaseServerClient();
-  const { data: loc } = await supabase
-    .from("locations")
-    .select("address, eircode, receipt_footer")
-    .eq("id", location.id)
-    .eq("org_id", orgId)
-    .maybeSingle();
+  const rawMeta = await deviceFeedMeta(device.tokenHash);
+  if (!rawMeta) return { ok: false, reason: "unpaired" };
+  const meta = parseFeedMeta(rawMeta);
+  const org = { name: meta.org.name, legalName: meta.org.legal_name, vatNumber: meta.org.vat_number };
+  const location = meta.location;
 
   let priced;
   try {
-    priced = await priceSaleOnServer(orgId, data, location.timezone);
+    const rows = await deviceSaleCatalogAsOf(
+      device.tokenHash,
+      [...new Set(data.lines.map((l) => l.variantId))],
+      [...new Set(data.lines.flatMap((l) => l.modifierIds))],
+      new Date(),
+    );
+    if (!rows) return { ok: false, reason: "unpaired" };
+    priced = priceRows(data, rowsFromAsOf(rows), mapTaxRates(meta.tax_rates), location.timezone);
   } catch (e) {
     return { ok: false, reason: e instanceof SaleError ? "prices" : "failed" };
   }
@@ -82,12 +87,12 @@ export async function emailReceipt(orgId: string, raw: unknown): Promise<EmailRe
       name: org.name,
       legalName: org.legalName,
       vatNumber: org.vatNumber,
-      address: loc?.address ?? null,
-      eircode: loc?.eircode ?? null,
-      receiptFooter: loc?.receipt_footer ?? null,
+      address: location.address,
+      eircode: location.eircode,
+      receiptFooter: location.receipt_footer,
       timezone: location.timezone,
     },
-    options: presets[org.businessType].receipt,
+    options: presets[meta.org.business_type].receipt,
     asInvoice: !!data.invoice,
   });
   changeDue(receipt.tenderedCents, receipt.dueCents); // throws only if the checks above were skipped

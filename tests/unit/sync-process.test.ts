@@ -12,8 +12,10 @@ const P1 = "00000000-0000-4000-8000-0000000000a1";
 const ctx = {
   orgId: "00000000-0000-4000-8000-0000000000f1",
   registerId: "00000000-0000-4000-8000-0000000000e1",
-  userId: "00000000-0000-4000-8000-0000000000d1",
+  discountOverrideBp: 1000,
 };
+const CASHIER = "00000000-0000-4000-8000-0000000000d1";
+const MANAGER = "00000000-0000-4000-8000-0000000000d2";
 
 const rowsAt = (priceCents: number): SaleRows => ({
   variants: [{ id: V1, productId: P1, name: "", priceCents, attributes: {} }],
@@ -25,6 +27,7 @@ const rowsAt = (priceCents: number): SaleRows => ({
 let n = 0;
 const sale = (over: Partial<SyncSale> = {}): SyncSale => ({
   id: `00000000-0000-7000-8000-${String(++n).padStart(12, "0")}`,
+  cashierUserId: CASHIER,
   receiptSeq: n,
   completedAt: NOW.toISOString(),
   mode: "eat_in",
@@ -184,7 +187,7 @@ describe("processBatch", () => {
     const s = sale({ expectedDueCents: 5 });
     await processBatch([s], ctx, d);
     const payload = rejections[0]!.payload as Record<string, unknown>;
-    expect(payload).toEqual({ ...s, cashierUserId: ctx.userId });
+    expect(payload).toEqual({ ...s });
     expect(rejections[0]).toMatchObject({ org_id: ctx.orgId, register_id: ctx.registerId });
   });
 
@@ -279,5 +282,123 @@ describe("errors that would repeat forever", () => {
     const bad = { ...sale(), tenderedCents: -1 };
     await processBatch([bad], ctx, d);
     expect(rejections[0]!.payload).toMatchObject({ invalid: true, raw: { raw: { id: bad.id } } });
+  });
+});
+
+describe("manager override and cashier attribution (step 1.7)", () => {
+  /** A sale of the €12.34 item with a line discount, priced the way the server will price it. */
+  const discounted = (percentBp: number, over: Partial<SyncSale> = {}) => {
+    const base = sale({
+      lines: [{ variantId: V1, qty: 1, modifierIds: [], discount: { percentBp } }],
+      ...over,
+    });
+    const cart = buildServerCart(base, rowsAt(1234));
+    const due = priceCart(cart, { country: "IE", date: "2026-10-06", rates: IRISH_RATES }).basket
+      .amountDue;
+    return { ...base, expectedDueCents: due, tenderedCents: 5000 };
+  };
+
+  it("records the sale under the cashier who rang it up", async () => {
+    const { d, recorded } = deps(() => 1234);
+    await processBatch([sale()], ctx, d);
+    expect((recorded[0] as { sale: Record<string, unknown> }).sale.user_id).toBe(CASHIER);
+  });
+
+  it("a discount at the shop's limit needs no approval", async () => {
+    const { d, recorded } = deps(() => 1234);
+    const [r] = await processBatch([discounted(1000)], ctx, d);
+    expect(r!.status).toBe("created");
+    expect((recorded[0] as { sale: Record<string, unknown> }).sale.approved_by).toBeNull();
+  });
+
+  it("a discount above the limit without a manager's approval is held for a manager", async () => {
+    const { d, recorded, rejections } = deps(() => 1234);
+    const s = discounted(2500);
+    const [r] = await processBatch([s], ctx, d);
+    expect(r).toEqual({ id: s.id, status: "rejected", reason: "discount_needs_approval" });
+    expect(recorded).toHaveLength(0);
+    expect(rejections[0]).toMatchObject({
+      reason: "discount_needs_approval",
+      user_id: CASHIER,
+      detail: { thresholdBp: 1000 },
+    });
+    // Nothing about the cart is lost: Try again can re-run exactly this sale.
+    expect(rejections[0]!.payload).toEqual(s);
+  });
+
+  const APPROVAL = "00000000-0000-4000-8000-0000000000c1";
+
+  it("a till's approval id goes to the database, which derives the approver from it", async () => {
+    const { d, recorded } = deps(() => 1234);
+    const [r] = await processBatch([discounted(2500, { approvalId: APPROVAL })], ctx, d);
+    expect(r!.status).toBe("created");
+    const rec = (recorded[0] as { sale: Record<string, unknown> }).sale;
+    expect(rec.approval_id).toBe(APPROVAL);
+    expect(rec.approved_by).toBeNull(); // a till can never name the approver
+  });
+
+  it("a till cannot name an approver at all: the old field is refused", async () => {
+    const { d, recorded } = deps(() => 1234);
+    const forged = { ...discounted(2500), approvedBy: MANAGER };
+    const [r] = await processBatch([forged], ctx, d);
+    expect(r).toMatchObject({ status: "rejected", reason: "invalid" });
+    expect(recorded).toHaveLength(0);
+  });
+
+  it("the back office re-running a held sale is the manager's own approval (trusted context)", async () => {
+    const { d, recorded } = deps(() => 1234);
+    const [r] = await processBatch([discounted(2500)], { ...ctx, approverUserId: MANAGER }, d);
+    expect(r!.status).toBe("created");
+    const rec = (recorded[0] as { sale: Record<string, unknown> }).sale;
+    expect(rec.approved_by).toBe(MANAGER);
+    expect(rec.approval_id).toBeNull();
+  });
+
+  it("an approval nobody needed is not recorded as an override", async () => {
+    const { d, recorded } = deps(() => 1234);
+    await processBatch([sale({ approvalId: APPROVAL })], { ...ctx, approverUserId: MANAGER }, d);
+    const rec = (recorded[0] as { sale: Record<string, unknown> }).sale;
+    expect(rec.approval_id).toBeNull();
+    expect(rec.approved_by).toBeNull();
+  });
+
+  it("the shop's limit is the one on the server, not anything the till says", async () => {
+    const { d } = deps(() => 1234);
+    const strict = { ...ctx, discountOverrideBp: 0 };
+    const [r] = await processBatch([discounted(500)], strict, d);
+    expect(r!.reason).toBe("discount_needs_approval");
+    const lax = { ...ctx, discountOverrideBp: 10_000 };
+    expect((await processBatch([discounted(9000)], lax, d))[0]!.status).toBe("created");
+  });
+
+  it("an approval the database refuses (spent, expired, another till's, forged) holds the sale for a manager", async () => {
+    const { d, rejections } = deps(() => 1234, {
+      recordSale: async () => {
+        throw Object.assign(new Error("approval not valid"), { code: "42501" });
+      },
+    });
+    const [r] = await processBatch([discounted(2500, { approvalId: APPROVAL })], ctx, d);
+    expect(r).toMatchObject({ status: "rejected", reason: "discount_needs_approval" });
+    expect(rejections).toHaveLength(1);
+    expect(rejections[0]!.detail).toMatchObject({ approval: "not valid" });
+  });
+
+  it("any other permission failure is still just invalid, not a discount hold", async () => {
+    const { d } = deps(() => 1234, {
+      recordSale: async () => {
+        throw Object.assign(new Error("not a member"), { code: "42501" });
+      },
+    });
+    const [r] = await processBatch([sale()], ctx, d);
+    expect(r).toMatchObject({ status: "rejected", reason: "invalid" });
+  });
+
+  it("an unreadable sale is rejected under the cashier it names, if it names a real one", async () => {
+    const { d, rejections } = deps(() => 1234);
+    const named = { ...sale(), tenderedCents: -5 };
+    const nameless = { ...sale(), tenderedCents: -5, cashierUserId: "nobody" };
+    await processBatch([named, nameless], ctx, d);
+    expect(rejections[0]!.user_id).toBe(CASHIER);
+    expect(rejections[1]!.user_id).toBeNull();
   });
 });

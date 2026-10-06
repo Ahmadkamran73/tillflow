@@ -113,6 +113,20 @@
       "when": 1791278933440,
       "tag": "0018_sales_and_sync",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1791286233644,
+      "tag": "0021_device_pairing_and_pins",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1791295358027,
+      "tag": "0022_register_approvals",
+      "breakpoints": true
     }
   ]
 }

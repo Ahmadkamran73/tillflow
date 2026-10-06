@@ -6,7 +6,7 @@ import { z } from "zod";
 import { createSupabaseServerClient, requireRole } from "@/lib/auth";
 import { logger } from "@/lib/logger";
 import { syncSale } from "./protocol";
-import { syncSales } from "./server";
+import { syncSalesFromSession } from "./server";
 
 const str = (formData: FormData, key: string) => {
   const v = formData.get(key);
@@ -25,29 +25,31 @@ export async function retryRejectedSaleAction(formData: FormData): Promise<void>
   const parsed = input.safeParse({ orgId: str(formData, "orgId"), id: str(formData, "id") });
   if (!parsed.success) redirect("/o");
   const { orgId, id } = parsed.data;
-  await requireRole(["owner", "manager"], orgId);
+  const { user } = await requireRole(["owner", "manager"], orgId);
 
   const supabase = await createSupabaseServerClient();
   const { data: row } = await supabase
     .from("sync_rejections")
-    .select("id, register_id, payload, status")
+    .select("id, register_id, reason, payload, status")
     .eq("org_id", orgId)
     .eq("id", id)
     .maybeSingle();
   if (!row || row.status !== "open" || !row.register_id) redirect(`${page(orgId)}?result=error`);
 
-  const payload = row.payload as { cashierUserId?: string } | null;
-  const { cashierUserId, ...sale } = (payload ?? {}) as { cashierUserId?: string };
-  const cashier = z.uuid().safeParse(cashierUserId);
-  if (!cashier.success || !syncSale.safeParse(sale).success)
-    redirect(`${page(orgId)}?result=failed`);
+  // The stored sale carries its cashier. A sale held for a discount above the limit is approved by
+  // the manager pressing the button (their session, checked above): the approval the till could not
+  // get. Any approval id the till attached is dropped: it was not accepted, and may be forged.
+  const { approvalId: _dropped, ...sale } = (row.payload ?? {}) as Record<string, unknown>;
+  void _dropped;
+  if (!syncSale.safeParse(sale).success) redirect(`${page(orgId)}?result=failed`);
+  const approverUserId = row.reason === "discount_needs_approval" ? user.id : undefined;
 
   let ok = false;
   try {
-    const [result] = await syncSales([sale], {
+    const [result] = await syncSalesFromSession([sale], {
       orgId,
       registerId: row.register_id,
-      userId: cashier.data!,
+      approverUserId,
     });
     ok = result?.status === "created" || result?.status === "duplicate";
   } catch (e) {

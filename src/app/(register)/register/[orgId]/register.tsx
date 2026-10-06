@@ -1,7 +1,9 @@
 "use client";
 
 import {
+  ArchiveIcon,
   CheckIcon,
+  LockIcon,
   MinusIcon,
   PauseIcon,
   PercentIcon,
@@ -11,15 +13,22 @@ import {
   Trash2Icon,
   TriangleAlertIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { v7 as uuidv7 } from "uuid";
 import { RegisterLayout } from "@/components/register/register-layout";
 import { SyncStatusPill } from "@/components/sync-status-pill";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { presets } from "@/config/business-type-presets";
 import { t } from "@/lib/i18n";
-import { changeDue, formatCents, localDate, type Discount } from "@/lib/money";
+import {
+  changeDue,
+  discountNeedsOverride,
+  formatCents,
+  localDate,
+  type Discount,
+} from "@/lib/money";
 import {
   cartReducer,
   depositOf,
@@ -37,6 +46,7 @@ import {
   type Prompt,
 } from "@/lib/register/cart";
 import { registerDb, type LocalSale, type RegisterDb } from "@/lib/register/db";
+import { checkPin, type ApprovalFor, type StaffMember } from "@/lib/register/staff";
 import type { InvoiceInput } from "@/lib/register/invoice";
 import {
   defaultPrinter,
@@ -68,8 +78,17 @@ import {
   InvoiceDialog,
   PrinterDialog,
   TenderDialog,
-  TillDialog,
 } from "./sale-dialogs";
+import { LockScreen, type Cashier } from "./lock-screen";
+import { OverrideDialog } from "./override-dialog";
+
+/** Nobody touches the till for this long and it locks itself. */
+const IDLE_LOCK_MS = 5 * 60_000;
+
+/** What the manager is being asked to approve. */
+type OverrideAsk =
+  | { kind: "discount"; key: string; percent: string }
+  | { kind: "noSale" };
 
 type Flow = {
   product: FeedProduct;
@@ -86,7 +105,7 @@ type Dialog =
   | { kind: "discount"; target: "basket" | string }
   | { kind: "parked" }
   | { kind: "tender" }
-  | { kind: "till" }
+  | { kind: "override"; ask: OverrideAsk }
   | { kind: "printer" }
   | { kind: "done"; sale: LocalSale; status: string }
   | { kind: "email"; sale: LocalSale; status: string; sending: boolean }
@@ -110,11 +129,61 @@ export function Register({ orgId }: { orgId: string }) {
   const [message, setMessage] = useState({ text: "", n: 0 });
   const [printer, setPrinter] = useState<PrinterSettings>(defaultPrinter);
   const [printJob, setPrintJob] = useState<{ n: number; lines: string[] } | null>(null);
+  // Who is serving. Memory only: a reload locks the till.
+  const [cashier, setCashier] = useState<Cashier | null>(null);
+  // A manager's approval of the discounts as they are now (void as soon as they change).
+  // approvalId is the server's proof (online); without it the sale is held for a manager on sync.
+  const [approval, setApproval] = useState<{
+    userId: string;
+    approvalId?: string;
+    key: string;
+  } | null>(null);
+  const [online, setOnline] = useState(true);
 
   useEffect(() => {
     if (!db) return;
     void loadPrinter(db).then(setPrinter);
   }, [db]);
+
+  useEffect(() => {
+    // Reading navigator.onLine once on mount; the events keep it current after that.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setOnline(navigator.onLine);
+    const up = () => setOnline(true);
+    const down = () => setOnline(false);
+    window.addEventListener("online", up);
+    window.addEventListener("offline", down);
+    return () => {
+      window.removeEventListener("online", up);
+      window.removeEventListener("offline", down);
+    };
+  }, []);
+
+  // Lock after a few minutes without a touch or key press.
+  const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!cashier) return;
+    const arm = () => {
+      if (idleTimer.current) clearTimeout(idleTimer.current);
+      idleTimer.current = setTimeout(() => setCashier(null), IDLE_LOCK_MS);
+    };
+    arm();
+    const events = ["pointerdown", "keydown"] as const;
+    for (const e of events) window.addEventListener(e, arm);
+    return () => {
+      if (idleTimer.current) clearTimeout(idleTimer.current);
+      for (const e of events) window.removeEventListener(e, arm);
+    };
+  }, [cashier]);
+
+  const verify = useCallback(
+    (purpose: "unlock" | "override", approvalFor?: ApprovalFor) =>
+      (member: StaffMember, pin: string) =>
+        db
+          ? checkPin(db, member, pin, purpose, { approvalFor })
+          : Promise.resolve({ status: "invalid" } as const),
+    [db],
+  );
 
   const preset = data?.org ? presets[data.org.businessType] : null;
 
@@ -260,7 +329,7 @@ export function Register({ orgId }: { orgId: string }) {
     } catch {
       say(t("register.scanError"));
     }
-  }, dialog === null);
+  }, dialog === null && cashier !== null);
 
   async function park() {
     if (!db || cart.lines.length === 0) return;
@@ -324,6 +393,55 @@ export function Register({ orgId }: { orgId: string }) {
     return result === "failed" ? t("register.printFallback") : t("register.printed");
   }
 
+  // The shop's discount limit (basis points): above it, a manager's PIN is needed.
+  const needsApproval =
+    !!priced && !!data?.org
+      ? discountNeedsOverride(
+          cart.lines.map((l, i) => ({
+            unitPrice: unitWithModifiers(l),
+            qty: l.qty,
+            gross: lineTotal(priced, priced.itemIndex[i]!),
+          })),
+          data.org.discountOverrideBp,
+        )
+      : false;
+  const discountKey = JSON.stringify([
+    cart.discount ?? null,
+    cart.lines.map((l) => [l.id, l.qty, l.discount ?? null]),
+  ]);
+  const overrideAsk: OverrideAsk = {
+    kind: "discount",
+    key: discountKey,
+    percent: `${(data?.org?.discountOverrideBp ?? 0) / 100}%`,
+  };
+
+  /** Queues what a manager approved outside a sale (it becomes an audit row on the server). */
+  async function queueEvent(
+    kind: "no_sale",
+    approver: { userId: string; approvalId?: string },
+  ) {
+    if (!db || !cashier) return;
+    await db.events.add({
+      id: uuidv7(),
+      kind,
+      at: new Date().toISOString(),
+      cashierUserId: cashier.userId,
+      // Verified by the server when there is an approvalId; otherwise only a claim, logged as one.
+      approvalId: approver.approvalId,
+      claimedApprover: approver.approvalId ? undefined : approver.userId,
+      detail: {},
+      syncState: "pending",
+    });
+    outbox.kick();
+  }
+
+  async function openDrawer(approver: { userId: string; approvalId?: string }) {
+    await queueEvent("no_sale", approver);
+    if (printer.type === "browser") return say(t("register.drawerNoPrinter"));
+    const r = await printLines(printer, [], true);
+    say(r === "printed" ? t("register.drawerOpened") : t("register.drawerFailed"));
+  }
+
   async function tender(tenderedCents: number) {
     if (!db || !till || !priced || !ctx || !data?.org) return;
     // The sale is stamped with the real time: if the day changed since the cart was priced, the
@@ -336,10 +454,18 @@ export function Register({ orgId }: { orgId: string }) {
       say(t("register.ratesChanged"));
       return;
     }
+    // A discount above the shop's limit needs the manager's PIN for the discounts as they are now.
+    if (needsApproval && approval?.key !== discountKey) {
+      setDialog({ kind: "override", ask: overrideAsk });
+      return;
+    }
+    if (!cashier) return;
     let sale: LocalSale;
     try {
       sale = await completeSale(db, {
         registerId: till.id,
+        cashierUserId: cashier.userId,
+        approvalId: needsApproval ? approval?.approvalId : undefined,
         cart,
         tenderedCents,
         expectedDueCents: priced.basket.amountDue,
@@ -362,7 +488,10 @@ export function Register({ orgId }: { orgId: string }) {
   }
 
   function pay() {
-    setDialog(till ? { kind: "tender" } : { kind: "till" });
+    if (!till) return;
+    if (needsApproval && approval?.key !== discountKey) {
+      setDialog({ kind: "override", ask: overrideAsk });
+    } else setDialog({ kind: "tender" });
   }
 
   const itemCount = cart.lines.reduce((n, l) => n + l.qty, 0);
@@ -483,14 +612,27 @@ export function Register({ orgId }: { orgId: string }) {
             onTender={tender}
           />
         );
-      case "till":
+      case "override":
         return (
-          <TillDialog
-            tills={tills}
+          <OverrideDialog
+            reason={
+              dialog.ask.kind === "discount"
+                ? t("override.discount", { percent: dialog.ask.percent })
+                : t("override.noSale")
+            }
+            staff={data?.staff ?? []}
+            offline={!online}
+            verify={verify("override", dialog.ask.kind === "discount" ? "discount" : "no_sale")}
             onClose={close}
-            onPick={async (id) => {
-              await db?.meta.put({ key: "registerId", value: id });
-              setDialog({ kind: "tender" });
+            onApproved={async ({ userId, name, approvalId }) => {
+              if (dialog.ask.kind === "discount") {
+                setApproval({ userId, approvalId, key: dialog.ask.key });
+                say(t("override.approved", { name }));
+                setDialog({ kind: "tender" });
+              } else {
+                close();
+                await openDrawer({ userId, approvalId });
+              }
             }}
           />
         );
@@ -603,6 +745,34 @@ export function Register({ orgId }: { orgId: string }) {
 
   const parkedCount = data?.parked.length ?? 0;
 
+  if (sync.unpaired) {
+    return (
+      <main className="surface-solid bg-background text-foreground flex min-h-dvh flex-col items-center justify-center gap-4 p-6 text-center">
+        <h1 className="text-heading font-semibold">{t("register.unpairedTitle")}</h1>
+        <p className="max-w-md">{t("register.unpairedBody")}</p>
+        <Link href="/register/pair" className={buttonVariants({ size: "touch" })}>
+          {t("register.unpairedAction")}
+        </Link>
+      </main>
+    );
+  }
+  if (!cashier) {
+    return (
+      <LockScreen
+        staff={data?.staff ?? []}
+        ready={!!data?.org}
+        offline={!online}
+        verify={verify("unlock")}
+        onUnlock={(c) => {
+          setApproval(null);
+          setCashier(c);
+          say(t("lock.serving", { name: c.name }));
+          focusCart();
+        }}
+      />
+    );
+  }
+
   return (
     <>
       <RegisterLayout
@@ -613,8 +783,19 @@ export function Register({ orgId }: { orgId: string }) {
               size="touch"
               variant="outline"
               className="ml-auto"
-              onClick={() => setDialog({ kind: "printer" })}
+              onClick={() => setCashier(null)}
             >
+              <LockIcon aria-hidden /> {t("lock.lockTill")}
+              <span className="sr-only"> ({t("lock.serving", { name: cashier.name })})</span>
+            </Button>
+            <Button
+              size="touch"
+              variant="outline"
+              onClick={() => setDialog({ kind: "override", ask: { kind: "noSale" } })}
+            >
+              <ArchiveIcon aria-hidden /> {t("register.openDrawer")}
+            </Button>
+            <Button size="touch" variant="outline" onClick={() => setDialog({ kind: "printer" })}>
               <PrinterIcon aria-hidden /> {t("register.printer")}:{" "}
               {t(`register.printer.${printer.type}`)}
             </Button>

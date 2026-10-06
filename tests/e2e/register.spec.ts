@@ -1,5 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
-import { hydrated, openDashboard, signUpAndEnrol, uniqueEmail } from "./helpers";
+import {
+  hydrated,
+  openDashboard,
+  openTill,
+  signUpAndEnrol,
+  uniqueEmail,
+  unlockTill,
+} from "./helpers";
 
 // Needs the local Supabase stack (`supabase start`) and its .env.local values.
 
@@ -38,7 +45,7 @@ test("general store: 3 items in 3 taps and cash tender; scan, discount, park and
     age: true,
   });
 
-  await page.goto(`/register/${orgId}`);
+  await openTill(page, orgId);
   const tile = (name: string) => page.getByRole("button", { name: new RegExp(`^${name}`) });
   await expect(tile("Tea bags")).toBeVisible();
 
@@ -84,14 +91,21 @@ test("general store: 3 items in 3 taps and cash tender; scan, discount, park and
   // Offline: the catalogue endpoint is blocked, the till still loads its products from the device.
   await page.route("**/api/v1/catalog/**", (route) => route.abort());
   await page.reload();
+  await unlockTill(page); // locks on reload; the PIN is checked against the hash saved on the till
   await expect(tile("Tea bags")).toBeVisible();
   await expect(page.getByRole("status").filter({ hasText: "Offline" })).toBeVisible();
 });
 
-test("a stranger gets 404 on another shop's till and catalogue", async ({ page }) => {
+test("an unpaired browser is sent to the pairing page and cannot read any catalogue", async ({
+  page,
+}) => {
   await signUpAndEnrol(page, uniqueEmail("register-404"), "E2E register 404");
-  await openDashboard(page);
+  const orgId = await openDashboard(page);
   const other = "00000000-0000-4000-8000-000000000000";
-  expect((await page.goto(`/register/${other}`))?.status()).toBe(404);
-  expect((await page.request.get(`/api/v1/catalog/${other}`)).status()).toBe(404);
+  // Being signed in to the back office is not enough: a till is a paired device.
+  for (const org of [orgId, other]) {
+    await page.goto(`/register/${org}`);
+    await expect(page).toHaveURL(/\/register\/pair$/);
+    expect((await page.request.get(`/api/v1/catalog/${org}`)).status()).toBe(401);
+  }
 });

@@ -30,6 +30,8 @@ export type Shop = {
   orgId: string;
   locationId: string;
   registerId: string;
+  /** SHA-256 hex of the till's (made-up) device token, as stored on registers.device_token_hash. */
+  tokenHash: string;
   owner: Actor;
   manager: Actor;
   cashier: Actor;
@@ -106,18 +108,19 @@ async function seedShop(tx: TransactionSql, name: string): Promise<Shop> {
     orgId,
     locationId,
     registerId,
+    tokenHash: createHash("sha256").update(`device:${registerId}`).digest("hex"),
     owner: actor("owner"),
     manager: actor("manager"),
     cashier: actor("cashier"),
   };
   await tx`insert into organisations (id, name, business_type) values (${orgId}, ${name}, 'general')`;
   for (const a of [shop.owner, shop.manager, shop.cashier]) {
-    await tx`insert into memberships (id, org_id, user_id, role, pin_hash)
-             values (${randomUUID()}, ${orgId}, ${a.userId}, ${a.role}, 'argon2-secret')`;
+    await tx`insert into memberships (id, org_id, user_id, role, pin_hash, display_name)
+             values (${randomUUID()}, ${orgId}, ${a.userId}, ${a.role}, 'argon2-secret', ${a.role})`;
   }
   await tx`insert into locations (id, org_id, name) values (${locationId}, ${orgId}, ${name + " Main"})`;
   await tx`insert into registers (id, org_id, location_id, name, device_token_hash)
-           values (${registerId}, ${orgId}, ${locationId}, 'Till 1', 'device-secret')`;
+           values (${registerId}, ${orgId}, ${locationId}, 'Till 1', ${shop.tokenHash})`;
   await tx`insert into audit_log (id, org_id, actor_user_id, action, entity)
            values (${randomUUID()}, ${orgId}, ${shop.owner.userId}, 'seed', 'organisation')`;
   return shop;

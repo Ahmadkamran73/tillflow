@@ -1,143 +1,86 @@
 import "server-only";
 import { z } from "zod";
-import { createSupabaseServerClient } from "@/lib/auth";
-import { getTaxRates } from "@/lib/catalog";
-import { getOrganisation } from "@/lib/org";
+import { mapTaxRates, parseFeedMeta } from "@/lib/device/meta";
+import { deviceFeedMeta, deviceFeedTable, type FeedTable } from "@/lib/device/service";
 import { feedSchema, type Feed } from "./feed";
 
-const PAGE = 1000; // PostgREST's default row cap
+const PAGE = 1000;
 
-type Page = PromiseLike<{ data: unknown[] | null; error: unknown }>;
+const row = z.record(z.string(), z.any());
 
-/** Reads every row of a query, a page at a time (the API caps one response at 1,000 rows). */
-async function all(page: (from: number, to: number) => Page): Promise<unknown[]> {
-  const rows: unknown[] = [];
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await page(from, from + PAGE - 1);
-    if (error) throw new Error("Could not load the catalogue");
-    rows.push(...(data ?? []));
-    if (!data || data.length < PAGE) return rows;
+/** Reads every row of one catalogue table for the till's shop, a page at a time (keyed by id). */
+async function all(tokenHash: string, table: FeedTable, since: Date | null) {
+  const rows: z.infer<typeof row>[] = [];
+  let after: string | null = null;
+  for (;;) {
+    const page = await deviceFeedTable(tokenHash, table, since, after, PAGE);
+    if (!page) throw new Error("Could not load the catalogue");
+    const parsed = z.array(row).parse(page);
+    rows.push(...parsed);
+    if (parsed.length < PAGE) return rows;
+    after = String(parsed[parsed.length - 1]!.id);
   }
 }
 
 /**
- * The catalogue as the register needs it. Products and variants are never deleted (archived),
- * so `since` works as "updated since"; archived rows are sent so the device can drop them.
- * The small tables (categories, modifiers) are sent whole every time because rows can be deleted.
- * Runs as the caller (RLS applies).
+ * The catalogue as a paired till needs it. Products and variants are never deleted (archived), so
+ * `since` works as "updated since"; archived rows are sent so the device can drop them. The small
+ * tables (categories, modifiers) are sent whole every time because rows can be deleted. Everything
+ * is read through ops.device_* with the till's token hash, so the shop is the token's shop and the
+ * till needs no user session. No cost prices.
  */
-export async function getCatalogFeed(orgId: string, since: string | null): Promise<Feed | null> {
-  const org = await getOrganisation(orgId);
-  if (!org) return null;
+export async function getCatalogFeed(
+  tokenHash: string,
+  since: string | null,
+): Promise<Feed | null> {
   // Taken before the reads and backed off a minute, so a transaction that commits while we read
   // is picked up next time. The overlap is harmless: the device upserts by id.
   const cursor = new Date(Date.now() - 60_000).toISOString();
-  const supabase = await createSupabaseServerClient();
+  const sinceDate = since ? new Date(since) : null;
 
-  const changed = <T extends { gt: (c: string, v: string) => T; is: (c: string, v: null) => T }>(
-    q: T,
-  ) => (since ? q.gt("updated_at", since) : q.is("archived_at", null));
+  const rawMeta = await deviceFeedMeta(tokenHash);
+  if (!rawMeta) return null;
+  const meta = parseFeedMeta(rawMeta);
 
-  const [loc, regs, seqs, taxRates, categories, products, variants, groups, mods, pgroups] =
-    await Promise.all([
-      supabase
-        .from("locations")
-        .select("id, timezone, address, eircode, receipt_footer")
-        .eq("org_id", orgId)
-        .order("created_at")
-        .limit(1),
-      supabase.from("registers").select("id, name").eq("org_id", orgId).order("name"),
-      supabase.rpc("register_last_seqs", { p_org: orgId }),
-      getTaxRates(),
-      all((a, b) =>
-        supabase
-          .from("categories")
-          .select("id, name, colour, sort")
-          .eq("org_id", orgId)
-          .order("sort")
-          .order("id")
-          .range(a, b),
-      ),
-      all((a, b) =>
-        changed(
-          supabase
-            .from("products")
-            .select("id, name, category_id, tax_category, takeaway_tax_category, archived_at")
-            .eq("org_id", orgId),
-        )
-          .order("id")
-          .range(a, b),
-      ),
-      all((a, b) =>
-        changed(
-          supabase
-            .from("variants")
-            .select(
-              "id, product_id, name, sku, barcode, price_incl_vat_cents, sort, attributes, archived_at",
-            )
-            .eq("org_id", orgId),
-        )
-          .order("id")
-          .range(a, b),
-      ),
-      all((a, b) =>
-        supabase
-          .from("modifier_groups")
-          .select("id, name, min_choices, max_choices, sort")
-          .eq("org_id", orgId)
-          .order("id")
-          .range(a, b),
-      ),
-      all((a, b) =>
-        supabase
-          .from("modifiers")
-          .select("id, group_id, name, price_delta_cents, sort")
-          .eq("org_id", orgId)
-          .order("id")
-          .range(a, b),
-      ),
-      all((a, b) =>
-        supabase
-          .from("product_modifier_groups")
-          .select("id, product_id, group_id, sort")
-          .eq("org_id", orgId)
-          .order("id")
-          .range(a, b),
-      ),
-    ]);
-
-  const location = loc.data?.[0];
-  const timezone = location?.timezone;
-  if (!timezone || regs.error || seqs.error) throw new Error("Could not load the catalogue");
-  const row = z.record(z.string(), z.any());
-  const rows = (x: unknown[]) => z.array(row).parse(x);
+  const [categories, products, variants, groups, mods, pgroups] = await Promise.all([
+    all(tokenHash, "categories", null),
+    all(tokenHash, "products", sinceDate),
+    all(tokenHash, "variants", sinceDate),
+    all(tokenHash, "modifier_groups", null),
+    all(tokenHash, "modifiers", null),
+    all(tokenHash, "product_modifier_groups", null),
+  ]);
 
   return feedSchema.parse({
     cursor,
     full: since === null,
     org: {
-      businessType: org.businessType,
-      timezone,
+      businessType: meta.org.business_type,
+      timezone: meta.location.timezone,
       country: "IE",
-      name: org.name,
-      legalName: org.legalName,
-      vatNumber: org.vatNumber,
-      address: location.address,
-      eircode: location.eircode,
-      receiptFooter: location.receipt_footer,
+      name: meta.org.name,
+      legalName: meta.org.legal_name,
+      vatNumber: meta.org.vat_number,
+      address: meta.location.address,
+      eircode: meta.location.eircode,
+      receiptFooter: meta.location.receipt_footer,
+      discountOverrideBp: meta.org.discount_override_bp,
     },
-    serverTime: new Date().toISOString(),
-    registers: (regs.data ?? []).map((r) => ({
-      id: r.id,
-      name: r.name,
-      lastSeq:
-        ((seqs.data ?? []) as { register_id: string; last_seq: number }[]).find(
-          (q) => q.register_id === r.id,
-        )?.last_seq ?? 0,
+    staff: meta.staff.map((s) => ({
+      userId: s.user_id,
+      displayName: s.display_name,
+      role: s.role,
+      pinHash: s.pin_hash,
     })),
-    taxRates,
-    categories: rows(categories),
-    products: rows(products).map((p) => ({
+    serverTime: new Date().toISOString(),
+    registers: [
+      { id: meta.register.id, name: meta.register.name, lastSeq: meta.register.last_seq },
+    ],
+    taxRates: mapTaxRates(meta.tax_rates),
+    categories: categories
+      .map((c) => ({ id: c.id, name: c.name, colour: c.colour, sort: c.sort }))
+      .sort((a, b) => a.sort - b.sort || String(a.id).localeCompare(String(b.id))),
+    products: products.map((p) => ({
       id: p.id,
       name: p.name,
       categoryId: p.category_id,
@@ -145,7 +88,7 @@ export async function getCatalogFeed(orgId: string, since: string | null): Promi
       takeawayTaxCategory: p.takeaway_tax_category,
       archived: p.archived_at !== null,
     })),
-    variants: rows(variants).map((v) => ({
+    variants: variants.map((v) => ({
       id: v.id,
       productId: v.product_id,
       name: v.name,
@@ -156,21 +99,21 @@ export async function getCatalogFeed(orgId: string, since: string | null): Promi
       attributes: v.attributes,
       archived: v.archived_at !== null,
     })),
-    modifierGroups: rows(groups).map((g) => ({
+    modifierGroups: groups.map((g) => ({
       id: g.id,
       name: g.name,
       min: g.min_choices,
       max: g.max_choices,
       sort: g.sort,
     })),
-    modifiers: rows(mods).map((m) => ({
+    modifiers: mods.map((m) => ({
       id: m.id,
       groupId: m.group_id,
       name: m.name,
       priceDeltaCents: m.price_delta_cents,
       sort: m.sort,
     })),
-    productGroups: rows(pgroups).map((g) => ({
+    productGroups: pgroups.map((g) => ({
       id: g.id,
       productId: g.product_id,
       groupId: g.group_id,
@@ -178,3 +121,5 @@ export async function getCatalogFeed(orgId: string, since: string | null): Promi
     })),
   });
 }
+
+export type { Feed };

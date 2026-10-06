@@ -1,7 +1,14 @@
 import { expect, test, type Page } from "@playwright/test";
 import { config } from "dotenv";
 import postgres from "postgres";
-import { hydrated, openDashboard, signUpAndEnrol, uniqueEmail } from "./helpers";
+import {
+  hydrated,
+  openDashboard,
+  openTill,
+  signUpAndEnrol,
+  uniqueEmail,
+  unlockTill,
+} from "./helpers";
 
 // Needs the local Supabase stack (`supabase start`) and its .env.local values (DIRECT_URL is how
 // the test looks at the server's tables, as an administrator).
@@ -51,7 +58,7 @@ const pill = (page: Page, text: string | RegExp) =>
   page.getByRole("status").filter({ hasText: text });
 
 async function openRegister(page: Page, orgId: string) {
-  await page.goto(`/register/${orgId}`);
+  await openTill(page, orgId); // PIN, pairing code, pair this browser, unlock
   await expect(tile(page)).toBeVisible();
   await expect(pill(page, /^Online$/)).toBeVisible();
 }
@@ -125,6 +132,7 @@ test("offline: 20 sales survive a reload and reach the server exactly once; a re
   // Let the service worker take over, then load once more so the register page is cached.
   await page.evaluate(() => navigator.serviceWorker.ready);
   await page.reload();
+  await unlockTill(page);
   await expect.poll(() => page.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true);
   await expect(tile(page)).toBeVisible();
 
@@ -135,6 +143,7 @@ test("offline: 20 sales survive a reload and reach the server exactly once; a re
 
   // A reload while offline: the page still loads and still knows about all 20 sales.
   await page.reload();
+  await unlockTill(page); // offline: the PIN is checked against the hash saved on the till
   await expect(tile(page)).toBeVisible();
   await expect(pill(page, "Offline (20 waiting)")).toBeVisible();
 
@@ -265,16 +274,29 @@ test("a sale the server refuses lands in Needs attention and can be resolved wit
   ]);
 });
 
-test("sync refuses another shop's till and a signed-out caller", async ({ page, request }) => {
+test("sync refuses an unpaired caller, a till of another shop and a different till", async ({
+  page,
+  request,
+}) => {
   const { orgId } = await setup(page, "syncauth");
-  const call = (api: typeof request, org: string) =>
+  const call = (api: typeof request, org: string, registerId: string) =>
     api.post(`/api/v1/sync/sales?orgId=${org}`, {
-      data: { registerId: "00000000-0000-4000-8000-0000000000e1", sales: [] },
+      data: { registerId, sales: [] },
       maxRedirects: 0,
     });
-  // Signed in (the page's cookies), but not a member of that shop, or not that shop's till: 404.
-  expect((await call(page.request, "00000000-0000-4000-8000-000000000000")).status()).toBe(404);
-  expect((await call(page.request, orgId)).status()).toBe(404);
-  // Signed out (a fresh context has no cookies): 401, not a redirect to a login page.
-  expect((await call(request, orgId)).status()).toBe(401);
+  const someTill = "00000000-0000-4000-8000-0000000000e1";
+  // The back-office session alone is not a till: 401 (no device token), never a redirect.
+  expect((await call(page.request, orgId, someTill)).status()).toBe(401);
+  expect((await call(request, orgId, someTill)).status()).toBe(401);
+
+  // Pair this browser as Till 1; now it is a till, but only for its own shop and its own register.
+  await openTill(page, orgId);
+  expect((await call(page.request, "00000000-0000-4000-8000-000000000000", someTill)).status()).toBe(
+    404,
+  );
+  expect((await call(page.request, orgId, someTill)).status()).toBe(403);
+  const [reg] = await sql`select id from registers where org_id = ${orgId}`;
+  expect((await call(page.request, orgId, reg!.id)).status()).toBe(200);
+  // A fresh context has neither session nor token.
+  expect((await call(request, orgId, reg!.id)).status()).toBe(401);
 });

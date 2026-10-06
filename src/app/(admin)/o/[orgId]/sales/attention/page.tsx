@@ -59,11 +59,7 @@ export default async function AttentionPage({
   const rows = rejections.data ?? [];
 
   // Product names for the items column (only ids travel from the till).
-  const sales = rows.map((r) => {
-    const { cashierUserId: _cashier, ...sale } = (r.payload ?? {}) as Record<string, unknown>;
-    void _cashier;
-    return syncSale.safeParse(sale);
-  });
+  const sales = rows.map((r) => syncSale.safeParse(r.payload ?? {}));
   const variantIds = [
     ...new Set(sales.flatMap((s) => (s.success ? s.data.lines.map((l) => l.variantId) : []))),
   ];

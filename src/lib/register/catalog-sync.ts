@@ -1,6 +1,9 @@
 import { feedSchema } from "./feed";
 import type { RegisterDb } from "./db";
 
+/** The server no longer knows this device (revoked, replaced, or never paired): pair it again. */
+export class UnpairedError extends Error {}
+
 /**
  * Pulls what changed since the stored cursor and applies it in one local transaction, so the
  * screens never see half a catalogue. Throws when offline or signed out; callers just keep
@@ -10,7 +13,8 @@ export async function refreshCatalog(db: RegisterDb, orgId: string): Promise<voi
   const cursor = (await db.meta.get("cursor"))?.value;
   const url = `/api/v1/catalog/${orgId}${typeof cursor === "string" ? `?since=${encodeURIComponent(cursor)}` : ""}`;
   const res = await fetch(url, { cache: "no-store", credentials: "same-origin" });
-  // A signed-out session is redirected to the login page (HTML), which must not parse as a feed.
+  if (res.status === 401 || res.status === 403 || res.status === 404) throw new UnpairedError();
+  // A redirect (to a login page, say) is HTML, which must not parse as a feed.
   if (!res.ok || res.redirected) throw new Error(`catalogue refresh failed (${res.status})`);
   const feed = feedSchema.parse(await res.json());
 
@@ -46,6 +50,8 @@ export async function refreshCatalog(db: RegisterDb, orgId: string): Promise<voi
         db.meta.bulkPut([
           { key: "org", value: feed.org },
           { key: "registers", value: feed.registers },
+          // Who can unlock the till, with their PIN hashes (Argon2) for checking a PIN offline.
+          { key: "staff", value: feed.staff },
           { key: "taxRates", value: feed.taxRates },
           { key: "cursor", value: feed.cursor },
           // When this device last saw the server’s prices: sent with each sale (`catalogAsOf`).

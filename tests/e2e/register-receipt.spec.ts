@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { hydrated, openDashboard, signUpAndEnrol, uniqueEmail } from "./helpers";
+import { hydrated, openDashboard, openTill, signUpAndEnrol, uniqueEmail } from "./helpers";
 
 // Needs the local Supabase stack (`supabase start`) and its .env.local values.
 
@@ -33,7 +33,7 @@ test("cash sale: change, rounding line, numbered receipt, browser print, VAT inv
   await page.getByRole("button", { name: "Save product" }).click();
   await expect(page).toHaveURL(/\/products\?saved=1$/);
 
-  await page.goto(`/register/${orgId}`);
+  await openTill(page, orgId);
   const prints = () => page.evaluate(() => window.__prints);
   const receipt = page.locator("#print-receipt");
   const sell = async () => {
@@ -90,7 +90,7 @@ test("tender: a short amount is refused", async ({ page }) => {
   await page.getByLabel("Price (including VAT)").fill("5");
   await page.getByRole("button", { name: "Save product" }).click();
   await expect(page).toHaveURL(/\/products\?saved=1$/);
-  await page.goto(`/register/${orgId}`);
+  await openTill(page, orgId);
   await page.getByRole("button", { name: /^Milk/ }).click();
   await page.getByRole("button", { name: "Pay €5.00" }).first().click();
   await page.getByLabel("Other amount").fill("4");

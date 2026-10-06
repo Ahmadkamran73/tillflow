@@ -22,8 +22,19 @@ export const feedSchema = z.object({
     address: z.string().nullable(),
     eircode: z.string().nullable(),
     receiptFooter: z.string().nullable(),
+    /** A discount above this share (basis points) of a line or the sale needs a manager's PIN. */
+    discountOverrideBp: z.int().min(0).max(10_000),
   }),
-  /** The shop's tills; the device picks one once (until pairing, step 1.7). */
+  /** Who can unlock the till: staff of this shop who have set a PIN. The Argon2 hashes let a till check a PIN offline. */
+  staff: z.array(
+    z.object({
+      userId: z.string(),
+      displayName: z.string(),
+      role: z.enum(["owner", "manager", "cashier"]),
+      pinHash: z.string(),
+    }),
+  ),
+  /** Only the till this device is paired to. */
   registers: z.array(
     z.object({
       id: z.string(),

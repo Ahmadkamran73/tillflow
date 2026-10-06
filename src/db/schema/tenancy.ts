@@ -3,6 +3,7 @@ import {
   check,
   foreignKey,
   index,
+  integer,
   pgEnum,
   pgTable,
   text,
@@ -41,6 +42,8 @@ export const organisations = pgTable(
     /** Set by public.confirm_vat_rates (owner, audit-logged); never client-writable. */
     vatRatesConfirmedAt: timestamp("vat_rates_confirmed_at", { withTimezone: true }),
     vatRatesConfirmedBy: uuid("vat_rates_confirmed_by"),
+    /** A discount above this share (basis points) of a line or sale needs a manager PIN. */
+    discountOverrideBp: integer("discount_override_bp").notNull().default(1000),
     status: orgStatus("status").notNull().default("trial"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -48,6 +51,7 @@ export const organisations = pgTable(
   (t) => [
     check("organisations_country_len", sql`char_length(${t.country}) = 2`),
     // Shape only; the mod-23 check digit is verified in src/lib/onboarding.ts.
+    check("organisations_discount_override_bp", sql`${t.discountOverrideBp} between 0 and 10000`),
     check(
       "organisations_vat_number_ie",
       sql`${t.vatNumber} is null or ${t.vatNumber} ~ '^IE([0-9]{7}[A-W][A-IW]?|[0-9][A-Z+*][0-9]{5}[A-W])$'`,
@@ -70,6 +74,12 @@ export const memberships = pgTable(
     userId: uuid("user_id").notNull(),
     role: membershipRole("role").notNull(),
     pinHash: text("pin_hash"),
+    /** Name shown on the till's staff picker. */
+    displayName: text("display_name"),
+    pinSetAt: timestamp("pin_set_at", { withTimezone: true }),
+    /** Attempts reserved since the last good PIN; the 5th failure sets pinLockedUntil. */
+    pinFailedCount: integer("pin_failed_count").notNull().default(0),
+    pinLockedUntil: timestamp("pin_locked_until", { withTimezone: true }),
     locationIds: uuid("location_ids")
       .array()
       .notNull()
@@ -129,6 +139,66 @@ export const registers = pgTable(
     unique("registers_org_location_name_key").on(t.orgId, t.locationId, t.name),
     // Target for composite FKs so a sale can never point at another org's register.
     unique("registers_org_id_id_key").on(t.orgId, t.id),
+  ],
+);
+
+/**
+ * One-time pairing codes (8 characters, 10 minutes). Only the hash is stored; the code is shown
+ * once to the manager. Written by public.create_pairing_code / ops.pair_register, never by clients.
+ */
+export const registerPairingCodes = pgTable(
+  "register_pairing_codes",
+  {
+    id: uuid("id").primaryKey(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organisations.id),
+    registerId: uuid("register_id").notNull(),
+    codeHash: text("code_hash").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdBy: uuid("created_by").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    foreignKey({
+      name: "register_pairing_codes_org_register_fk",
+      columns: [t.orgId, t.registerId],
+      foreignColumns: [registers.orgId, registers.id],
+    }),
+    unique("register_pairing_codes_code_hash_key").on(t.codeHash),
+    index("register_pairing_codes_org_register_idx").on(t.orgId, t.registerId),
+  ],
+);
+
+/**
+ * A manager's PIN, checked by the server (ops.issue_approval), turned into a single-use proof the
+ * till attaches to one sale or event. The database derives the approver from this row, never from
+ * anything the till says. Valid 30 minutes from creation, for one register and one purpose.
+ */
+export const registerApprovals = pgTable(
+  "register_approvals",
+  {
+    id: uuid("id").primaryKey(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organisations.id),
+    registerId: uuid("register_id").notNull(),
+    approverUserId: uuid("approver_user_id").notNull(),
+    purpose: text("purpose").notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    /** The sale or event the approval was spent on. */
+    consumedFor: uuid("consumed_for"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    foreignKey({
+      name: "register_approvals_org_register_fk",
+      columns: [t.orgId, t.registerId],
+      foreignColumns: [registers.orgId, registers.id],
+    }),
+    check("register_approvals_purpose", sql`${t.purpose} in ('discount', 'no_sale', 'refund')`),
+    index("register_approvals_org_register_idx").on(t.orgId, t.registerId, t.createdAt),
   ],
 );
 
