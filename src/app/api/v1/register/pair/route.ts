@@ -7,6 +7,7 @@ import {
   hashPairingCode,
   normalisePairingCode,
 } from "@/lib/device/token";
+import { appUrl } from "@/lib/auth/config";
 import { reportError } from "@/lib/errors";
 import { pairRegister } from "@/lib/device/service";
 import {
@@ -22,12 +23,31 @@ const body = z.strictObject({ code: z.string().min(1).max(32) });
 const NO_STORE = { "Cache-Control": "no-store" };
 
 /**
+ * Only this app's own pages may pair a browser. Without this, another site could submit a form that
+ * pairs a visitor's browser with a code the attacker chose (login CSRF). Behind Hostinger's proxy
+ * nextUrl carries the internal host, so the app's own URL is accepted too.
+ */
+function sameOrigin(request: NextRequest): boolean {
+  const origin = request.headers.get("origin");
+  if (!origin) return false;
+  try {
+    const host = new URL(origin).host;
+    return host === new URL(appUrl()).host || host === request.nextUrl.host;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * POST /api/v1/register/pair {code}: a till swaps the one-time code a manager made for a device
  * token, which goes into an httpOnly cookie (only its hash is stored). Public on purpose (the
  * till has nothing yet), so it is rate limited per IP and fails closed. A wrong, used or expired
  * code all look the same.
  */
 export async function POST(request: NextRequest) {
+  if (!sameOrigin(request) || !request.headers.get("content-type")?.startsWith("application/json")) {
+    return Response.json({ error: "not allowed" }, { status: 403, headers: NO_STORE });
+  }
   const limited = await rateLimit("pair", ipFromHeaders(request.headers));
   if (!limited.allowed) {
     return Response.json(
