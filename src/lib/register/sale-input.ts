@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { depositOf, variantLabel, warrantyOf, type Cart } from "./cart";
 import { invoiceInput } from "./invoice";
+import { tendersInput } from "./tender-input";
 import { TAX_CATEGORIES, type TaxCategory } from "@/lib/money";
 
 export const discount = z.union([
@@ -23,7 +24,9 @@ export const emailReceiptInput = z.strictObject({
   mode: z.enum(["eat_in", "take_away"]).default("eat_in"),
   /** What the till showed; the email is refused if the server's price differs. */
   expectedDueCents: z.int().min(0).max(100_000_000),
-  tenderedCents: z.int().min(0).max(100_000_000),
+  tenders: tendersInput,
+  /** Whether the sale was rounded to 5c on cash (the shop's setting when it was made). */
+  roundCash: z.boolean().default(true),
   receiptSeq: z.int().min(1).max(99_999_999),
   registerName: z.string().trim().min(1).max(80),
   completedAt: z.iso.datetime(),

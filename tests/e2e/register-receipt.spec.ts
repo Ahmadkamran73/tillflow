@@ -38,7 +38,8 @@ test("cash sale: change, rounding line, numbered receipt, browser print, VAT inv
   const receipt = page.locator("#print-receipt");
   const sell = async () => {
     await page.getByRole("button", { name: /^Tea bags/ }).click();
-    await page.getByRole("button", { name: "Pay €12.35" }).first().click(); // 5c rounding
+    await page.getByRole("button", { name: "Pay €12.34" }).first().click();
+    await page.getByRole("button", { name: "Cash", exact: true }).click(); // cash due 12.35: 5c rounding
     await page.getByRole("button", { name: "€20.00", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Sale complete" })).toBeVisible();
   };
@@ -93,10 +94,11 @@ test("tender: a short amount is refused", async ({ page }) => {
   await openTill(page, orgId);
   await page.getByRole("button", { name: /^Milk/ }).click();
   await page.getByRole("button", { name: "Pay €5.00" }).first().click();
+  await page.getByRole("button", { name: "Cash", exact: true }).click();
   await page.getByLabel("Other amount").fill("4");
-  await page.getByRole("button", { name: "Complete sale" }).click();
-  await expect(page.getByRole("alert")).toContainText("less than the amount due");
+  await page.getByRole("button", { name: "Take cash" }).click();
+  await expect(page.getByRole("alert")).toContainText("Cash must cover at least €5.00");
   await page.getByLabel("Other amount").fill("10");
-  await page.getByRole("button", { name: "Complete sale" }).click();
+  await page.getByRole("button", { name: "Take cash" }).click();
   await expect(page.getByText("Change due: €5.00")).toBeVisible();
 });

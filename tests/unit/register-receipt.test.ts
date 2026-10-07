@@ -41,13 +41,31 @@ const line = (over: Partial<CartLine> = {}): CartLine => ({
   ...over,
 });
 
+const cash = (cents: number) => ({
+  id: "t-cash",
+  typeId: null,
+  method: "cash" as const,
+  amountCents: cents,
+  tipCents: 0,
+  label: "Cash",
+});
+const card = (cents: number, extra = {}) => ({
+  id: "t-card",
+  typeId: null,
+  method: "card" as const,
+  amountCents: cents,
+  tipCents: 0,
+  label: "Card - AIB terminal",
+  ...extra,
+});
+
 const saleOf = (lines: CartLine[], over: Partial<ReceiptSale> = {}): ReceiptSale => ({
   id: "s1",
   registerId: "r1",
   receiptSeq: 42,
   completedAt: "2026-10-05T13:32:00.000Z", // 14:32 in Dublin (IST)
   cart: { lines, ageChecked: false } satisfies Cart,
-  tenderedCents: 5000,
+  tenders: [cash(5000)],
   ...over,
 });
 
@@ -103,13 +121,43 @@ describe("buildReceipt", () => {
   });
 
   it("shows cash rounding as its own line and change from the rounded amount", () => {
-    const r = build(saleOf([line({ unitPriceCents: 1234 })], { tenderedCents: 2000 }));
+    const r = build(saleOf([line({ unitPriceCents: 1234 })], { tenders: [cash(2000)] }));
     expect(r.totalCents).toBe(1234);
     expect(r.roundingCents).toBe(1); // 12.34 → 12.35
     expect(r.dueCents).toBe(1235);
     expect(r.changeCents).toBe(765);
     const text = receiptText(r, 42, receiptLabels()).join("\n");
     expect(text).toContain("Cash rounding");
+  });
+
+  it("prints one line per payment: card exact, tip and reference, cash share rounded, change from cash", () => {
+    // 12.34: card 5.00 (tip 0.75, ref), cash share 7.34 rounds to 7.35, 10.00 handed over.
+    const r = build(
+      saleOf([line({ unitPriceCents: 1234 })], {
+        tenders: [card(500, { tipCents: 75, reference: "AUTH 123456" }), cash(1000)],
+      }),
+    );
+    expect(r.totalCents).toBe(1234);
+    expect(r.roundingCents).toBe(1);
+    expect(r.dueCents).toBe(1235);
+    expect(r.changeCents).toBe(265);
+    expect(r.payments.map((p) => [p.label, p.cents, p.tipCents])).toEqual([
+      ["Card - AIB terminal", 500, 75],
+      ["Cash", 1000, 0],
+    ]);
+    const text = receiptText(r, 42, receiptLabels()).join("\n");
+    expect(text).toContain("Card - AIB terminal");
+    expect(text).toContain("Tip");
+    expect(text).toContain("Ref AUTH 123456");
+    expect(text).toContain("Change");
+  });
+
+  it("a card-only receipt has no rounding and no change line", () => {
+    const r = build(saleOf([line({ unitPriceCents: 1234 })], { tenders: [card(1234)] }));
+    expect(r.roundingCents).toBe(0);
+    expect(r.dueCents).toBe(1234);
+    expect(r.changeCents).toBe(0);
+    expect(receiptText(r, 42, receiptLabels()).join("\n")).not.toContain("Change");
   });
 
   it("splits VAT by rate and keeps deposits outside VAT", () => {
@@ -126,7 +174,7 @@ describe("buildReceipt", () => {
 
   it("prints the warranty end date for electronics only", () => {
     const sale = saleOf([line({ name: "Phone", unitPriceCents: 59900, warrantyMonths: 24 })], {
-      tenderedCents: 60000,
+      tenders: [cash(60000)],
     });
     expect(build(sale, false, presets.electronics).lines[0]!.warrantyEnds).toBe("05/10/2028");
     expect(build(sale, false, presets.general).lines[0]!.warrantyEnds).toBeUndefined();
@@ -146,7 +194,7 @@ describe("buildReceipt", () => {
   });
 
   it("refuses a tender below the amount due", () => {
-    expect(() => build(saleOf([line()], { tenderedCents: 100 }))).toThrow(RangeError);
+    expect(() => build(saleOf([line()], { tenders: [cash(100)] }))).toThrow(RangeError);
   });
 });
 
@@ -236,7 +284,7 @@ describe("server re-pricing input", () => {
     const base = {
       lines: [{ variantId: crypto.randomUUID(), qty: 1, modifierIds: [] }],
       expectedDueCents: 100,
-      tenderedCents: 100,
+      tenders: [{ id: crypto.randomUUID(), typeId: null, method: "cash", amountCents: 100 }],
       receiptSeq: 1,
       registerName: "Till 1",
       completedAt: "2026-10-05T13:32:00.000Z",

@@ -127,7 +127,7 @@ export type PricedCart = {
 export function priceCart(
   cart: Cart,
   ctx: BasketContext,
-  tender: "cash" | "card" = "cash",
+  tender: "cash" | "card" = "card",
 ): PricedCart {
   const lines: BasketInput["lines"][number][] = [];
   const itemIndex = cart.lines.map((l) => {
@@ -161,7 +161,7 @@ export const lineTotal = ({ basket }: PricedCart, index: number) =>
  * `priceCart`, but a fixed discount that no longer fits (the quantity dropped, an item was
  * removed) is dropped instead of crashing the screen. `stripped` tells the caller to say so.
  */
-export function safePriceCart(cart: Cart, ctx: BasketContext, tender: "cash" | "card" = "cash") {
+export function safePriceCart(cart: Cart, ctx: BasketContext, tender: "cash" | "card" = "card") {
   try {
     return { priced: priceCart(cart, ctx, tender), stripped: false };
   } catch (e) {

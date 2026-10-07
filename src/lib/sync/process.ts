@@ -1,7 +1,8 @@
 import { z } from "zod";
-import { discountNeedsOverride } from "@/lib/money";
+import { discountNeedsOverride, settleTenders, type Settlement } from "@/lib/money";
 import { lineTotal, unitWithModifiers, type Cart, type PricedCart } from "@/lib/register/cart";
 import { SaleError } from "@/lib/register/sale-input";
+import { stripReferences } from "@/lib/register/tender-input";
 import { buildSaleRecord } from "./sale-record";
 import { syncSale, type SyncReason, type SyncResult, type SyncSale } from "./protocol";
 
@@ -22,6 +23,10 @@ export type SyncCtx = {
   registerId: string;
   /** A discount above this share (basis points) of a line or the sale needs a manager's approval. */
   discountOverrideBp: number;
+  /** The payment types of the till's location (archived ones too: an offline sale may use one). */
+  tenderTypes: { id: string; method: string }[];
+  /** Tips are only taken in cafés and restaurants. */
+  tipsAllowed: boolean;
   /**
    * TRUSTED callers only (the back office re-running a held sale: the signed-in manager). The sync
    * route for tills never sets this; a till can only present an approvalId.
@@ -73,6 +78,12 @@ const isDeterministic = (e: unknown) =>
   (typeof (e as { code?: unknown })?.code === "string" &&
     /^(22|23|42501)/.test((e as { code: string }).code));
 
+const tenderLine = (t: SyncSale["tenders"][number]) => ({
+  method: t.method,
+  amount: t.amountCents,
+  tip: t.tipCents,
+});
+
 type Rejection = { reason: SyncReason; detail: Record<string, unknown> };
 
 /** Prices a sale at each plausible catalogue moment and returns the first that matches the till. */
@@ -91,9 +102,13 @@ async function priceMatching(sale: SyncSale, deps: SyncDeps) {
   for (const at of moments) {
     try {
       const r = await deps.priceAt(sale, at);
-      const due = r.priced.basket.amountDue;
+      // The basket is priced with no cash rounding; rounding applies to the cash share only.
+      const settlement = settleTenders(r.priced.basket.total, sale.tenders.map(tenderLine), {
+        roundCash: sale.roundCash,
+      });
+      const due = settlement.amountDue;
       if (Math.abs(due - sale.expectedDueCents) <= TOLERANCE_CENTS)
-        return { ok: true as const, at, ...r };
+        return { ok: true as const, at, settlement, ...r };
       firstPriced ??= due;
     } catch (e) {
       if (!(e instanceof SaleError)) throw e; // a database failure: let the device retry
@@ -131,7 +146,8 @@ async function processOne(raw: unknown, ctx: SyncCtx, deps: SyncDeps): Promise<S
       user_id: uuidOfField(raw, "cashierUserId") ?? null,
       reason: "invalid",
       detail: {},
-      payload: { invalid: true, raw: storable({ raw }) },
+      // A reference that failed validation may be the very card number we refuse to keep.
+      payload: { invalid: true, raw: storable({ raw: stripReferences(raw) }) },
     });
     return { id, status: "rejected", reason: "invalid" };
   }
@@ -146,7 +162,8 @@ async function processOne(raw: unknown, ctx: SyncCtx, deps: SyncDeps): Promise<S
       reason: r.reason,
       detail: r.detail,
       // Cart inputs only: the VAT invoice (customer data) is never part of a sale on the wire.
-      payload: storable({ ...sale }),
+      // References are never kept in a rejection (they are for the payment row only).
+      payload: storable(stripReferences({ ...sale })),
     });
     return { id: sale.id, status: "rejected", reason: r.reason };
   };
@@ -185,12 +202,23 @@ async function processOne(raw: unknown, ctx: SyncCtx, deps: SyncDeps): Promise<S
     });
   }
 
-  const due = match.priced.basket.amountDue;
-  if (sale.tenderedCents < due) {
-    return reject({
-      reason: "short_tender",
-      detail: { tenderedCents: sale.tenderedCents, dueCents: due },
-    });
+  const settlement: Settlement = match.settlement;
+  const known = new Map(ctx.tenderTypes.map((t) => [t.id, t.method]));
+  if (sale.tenders.some((t) => t.typeId !== null && known.get(t.typeId) !== t.method)) {
+    return reject({ reason: "unknown_tender", detail: {} });
+  }
+  if (!settlement.ok) {
+    return reject(
+      settlement.error === "short"
+        ? {
+            reason: "short_tender",
+            detail: { balanceCents: settlement.balance, dueCents: settlement.amountDue },
+          }
+        : { reason: "tender_mismatch", detail: { error: settlement.error } },
+    );
+  }
+  if (settlement.tips > 0 && !ctx.tipsAllowed) {
+    return reject({ reason: "tender_mismatch", detail: { error: "tips_not_allowed" } });
   }
 
   let outcome;
@@ -205,6 +233,7 @@ async function processOne(raw: unknown, ctx: SyncCtx, deps: SyncDeps): Promise<S
         sale,
         cart: match.cart,
         priced: match.priced,
+        settlement,
         pricedAsOf: match.at,
       }),
     );

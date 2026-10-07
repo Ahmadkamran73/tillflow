@@ -43,6 +43,17 @@ export const feedSchema = z.object({
       lastSeq: z.int().min(0).default(0),
     }),
   ),
+  /** The ways this till's location takes payment (archived ones are not sent). */
+  tenderTypes: z
+    .array(
+      z.object({
+        id: z.string(),
+        method: z.enum(["cash", "card", "voucher"]),
+        label: z.string(),
+        sort: z.int(),
+      }),
+    )
+    .default([]),
   /** Server clock when the feed was read; the device shows a warning if its own clock is far off. */
   serverTime: z.iso.datetime(),
   taxRates: z.array(

@@ -49,6 +49,7 @@ const tile = (page: Page) => page.getByRole("button", { name: /^Tea bags/ });
 async function sell(page: Page) {
   await tile(page).click();
   await page.getByRole("button", { name: "Pay €12.30" }).first().click();
+  await page.getByRole("button", { name: "Cash", exact: true }).click();
   await page.getByRole("button", { name: /^Exact/ }).click();
   await expect(page.getByRole("heading", { name: "Sale complete" })).toBeVisible();
   await page.getByRole("button", { name: "New sale" }).click();
@@ -171,7 +172,13 @@ test("offline: 20 sales survive a reload and reach the server exactly once; a re
         registerId: string;
         receiptSeq: number;
         completedAt: string;
-        tenderedCents: number;
+        tenders: {
+          id: string;
+          typeId: string | null;
+          method: string;
+          amountCents: number;
+          tipCents: number;
+        }[];
         expectedDueCents: number;
         cart: { lines: { variantId: string; qty: number }[] };
       };
@@ -187,7 +194,13 @@ test("offline: 20 sales survive a reload and reach the server exactly once; a re
           qty: l.qty,
           modifierIds: [],
         })),
-        tenderedCents: s.tenderedCents,
+        tenders: s.tenders.map((t) => ({
+          id: t.id,
+          typeId: t.typeId,
+          method: t.method,
+          amountCents: t.amountCents,
+          tipCents: t.tipCents,
+        })),
         expectedDueCents: s.expectedDueCents,
       }));
       const out: string[] = [];
@@ -291,9 +304,9 @@ test("sync refuses an unpaired caller, a till of another shop and a different ti
 
   // Pair this browser as Till 1; now it is a till, but only for its own shop and its own register.
   await openTill(page, orgId);
-  expect((await call(page.request, "00000000-0000-4000-8000-000000000000", someTill)).status()).toBe(
-    404,
-  );
+  expect(
+    (await call(page.request, "00000000-0000-4000-8000-000000000000", someTill)).status(),
+  ).toBe(404);
   expect((await call(page.request, orgId, someTill)).status()).toBe(403);
   const [reg] = await sql`select id from registers where org_id = ${orgId}`;
   expect((await call(page.request, orgId, reg!.id)).status()).toBe(200);

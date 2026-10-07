@@ -156,6 +156,7 @@ test("a discount above the limit needs a manager PIN and is audit-logged; so is 
   await expect(page.locator("#pin-problem")).toContainText("That PIN is not right.");
   await page.getByLabel(`PIN for ${TILL_NAME}`).fill(TILL_PIN);
   await page.getByRole("button", { name: "Approve" }).click();
+  await page.getByRole("button", { name: "Cash", exact: true }).click();
   await page.getByRole("button", { name: /^Exact/ }).click();
   await expect(page.getByRole("heading", { name: "Sale complete" })).toBeVisible();
 

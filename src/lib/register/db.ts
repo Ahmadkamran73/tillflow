@@ -2,8 +2,11 @@ import Dexie, { type Table } from "dexie";
 import type { Feed } from "./feed";
 import { localDate, type RateRow } from "@/lib/money";
 import { priceCart, type Cart } from "./cart";
+import type { TenderInput } from "./tender-input";
 
 export type ParkedSale = { id: string; savedAt: number; cart: Cart };
+/** A payment on a sale: what travels (`TenderInput`) plus the type's label, for receipts. */
+export type LocalTender = TenderInput & { label: string };
 export type SyncState = "pending" | "synced" | "rejected";
 
 /**
@@ -22,7 +25,10 @@ export type LocalSale = {
   completedAt: string;
   /** Inputs only: totals are always re-derived with `priceCart`. */
   cart: Cart;
-  tenderedCents: number;
+  /** Cash handed over, card and voucher amounts, card tips; the server re-checks they add up. */
+  tenders: LocalTender[];
+  /** Whether the shop rounded cash to 5c when this sale was made (its preset then); missing = yes. */
+  roundCash?: boolean;
   /** What the till charged; the server recalculates and compares (within 1c). */
   expectedDueCents: number;
   /** When this till last pulled the catalogue: lets the server price at what the till showed. */
@@ -37,7 +43,7 @@ export type LocalSale = {
 /** The part of a sale a receipt is built from (also what an emailed receipt is rebuilt from). */
 export type ReceiptSale = Pick<
   LocalSale,
-  "id" | "registerId" | "receiptSeq" | "completedAt" | "cart" | "tenderedCents" | "invoice"
+  "id" | "registerId" | "receiptSeq" | "completedAt" | "cart" | "tenders" | "invoice" | "roundCash"
 >;
 export type Meta = { key: string; value: unknown };
 
@@ -107,14 +113,18 @@ export class RegisterDb extends Dexie {
             sale.syncState = "pending";
             sale.attempts = 0;
             try {
-              sale.expectedDueCents = priceCart(sale.cart as Cart, {
-                country: org?.country ?? "IE",
-                date: localDate(
-                  new Date(sale.completedAt as string),
-                  org?.timezone ?? "Europe/Dublin",
-                ),
-                rates: rates ?? [],
-              }).basket.amountDue;
+              sale.expectedDueCents = priceCart(
+                sale.cart as Cart,
+                {
+                  country: org?.country ?? "IE",
+                  date: localDate(
+                    new Date(sale.completedAt as string),
+                    org?.timezone ?? "Europe/Dublin",
+                  ),
+                  rates: rates ?? [],
+                },
+                "cash",
+              ).basket.amountDue;
             } catch {
               // Cannot be priced here: the server will reject it and a manager will see it.
               sale.expectedDueCents = 0;
@@ -127,6 +137,28 @@ export class RegisterDb extends Dexie {
       events: "id, syncState",
       pinAttempts: "userId",
     });
+    // v5 (step 2.1): a sale carries a list of payments. Older sales had one cash amount handed over.
+    this.version(5)
+      .stores({})
+      .upgrade(async (tx) => {
+        await tx
+          .table("sales")
+          .toCollection()
+          .modify((sale: Record<string, unknown>) => {
+            if (Array.isArray(sale.tenders)) return;
+            sale.tenders = [
+              {
+                id: sale.id,
+                typeId: null,
+                method: "cash",
+                amountCents: sale.tenderedCents ?? 0,
+                tipCents: 0,
+                label: "Cash",
+              },
+            ];
+            delete sale.tenderedCents;
+          });
+      });
   }
 }
 

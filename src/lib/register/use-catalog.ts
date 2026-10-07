@@ -11,6 +11,7 @@ export type CatalogData = {
   org: Feed["org"] | undefined;
   registers: Feed["registers"];
   staff: Feed["staff"];
+  tenderTypes: Feed["tenderTypes"];
   registerId: string | undefined;
   taxRates: RateRow[];
   products: Feed["products"];
@@ -45,6 +46,7 @@ export function useCatalog(db: RegisterDb | null): CatalogData | null {
         parked,
         registers,
         staff,
+        tenderTypes,
         registerId,
       ] = await Promise.all([
         db.meta.get("org"),
@@ -58,12 +60,14 @@ export function useCatalog(db: RegisterDb | null): CatalogData | null {
         db.parked.orderBy("savedAt").toArray(),
         db.meta.get("registers"),
         db.meta.get("staff"),
+        db.meta.get("tenderTypes"),
         db.meta.get("registerId"),
       ]);
       return {
         org: org?.value as Feed["org"] | undefined,
         registers: (registers?.value as Feed["registers"] | undefined) ?? [],
         staff: (staff?.value as Feed["staff"] | undefined) ?? [],
+        tenderTypes: (tenderTypes?.value as Feed["tenderTypes"] | undefined) ?? [],
         registerId: registerId?.value as string | undefined,
         taxRates: (taxRates?.value as RateRow[] | undefined) ?? [],
         products,

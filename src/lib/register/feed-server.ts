@@ -1,7 +1,12 @@
 import "server-only";
 import { z } from "zod";
-import { mapTaxRates, parseFeedMeta } from "@/lib/device/meta";
-import { deviceFeedMeta, deviceFeedTable, type FeedTable } from "@/lib/device/service";
+import { mapTaxRates, parseFeedMeta, parseTenderMeta } from "@/lib/device/meta";
+import {
+  deviceFeedMeta,
+  deviceFeedTable,
+  deviceTenderTypes,
+  type FeedTable,
+} from "@/lib/device/service";
 import { feedSchema, type Feed } from "./feed";
 
 const PAGE = 1000;
@@ -41,6 +46,8 @@ export async function getCatalogFeed(
   const rawMeta = await deviceFeedMeta(tokenHash);
   if (!rawMeta) return null;
   const meta = parseFeedMeta(rawMeta);
+  const rawTypes = await deviceTenderTypes(tokenHash);
+  const tenderTypes = rawTypes ? parseTenderMeta(rawTypes).types.filter((t) => !t.archived) : [];
 
   const [categories, products, variants, groups, mods, pgroups] = await Promise.all([
     all(tokenHash, "categories", null),
@@ -71,6 +78,12 @@ export async function getCatalogFeed(
       displayName: s.display_name,
       role: s.role,
       pinHash: s.pin_hash,
+    })),
+    tenderTypes: tenderTypes.map((t) => ({
+      id: t.id,
+      method: t.method,
+      label: t.label,
+      sort: t.sort,
     })),
     serverTime: new Date().toISOString(),
     registers: [

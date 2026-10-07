@@ -168,6 +168,12 @@ export async function deviceSyncMeta(tokenHash: string): Promise<unknown> {
   return row?.m ?? null;
 }
 
+/** The payment types of the till's location and the shop's business type (ops.device_tender_types). */
+export async function deviceTenderTypes(tokenHash: string): Promise<unknown> {
+  const [row] = await db()<{ m: unknown }[]>`select ops.device_tender_types(${tokenHash}) as m`;
+  return row?.m ?? null;
+}
+
 export type FeedTable =
   | "categories"
   | "products"

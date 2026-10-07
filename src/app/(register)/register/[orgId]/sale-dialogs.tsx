@@ -5,96 +5,12 @@ import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { t } from "@/lib/i18n";
-import { formatCents, parseCents, quickCash } from "@/lib/money";
+import { formatCents } from "@/lib/money";
 import { invoiceInput, type InvoiceInput } from "@/lib/register/invoice";
 import type { PrinterSettings } from "@/lib/register/print";
 import { LOCAL_BRIDGE } from "@/lib/register/print/bridge";
 import { chooseUsbPrinter, usbSupported } from "@/lib/register/print/usb";
 import { Cancel, Modal } from "./dialogs";
-
-export function TenderDialog({
-  due,
-  rounding,
-  onTender,
-  onClose,
-}: {
-  due: number;
-  rounding: number;
-  /** Cash handed over, in cents; always at least `due`. */
-  onTender: (cents: number) => void;
-  onClose: () => void;
-}) {
-  const [other, setOther] = useState("");
-  const [error, setError] = useState(false);
-  return (
-    <Modal title={t("register.tenderTitle")} onClose={onClose}>
-      <dl className="flex flex-col gap-1 tabular-nums">
-        {rounding !== 0 && (
-          <div className="text-muted-foreground flex justify-between text-sm">
-            <dt>{t("register.rounding")}</dt>
-            <dd>{formatCents(rounding)}</dd>
-          </div>
-        )}
-        <div className="flex items-baseline justify-between">
-          <dt className="text-heading font-semibold">{t("register.due")}</dt>
-          <dd className="font-display text-amount font-semibold">{formatCents(due)}</dd>
-        </div>
-      </dl>
-      <div className="grid grid-cols-2 gap-2">
-        {quickCash(due).map((c, i) => (
-          <Button
-            key={c}
-            type="button"
-            size="touch"
-            variant={i === 0 ? "default" : "outline"}
-            onClick={() => onTender(c)}
-          >
-            {i === 0 ? `${t("register.exactCash")} ${formatCents(c)}` : formatCents(c)}
-          </Button>
-        ))}
-      </div>
-      <form
-        className="flex flex-col gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          const c = parseCents(other);
-          if (c === null || c < due) setError(true);
-          else onTender(c);
-        }}
-      >
-        <label className="flex flex-col gap-1 text-sm font-medium">
-          {t("register.otherAmount")}
-          <span id="tender-hint" className="text-muted-foreground text-xs font-normal">
-            {t("register.otherAmountHint")}
-          </span>
-          <Input
-            inputMode="decimal"
-            autoComplete="off"
-            value={other}
-            aria-invalid={error}
-            aria-describedby={error ? "tender-hint tender-error" : "tender-hint"}
-            className="h-12 text-base md:text-base"
-            onChange={(e) => {
-              setOther(e.target.value);
-              setError(false);
-            }}
-          />
-        </label>
-        {error && (
-          <p id="tender-error" role="alert" className="text-destructive text-sm">
-            {t("register.notEnough")}
-          </p>
-        )}
-        <div className="grid grid-cols-2 gap-2">
-          <Cancel onClick={onClose} />
-          <Button type="submit" size="touch">
-            {t("register.completeSale")}
-          </Button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
 
 export function DoneDialog({
   change,

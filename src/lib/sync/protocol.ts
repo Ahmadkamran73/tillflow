@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { discount, saleLine } from "@/lib/register/sale-input";
+import { tendersInput } from "@/lib/register/tender-input";
 
 // The wire format of POST /api/v1/sync/sales, shared by the device (outbox) and the server.
 // Only inputs travel: ids, quantities, serials, discounts and what the till showed. Prices, VAT
@@ -8,7 +9,7 @@ import { discount, saleLine } from "@/lib/register/sale-input";
 export const MAX_BATCH = 25;
 export const MAX_BODY_BYTES = 256 * 1024;
 
-export const syncSale = z.strictObject({
+const syncSaleShape = z.strictObject({
   /** UUIDv7 made on the device; the idempotency key. */
   id: z.uuid(),
   /** Who rang it up: the person whose PIN unlocked the till. The server checks they are staff of this shop. */
@@ -26,10 +27,31 @@ export const syncSale = z.strictObject({
   mode: z.enum(["eat_in", "take_away"]).default("eat_in"),
   lines: z.array(saleLine).min(1).max(100),
   basketDiscount: discount.optional(),
-  tenderedCents: z.int().min(0).max(100_000_000),
+  /** 1-10 payments (cash handed over, card/voucher amounts, card tips); the server re-checks they add up. */
+  tenders: tendersInput,
+  /**
+   * Whether this sale rounded cash to 5c: the shop's setting when it was rung up. The server prices
+   * with the sale's own mode, so a business-type change before it syncs cannot reject it. Sales
+   * queued before this field always rounded (the default).
+   */
+  roundCash: z.boolean().default(true),
   expectedDueCents: z.int().min(0).max(100_000_000),
 });
-export type SyncSale = z.infer<typeof syncSale>;
+/**
+ * Sales queued before tender types carried one `tenderedCents` (cash handed over): read them as a
+ * single cash tender so old outbox rows, old till builds and old rejection payloads still work.
+ */
+export const syncSale = z.preprocess((raw) => {
+  if (raw && typeof raw === "object" && "tenderedCents" in raw && !("tenders" in raw)) {
+    const { tenderedCents, ...rest } = raw as Record<string, unknown>;
+    return {
+      ...rest,
+      tenders: [{ id: rest.id, typeId: null, method: "cash", amountCents: tenderedCents }],
+    };
+  }
+  return raw;
+}, syncSaleShape);
+export type SyncSale = z.infer<typeof syncSaleShape>;
 
 /** The batch envelope. Each sale is validated on its own so one bad sale never blocks the rest. */
 export const syncBatch = z.strictObject({
@@ -49,6 +71,8 @@ export const SYNC_REASONS = [
   "receipt_number_used",
   "cannot_price",
   "discount_needs_approval",
+  "tender_mismatch",
+  "unknown_tender",
 ] as const;
 export type SyncReason = (typeof SYNC_REASONS)[number];
 
@@ -75,4 +99,6 @@ export const reasonText: Record<SyncReason, string> = {
     "The sale could not be priced (a discount that does not fit, or a missing VAT rate).",
   discount_needs_approval:
     "The discount was above the shop's limit and no manager approved it on the till.",
+  tender_mismatch: "The payments on this sale do not add up to its total.",
+  unknown_tender: "A payment type on this sale is not set up for this till's shop.",
 };
