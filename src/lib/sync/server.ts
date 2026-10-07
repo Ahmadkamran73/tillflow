@@ -25,6 +25,8 @@ function run(
   shop: Shop,
   source: Pick<SyncDeps, "existingIds"> & {
     rowsAsOf: (sale: SyncSale, at: Date) => ReturnType<typeof loadRowsAsOf>;
+    /** The till's token hash; null only for the back office's trusted Try again. */
+    tokenHash: string | null;
   },
 ): Promise<SyncResult[]> {
   const deps: SyncDeps = {
@@ -33,7 +35,7 @@ function run(
     async priceAt(sale, at) {
       return priceRows(sale, await source.rowsAsOf(sale, at), shop.taxRates, shop.timezone);
     },
-    recordSale,
+    recordSale: (payload) => recordSale(payload, source.tokenHash),
     recordRejection: recordSyncRejection,
   };
   return processBatch(rawSales, ctx, deps);
@@ -62,6 +64,7 @@ export async function syncSalesFromDevice(
     },
     meta,
     {
+      tokenHash: device.tokenHash,
       async existingIds(ids) {
         return new Set(await deviceSalesKnown(device.tokenHash, ids));
       },
@@ -100,6 +103,7 @@ export async function syncSalesFromSession(
     { ...ctx, discountOverrideBp: org.discountOverrideBp },
     { timezone: location.timezone, taxRates },
     {
+      tokenHash: null,
       async existingIds(ids) {
         // Not a plain select: a cashier's RLS hides other cashiers' sales, but a replay must still be
         // recognised as a duplicate.

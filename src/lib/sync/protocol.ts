@@ -28,6 +28,8 @@ export const syncSale = z.strictObject({
   basketDiscount: discount.optional(),
   tenderedCents: z.int().min(0).max(100_000_000),
   expectedDueCents: z.int().min(0).max(100_000_000),
+  /** The VAT the till printed (newer tills): compared, never trusted; a difference flags the sale. */
+  expectedVatCents: z.int().min(0).max(100_000_000).optional(),
 });
 export type SyncSale = z.infer<typeof syncSale>;
 

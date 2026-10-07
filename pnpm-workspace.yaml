@@ -3,3 +3,7 @@ onlyBuiltDependencies:
   - sharp
   - supabase
   - unrs-resolver
+
+overrides:
+  # GHSA-67mh-4wv8-2f99 (dev server request leak) in the esbuild that drizzle-kit pulls in.
+  "@esbuild-kit/core-utils>esbuild": ^0.25.0

@@ -37,6 +37,16 @@ export const MAX_AHEAD_MS = 10 * 60_000;
 export const MAX_CATALOG_AGE_MS = 30 * DAY;
 /** The till's total may differ from the server's by this much and still be accepted. */
 export const TOLERANCE_CENTS = 1;
+/**
+ * The till's VAT must equal the server's exactly: both use the same money library, so the same
+ * gross and rate always give the same VAT, and any difference is a rate or category that moved.
+ */
+export const VAT_TOLERANCE_CENTS = 0;
+/** A sale synced later than this is checked against today's prices (a till clock set back). */
+export const LATE_SYNC_MS = 60 * 60_000;
+
+/** Saved, but worth a manager's look. Keep in step with the sales_review_flags check in SQL. */
+export type ReviewFlag = "vat_differs" | "old_prices";
 
 /** A real UUID, or undefined: an id that only looks like one would make the database throw and block the till. */
 const uuidOfField = (raw: unknown, field: string): string | undefined => {
@@ -78,28 +88,42 @@ type Rejection = { reason: SyncReason; detail: Record<string, unknown> };
 /** Prices a sale at each plausible catalogue moment and returns the first that matches the till. */
 async function priceMatching(sale: SyncSale, deps: SyncDeps) {
   const completed = new Date(sale.completedAt);
+  const now = deps.now();
   const moments = [completed];
   if (sale.catalogAsOf) {
     const c = new Date(sale.catalogAsOf);
     if (c <= completed && completed.getTime() - c.getTime() <= MAX_CATALOG_AGE_MS) moments.push(c);
   }
   // A product created seconds before the sale, on a till whose clock runs slow, is only visible now.
-  moments.push(deps.now());
+  moments.push(now);
 
   let firstError: Rejection | undefined;
   let firstPriced: number | undefined;
+  // The first moment whose total matches, kept in case no moment matches the till's VAT as well.
+  let dueOnly: { at: Date; cart: Cart; priced: PricedCart } | undefined;
   for (const at of moments) {
     try {
       const r = await deps.priceAt(sale, at);
       const due = r.priced.basket.amountDue;
-      if (Math.abs(due - sale.expectedDueCents) <= TOLERANCE_CENTS)
-        return { ok: true as const, at, ...r };
+      if (Math.abs(due - sale.expectedDueCents) <= TOLERANCE_CENTS) {
+        // A VAT category can change with no price change: prefer the moment that also gives the
+        // VAT the receipt printed, so the books agree with it whenever they can.
+        if (
+          sale.expectedVatCents === undefined ||
+          Math.abs(r.priced.basket.vatTotal - sale.expectedVatCents) <= VAT_TOLERANCE_CENTS
+        ) {
+          return { ok: true as const, at, atNow: at === now, ...r };
+        }
+        dueOnly ??= { at, ...r };
+        continue;
+      }
       firstPriced ??= due;
     } catch (e) {
       if (!(e instanceof SaleError)) throw e; // a database failure: let the device retry
       firstError ??= { reason: reasonOf(e), detail: { message: e.message } };
     }
   }
+  if (dueOnly) return { ok: true as const, atNow: dueOnly.at === now, ...dueOnly };
   if (firstPriced !== undefined) {
     return {
       ok: false as const,
@@ -110,6 +134,35 @@ async function priceMatching(sale: SyncSale, deps: SyncDeps) {
     };
   }
   return { ok: false as const, rejection: firstError! };
+}
+
+/**
+ * Was the sale priced at an older, cheaper catalogue than it should have been? Two ways in:
+ * - priced at the till's last catalogue pull (`catalogAsOf`) because its own moment did not match:
+ *   compare with the catalogue at the moment of the sale (a till that stopped pulling updates);
+ * - synced over an hour late and priced before now: compare with today's catalogue (a till whose
+ *   clock was set back).
+ * Totals before cash rounding, so a small rise is not hidden by it. A sale that cannot be priced at
+ * the later moment (a product removed since) is not flagged. The sale is saved either way.
+ */
+async function cheaperThanItShouldBe(
+  sale: SyncSale,
+  match: { at: Date; atNow: boolean; priced: PricedCart },
+  deps: SyncDeps,
+): Promise<boolean> {
+  const completed = new Date(sale.completedAt);
+  const now = deps.now();
+  let later: Date | undefined;
+  if (match.at < completed) later = completed;
+  else if (!match.atNow && now.getTime() - completed.getTime() > LATE_SYNC_MS) later = now;
+  if (!later) return false;
+  try {
+    const then = await deps.priceAt(sale, later);
+    return then.priced.basket.total > match.priced.basket.total;
+  } catch (e) {
+    if (e instanceof SaleError) return false;
+    throw e;
+  }
 }
 
 async function processOne(raw: unknown, ctx: SyncCtx, deps: SyncDeps): Promise<SyncResult> {
@@ -193,6 +246,15 @@ async function processOne(raw: unknown, ctx: SyncCtx, deps: SyncDeps): Promise<S
     });
   }
 
+  const reviewFlags: ReviewFlag[] = [];
+  if (
+    sale.expectedVatCents !== undefined &&
+    Math.abs(match.priced.basket.vatTotal - sale.expectedVatCents) > VAT_TOLERANCE_CENTS
+  ) {
+    reviewFlags.push("vat_differs");
+  }
+  if (await cheaperThanItShouldBe(sale, match, deps)) reviewFlags.push("old_prices");
+
   let outcome;
   try {
     outcome = await deps.recordSale(
@@ -206,6 +268,7 @@ async function processOne(raw: unknown, ctx: SyncCtx, deps: SyncDeps): Promise<S
         cart: match.cart,
         priced: match.priced,
         pricedAsOf: match.at,
+        reviewFlags,
       }),
     );
   } catch (e) {

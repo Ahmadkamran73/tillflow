@@ -143,9 +143,116 @@ export async function resetPinAction(formData: FormData): Promise<void> {
   });
   if (error) {
     logger.error({ code: error.code }, "reset_member_pin failed");
-    redirect(`${page}?result=error`);
+    redirect(`${page}?result=error&n=${Date.now()}`);
   }
-  redirect(`${page}?result=reset`);
+  redirect(`${page}?result=reset&n=${Date.now()}`);
+}
+
+const staffPinForm = z.object({ pin: pinSchema, confirm: z.string() });
+
+export type AddStaffState = {
+  error?: "invalid" | "mismatch" | "nameInUse" | "error";
+  /** The field to fix, so the form can mark it and move focus there. */
+  field?: "name" | "pin" | "confirm";
+  /** The name as typed, kept after an error (the PINs are never sent back). */
+  name: string;
+};
+
+/**
+ * A manager adds a cashier who only uses the till: a name and a PIN the cashier types on the
+ * manager's screen. No login account; the database makes the id that stands for them.
+ */
+export async function addTillStaffAction(
+  _prev: AddStaffState,
+  formData: FormData,
+): Promise<AddStaffState> {
+  const orgId = uuid.safeParse(str(formData, "orgId"));
+  if (!orgId.success) redirect("/o");
+  await requireRole(["owner", "manager"], orgId.data);
+  const name = str(formData, "name").slice(0, 40);
+
+  const parsed = pinForm.safeParse({
+    name,
+    pin: str(formData, "pin"),
+    confirm: str(formData, "confirm"),
+  });
+  if (!parsed.success) {
+    const field = parsed.error.issues[0]?.path[0] === "name" ? "name" : "pin";
+    return { error: "invalid", field, name };
+  }
+  if (parsed.data.pin !== parsed.data.confirm) return { error: "mismatch", field: "confirm", name };
+
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase.rpc("add_till_staff", {
+    p_org: orgId.data,
+    p_membership_id: uuidv7(),
+    p_display_name: parsed.data.name,
+    p_pin_hash: await hashPin(parsed.data.pin),
+    p_audit_id: uuidv7(),
+  });
+  if (error) {
+    logger.error({ code: error.code }, "add_till_staff failed");
+    return error.code === "23505"
+      ? { error: "nameInUse", field: "name", name }
+      : { error: "error", name };
+  }
+  revalidatePath(`/o/${orgId.data}/staff`);
+  redirect(`/o/${orgId.data}/staff?result=added&n=${Date.now()}`);
+}
+
+/** A manager sets a till-only cashier's PIN (typed by the cashier on the manager's screen). */
+export async function setMemberPinAction(formData: FormData): Promise<void> {
+  const orgId = uuid.safeParse(str(formData, "orgId"));
+  const membershipId = uuid.safeParse(str(formData, "membershipId"));
+  if (!orgId.success) redirect("/o");
+  await requireRole(["owner", "manager"], orgId.data);
+  if (!membershipId.success) redirect(`/o/${orgId.data}/staff?result=error`);
+  const page = `/o/${orgId.data}/staff/${membershipId.data}`;
+
+  const parsed = staffPinForm.safeParse({
+    pin: str(formData, "pin"),
+    confirm: str(formData, "confirm"),
+  });
+  // `n` makes each result a new URL, so the message is announced again when it repeats.
+  const n = Date.now();
+  if (!parsed.success) redirect(`${page}?result=invalid&n=${n}`);
+  if (parsed.data.pin !== parsed.data.confirm) redirect(`${page}?result=mismatch&n=${n}`);
+
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase.rpc("set_member_pin", {
+    p_membership: membershipId.data,
+    p_hash: await hashPin(parsed.data.pin),
+    p_audit_id: uuidv7(),
+  });
+  if (error) {
+    logger.error({ code: error.code }, "set_member_pin failed");
+    redirect(`${page}?result=error&n=${n}`);
+  }
+  redirect(`/o/${orgId.data}/staff?result=pinSet&n=${n}`);
+}
+
+/** A manager removes a till-only cashier. Their past sales keep their id in history. */
+export async function removeTillStaffAction(formData: FormData): Promise<void> {
+  const orgId = uuid.safeParse(str(formData, "orgId"));
+  const membershipId = uuid.safeParse(str(formData, "membershipId"));
+  if (!orgId.success) redirect("/o");
+  await requireRole(["owner", "manager"], orgId.data);
+  const page = `/o/${orgId.data}/staff`;
+  const n = Date.now();
+  if (!membershipId.success) redirect(`${page}?result=error&n=${n}`);
+
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase.rpc("remove_till_staff", {
+    p_membership: membershipId.data,
+    p_audit_id: uuidv7(),
+  });
+  if (error) {
+    logger.error({ code: error.code }, "remove_till_staff failed");
+    // Back to where they acted, with the message next to Remove.
+    redirect(`${page}/${membershipId.data}?confirm=remove&result=error&n=${n}`);
+  }
+  revalidatePath(page);
+  redirect(`${page}?result=removed&n=${n}`);
 }
 
 export async function setDiscountLimitAction(formData: FormData): Promise<void> {

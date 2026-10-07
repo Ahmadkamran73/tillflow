@@ -9,6 +9,21 @@ export const salesEnIE = {
   "sales.col.vat": "VAT",
   "sales.attentionLink": "{count} sales need attention",
   "sales.attentionNone": "Nothing needs attention",
+  "sales.reviewLink": "{count} saved sales to review",
+  "sales.col.check": "Review",
+  "sales.flag.none": "None",
+  "sales.flag.vat_differs": "VAT differs from the till",
+  "sales.flag.old_prices": "Priced at older, lower prices",
+  "sales.review.title": "Sales to review",
+  "sales.review.body":
+    "These sales were saved with the server's prices and VAT, but something looked odd. VAT differs: the till printed a different VAT total, so check its receipt. Older prices: the sale reached the server late and was priced at a catalogue cheaper than today's, which can mean the till's clock was set back.",
+  "sales.review.none": "Nothing to review.",
+  "sales.review.tillVat": "Till VAT {till}, server VAT {server}",
+  "sales.review.note": "Note (optional)",
+  "sales.review.mark": "Mark reviewed",
+  "sales.review.markFor": "Mark reviewed: receipt {receipt}",
+  "sales.review.done": "Marked reviewed.",
+  "sales.review.error": "We could not save that. Please try again.",
 
   "attention.title": "Needs attention",
   "attention.intro":

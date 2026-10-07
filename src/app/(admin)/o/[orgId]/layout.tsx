@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { BackOfficeShell } from "@/components/back-office/shell";
 import { requireRole } from "@/lib/auth";
+import { t } from "@/lib/i18n";
 import { getOrganisation } from "@/lib/org";
 
 export default async function OrgLayout({
@@ -20,18 +21,18 @@ export default async function OrgLayout({
   return (
     <BackOfficeShell orgId={orgId} orgName={org.name} role={role}>
       {user.hasVerifiedFactor ? null : (
-        <div
-          role="status"
+        <aside
+          aria-label={t("mfa.reminderLabel")}
           className="border-border bg-muted mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3 text-sm"
         >
-          <span>Two-step verification is off. Turn it on to protect your shop&apos;s data.</span>
+          <span>{t("mfa.reminder")}</span>
           <Link
             href={`/mfa?next=${encodeURIComponent(`/o/${orgId}/settings`)}`}
             className="inline-flex min-h-12 items-center font-medium underline underline-offset-4"
           >
-            Set it up now
+            {t("mfa.reminderLink")}
           </Link>
-        </div>
+        </aside>
       )}
       {children}
     </BackOfficeShell>

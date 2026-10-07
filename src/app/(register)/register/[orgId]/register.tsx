@@ -86,9 +86,7 @@ import { OverrideDialog } from "./override-dialog";
 const IDLE_LOCK_MS = 5 * 60_000;
 
 /** What the manager is being asked to approve. */
-type OverrideAsk =
-  | { kind: "discount"; key: string; percent: string }
-  | { kind: "noSale" };
+type OverrideAsk = { kind: "discount"; key: string; percent: string } | { kind: "noSale" };
 
 type Flow = {
   product: FeedProduct;
@@ -318,18 +316,21 @@ export function Register({ orgId }: { orgId: string }) {
     else startAdd(product, variants[0]!);
   }
 
-  useScanner(async (code) => {
-    if (!db) return;
-    setQuery(""); // the code may also have been typed into the search box
-    try {
-      const variant = await db.variants.where("barcode").equals(code).first();
-      const product = variant && index.products.get(variant.productId);
-      if (!variant || !product) say(t("register.scanNotFound", { code }));
-      else startAdd(product, variant);
-    } catch {
-      say(t("register.scanError"));
-    }
-  }, dialog === null && cashier !== null);
+  useScanner(
+    async (code) => {
+      if (!db) return;
+      setQuery(""); // the code may also have been typed into the search box
+      try {
+        const variant = await db.variants.where("barcode").equals(code).first();
+        const product = variant && index.products.get(variant.productId);
+        if (!variant || !product) say(t("register.scanNotFound", { code }));
+        else startAdd(product, variant);
+      } catch {
+        say(t("register.scanError"));
+      }
+    },
+    dialog === null && cashier !== null,
+  );
 
   async function park() {
     if (!db || cart.lines.length === 0) return;
@@ -416,10 +417,7 @@ export function Register({ orgId }: { orgId: string }) {
   };
 
   /** Queues what a manager approved outside a sale (it becomes an audit row on the server). */
-  async function queueEvent(
-    kind: "no_sale",
-    approver: { userId: string; approvalId?: string },
-  ) {
+  async function queueEvent(kind: "no_sale", approver: { userId: string; approvalId?: string }) {
     if (!db || !cashier) return;
     await db.events.add({
       id: uuidv7(),
@@ -469,6 +467,7 @@ export function Register({ orgId }: { orgId: string }) {
         cart,
         tenderedCents,
         expectedDueCents: priced.basket.amountDue,
+        expectedVatCents: priced.basket.vatTotal,
       });
     } catch {
       say(t("register.saveFailed"));

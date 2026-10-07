@@ -64,6 +64,7 @@ const toWire = (s: LocalSale): SyncSale => ({
   basketDiscount: s.cart.discount,
   tenderedCents: s.tenderedCents,
   expectedDueCents: s.expectedDueCents,
+  expectedVatCents: s.expectedVatCents,
 });
 
 async function fail(db: RegisterDb, opts: Required<Pick<DrainOptions, "now" | "random">>) {

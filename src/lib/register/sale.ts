@@ -24,6 +24,7 @@ export async function completeSale(
     cart: Cart;
     tenderedCents: number;
     expectedDueCents: number;
+    expectedVatCents?: number;
   },
 ): Promise<LocalSale> {
   return db.transaction("rw", db.meta, db.sales, async () => {
@@ -43,6 +44,7 @@ export async function completeSale(
       cart: input.cart,
       tenderedCents: input.tenderedCents,
       expectedDueCents: input.expectedDueCents,
+      expectedVatCents: input.expectedVatCents,
       catalogAsOf: typeof pulledAt === "string" ? pulledAt : undefined,
       syncState: "pending",
       attempts: 0,

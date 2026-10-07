@@ -117,9 +117,16 @@ export async function heartbeatAgeSeconds(): Promise<number | null> {
 
 export type RecordSaleResult = "created" | "duplicate" | "receipt_clash";
 
-export async function recordSale(payload: unknown): Promise<RecordSaleResult> {
+/**
+ * `tokenHash`: the till's device token hash; the database then refuses a sale for any other shop or
+ * till. Only the back office's Try again (a signed-in manager, already checked) passes none.
+ */
+export async function recordSale(
+  payload: unknown,
+  tokenHash: string | null,
+): Promise<RecordSaleResult> {
   const [row] = await db()<{ r: RecordSaleResult }[]>`
-    select ops.record_sale(${db().json(payload as postgres.JSONValue)}) as r`;
+    select ops.record_sale(${db().json(payload as postgres.JSONValue)}, ${tokenHash}) as r`;
   if (!row) throw new Error("record_sale returned no row");
   return row.r;
 }

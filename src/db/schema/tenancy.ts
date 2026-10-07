@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   check,
   foreignKey,
   index,
@@ -80,6 +81,11 @@ export const memberships = pgTable(
     /** Attempts reserved since the last good PIN; the 5th failure sets pinLockedUntil. */
     pinFailedCount: integer("pin_failed_count").notNull().default(0),
     pinLockedUntil: timestamp("pin_locked_until", { withTimezone: true }),
+    /**
+     * A cashier added by a manager for the till only: no login account. Such a row never
+     * authorises a session (app.org_ids_with_roles skips it), even if its id ever matched a user.
+     */
+    tillOnly: boolean("till_only").notNull().default(false),
     locationIds: uuid("location_ids")
       .array()
       .notNull()
