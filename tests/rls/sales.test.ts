@@ -709,3 +709,34 @@ describe("ops.record_sale re-checks (Phase 1 hardening)", () => {
       expect(rows).toEqual([{ actor_user_id: world.a.manager.userId, after: { note: "Checked" } }]);
     }));
 });
+
+describe("public.sales_to_review", () => {
+  it("leaves reviewed sales out before the limit, so they can never hide an unreviewed one", () =>
+    inWorld(async (ctx) => {
+      const { sql, world, as, denied } = ctx;
+      const { pid, vid } = await seedProduct(ctx, world.a.orgId);
+      const old = salePayload(world.a, vid, pid, { receipt_seq: 1, review_flags: ["old_prices"] });
+      await record(ctx, old);
+      // Three newer flagged sales, all reviewed.
+      for (const seq of [2, 3, 4]) {
+        const p = salePayload(world.a, vid, pid, {
+          id: randomUUID(),
+          receipt_seq: seq,
+          review_flags: ["old_prices"],
+        });
+        await record(ctx, p);
+        await as(
+          world.a.manager,
+          () => sql`select public.mark_sale_reviewed(${p.sale.id}, '', ${randomUUID()})`,
+        );
+      }
+      const list = (actor: Parameters<Ctx["as"]>[0], limit: number) =>
+        as(actor, () => sql`select id from public.sales_to_review(${world.a.orgId}, ${limit})`);
+      // Limit 1: still the old, unreviewed sale.
+      expect(await list(world.a.manager, 1)).toEqual([{ id: old.sale.id }]);
+      // RLS decides what others see: Shop B and a cashier get nothing; anon cannot call it.
+      expect(await list(world.b.manager, 10)).toHaveLength(0);
+      expect(await list(world.a.cashier, 10)).toHaveLength(0);
+      await denied(() => list(null, 10));
+    }));
+});

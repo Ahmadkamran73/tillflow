@@ -210,6 +210,33 @@ $$;
 revoke all on function public.mark_sale_reviewed(uuid, text, uuid) from public, anon;
 grant execute on function public.mark_sale_reviewed(uuid, text, uuid) to authenticated;
 
+-- ---------------------------------------------------------------- public.sales_to_review
+-- Flagged sales with no review yet, newest first. The reviewed ones are left out BEFORE the limit,
+-- so many reviewed sales can never push an unreviewed one off the list, however old it is.
+-- SECURITY INVOKER: RLS on sales and audit_log decides what the caller sees (managers and owners).
+create function public.sales_to_review(p_org uuid, p_limit integer)
+returns table (id uuid, register_id uuid, receipt_seq integer, completed_at timestamptz,
+               review_flags text[], vat_cents integer, client_vat_cents integer,
+               amount_due_cents integer)
+language sql stable security invoker set search_path = ''
+as $$
+  select s.id, s.register_id, s.receipt_seq, s.completed_at, s.review_flags, s.vat_cents,
+         s.client_vat_cents, s.amount_due_cents
+  from public.sales s
+  where s.org_id = p_org
+    -- The review list is for managers and owners only (a cashier can read their own sales).
+    and s.org_id in (select app.manager_org_ids())
+    and s.review_flags <> '{}'
+    and not exists (
+      select 1 from public.audit_log a
+      where a.org_id = s.org_id and a.action = 'sale.reviewed' and a.entity_id = s.id
+    )
+  order by s.received_at desc, s.id
+  limit least(greatest(coalesce(p_limit, 100), 1), 500)
+$$;
+revoke all on function public.sales_to_review(uuid, integer) from public, anon;
+grant execute on function public.sales_to_review(uuid, integer) to authenticated;
+
 -- ---------------------------------------------------------------- ops.record_sale
 -- p: as in 0023, plus sale.client_vat and sale.review_flags.
 -- p_token_hash: the till's device token hash. The sync route always passes it, and the sale's org
