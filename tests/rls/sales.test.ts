@@ -163,7 +163,8 @@ describe("ops.record_sale", () => {
       const { pid, vid } = await seedProduct(ctx, world.a.orgId);
       const noRate = salePayload(world.a, vid, pid);
       delete (noRate.lines[0] as Record<string, unknown>).tax_rate_bp;
-      await denied(() => record(ctx, noRate), ["23514"]);
+      // Refused by record_sale's own line check (22023) before the table's constraint (23514).
+      await denied(() => record(ctx, noRate), ["22023"]);
       await denied(
         () => record(ctx, salePayload(world.a, vid, pid, { client_due: 703 })),
         ["23514"],
