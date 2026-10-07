@@ -141,3 +141,10 @@ export async function inWorld(fn: (ctx: Ctx) => Promise<void>) {
     if (!(e instanceof Rollback)) throw e;
   }
 }
+
+/** Gives a seeded user a verified authenticator, as Supabase would after MFA enrolment. */
+export async function enrolTotp(tx: TransactionSql, actor: Actor) {
+  await tx`insert into auth.users (id, aud, role) values (${actor.userId}, 'authenticated', 'authenticated') on conflict (id) do nothing`;
+  await tx`insert into auth.mfa_factors (id, user_id, factor_type, status, created_at, updated_at, secret)
+           values (${randomUUID()}, ${actor.userId}, 'totp', 'verified', now(), now(), 'x')`;
+}

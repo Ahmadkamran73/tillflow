@@ -10,7 +10,7 @@ const linkClass =
 
 export default async function SettingsPage({ params }: { params: Promise<{ orgId: string }> }) {
   const { orgId } = await params;
-  const { role } = await requireRole(["owner", "manager"], orgId);
+  const { role, user } = await requireRole(["owner", "manager"], orgId);
 
   const links: { href: string; label: MessageKey }[] = [
     { href: "tills", label: "tills.title" },
@@ -36,6 +36,19 @@ export default async function SettingsPage({ params }: { params: Promise<{ orgId
           </li>
         ))}
       </ul>
+      <p className="surface-panel flex flex-wrap items-center justify-between gap-3 px-5 py-3">
+        <span>
+          Two-step verification: <strong>{user.hasVerifiedFactor ? "On" : "Off"}</strong>
+        </span>
+        {user.hasVerifiedFactor ? null : (
+          <Link
+            href={`/mfa?next=${encodeURIComponent(`/o/${orgId}/settings`)}`}
+            className="inline-flex min-h-12 items-center font-medium underline underline-offset-4"
+          >
+            Set it up
+          </Link>
+        )}
+      </p>
     </section>
   );
 }

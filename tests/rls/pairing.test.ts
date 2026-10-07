@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { createHash, randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
-import { inWorld, sql, type Ctx } from "./helpers";
+import { enrolTotp, inWorld, sql, type Ctx } from "./helpers";
 
 afterAll(() => sql.end());
 
@@ -37,8 +37,9 @@ describe("register pairing codes", () => {
       expect(audit[0]!.n).toBe(2);
     }));
 
-  it("owners without a verified second factor (aal1) are refused", () =>
+  it("owners who set up a second factor but are at aal1 are refused", () =>
     inWorld(async (ctx) => {
+      await enrolTotp(ctx.sql, ctx.world.a.owner);
       await ctx.denied(() =>
         ctx.as(
           ctx.world.a.owner,

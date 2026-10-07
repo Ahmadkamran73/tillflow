@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
-import { inWorld, sql, type Actor, type Ctx } from "./helpers";
+import { enrolTotp, inWorld, sql, type Actor, type Ctx } from "./helpers";
 
 afterAll(() => sql.end());
 
@@ -52,7 +52,8 @@ describe("setting and resetting PINs", () => {
       // Not a member of Shop B; no session at all.
       await denied(() => setPin(ctx, world.a.cashier, world.b.orgId));
       await denied(() => setPin(ctx, null, world.a.orgId));
-      // An owner without the second factor is not treated as a member.
+      // An owner who set up a second factor but is at aal1 is not treated as a member.
+      await enrolTotp(ctx.sql, world.a.owner);
       await denied(() =>
         ctx.as(
           world.a.owner,
@@ -277,6 +278,7 @@ describe("discount override threshold", () => {
       await denied(() => set(world.a.cashier, 500));
       await denied(() => set(world.b.owner, 500));
       await denied(() => set(null, 500));
+      await enrolTotp(sql, world.a.owner);
       await denied(() => set(world.a.owner, 500, { aal: "aal1" }));
       await denied(() => set(world.a.owner, -1), ["22023"]);
       await denied(() => set(world.a.owner, 10001), ["22023"]);

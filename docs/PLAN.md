@@ -209,7 +209,7 @@ Server owns catalogue and prices; the device owns what was sold. Stock may go ne
 
 - **Tenant isolation:** RLS on every table from the first migration; CI fails if a table lacks a policy; tests prove Shop A cannot read or write Shop B.
 - **Service-role / privileged DB access** only in `src/lib/ops/db.ts` (calls `ops.*` SECURITY DEFINER functions only) and the pg-boss job handlers; never in the browser. CI checks the imports.
-- **Auth:** owners MFA-required; registers paired with one-time codes (revocable device tokens); cashier PINs hashed with Argon2, rate-limited, lockout after 5 failures; PIN never works on an unpaired device; manager override for refunds, big discounts and no-sale drawer opens, all audit-logged.
+- **Auth:** two-step (TOTP) optional but nagged until set up, and enforced in RLS once enabled; registers paired with one-time codes (revocable device tokens); cashier PINs hashed with Argon2, rate-limited, lockout after 5 failures; PIN never works on an unpaired device; manager override for refunds, big discounts and no-sale drawer opens, all audit-logged.
 - **PCI DSS:** out of scope in v1 — Tillflow never handles card data. The "Card" tender stores only the amount and an optional terminal receipt reference typed by the cashier (never card numbers).
 - **App:** Zod validation + role check in every server action; server recalculates all totals; CSP/HSTS/secure cookies; rate limits; secrets only in Vercel/Supabase settings; Dependabot + `npm audit`; PII scrubbing in our own error log.
 - **Data:** TLS + encryption at rest; PITR; monthly restore test; append-only audit log; independent pen test before launch and yearly.
