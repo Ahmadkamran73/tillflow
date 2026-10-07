@@ -33,6 +33,20 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
   const { data } = await supabase.auth.getClaims();
 
   const { pathname, search } = request.nextUrl;
+  // Already signed in: the home page and log-in form go straight to the dashboard instead of
+  // asking for a password again. Skipped when `next` or `error` is present, so a session that
+  // is really dead (revoked) cannot bounce between /o and /login.
+  if (
+    data?.claims &&
+    (pathname === "/" || pathname === "/login") &&
+    !request.nextUrl.searchParams.has("next") &&
+    !request.nextUrl.searchParams.has("error")
+  ) {
+    const base = process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin;
+    const redirect = NextResponse.redirect(new URL("/o", base));
+    for (const c of response.cookies.getAll()) redirect.cookies.set(c);
+    return redirect;
+  }
   if (!data?.claims && isProtected(pathname)) {
     // Not request.nextUrl: behind Hostinger's proxy its origin is the internal 0.0.0.0:3000.
     const base = process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin;
