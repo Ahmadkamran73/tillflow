@@ -98,5 +98,21 @@ export const feedSchema = z.object({
 });
 
 export type Feed = z.infer<typeof feedSchema>;
+
+/** The shop default (organisations.discount_override_bp): 10% off needs no manager PIN, more does. */
+export const DEFAULT_DISCOUNT_LIMIT_BP = 1000;
+
+/**
+ * The discount limit from the till's saved copy of the shop. A copy saved before the limit existed
+ * has none: use the default until the next catalogue pull brings the real one, instead of crashing
+ * the register (which would also stop that pull from ever running).
+ */
+export const discountLimitOf = (org: { discountOverrideBp?: number } | undefined): number =>
+  typeof org?.discountOverrideBp === "number" &&
+  Number.isInteger(org.discountOverrideBp) &&
+  org.discountOverrideBp >= 0 &&
+  org.discountOverrideBp <= 10_000
+    ? org.discountOverrideBp
+    : DEFAULT_DISCOUNT_LIMIT_BP;
 export type FeedProduct = Feed["products"][number];
 export type FeedVariant = Feed["variants"][number];

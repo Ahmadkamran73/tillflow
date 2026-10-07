@@ -57,7 +57,7 @@ import {
 } from "@/lib/register/print";
 import { buildReceipt, receiptLabels, receiptText } from "@/lib/register/receipt";
 import { completeSale, setInvoice } from "@/lib/register/sale";
-import type { FeedProduct, FeedVariant } from "@/lib/register/feed";
+import { discountLimitOf, type FeedProduct, type FeedVariant } from "@/lib/register/feed";
 import { useCatalog, useCatalogRefresh } from "@/lib/register/use-catalog";
 import { useSync } from "@/lib/sync/use-sync";
 import { useScanner } from "@/lib/register/use-scanner";
@@ -402,7 +402,7 @@ export function Register({ orgId }: { orgId: string }) {
             qty: l.qty,
             gross: lineTotal(priced, priced.itemIndex[i]!),
           })),
-          data.org.discountOverrideBp,
+          discountLimitOf(data.org),
         )
       : false;
   const discountKey = JSON.stringify([
@@ -412,7 +412,7 @@ export function Register({ orgId }: { orgId: string }) {
   const overrideAsk: OverrideAsk = {
     kind: "discount",
     key: discountKey,
-    percent: `${(data?.org?.discountOverrideBp ?? 0) / 100}%`,
+    percent: `${discountLimitOf(data?.org) / 100}%`,
   };
 
   /** Queues what a manager approved outside a sale (it becomes an audit row on the server). */
