@@ -127,6 +127,13 @@
       "when": 1791295358027,
       "tag": "0022_register_approvals",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1791368122895,
+      "tag": "0025_sales_review_flags_and_till_staff",
+      "breakpoints": true
     }
   ]
 }

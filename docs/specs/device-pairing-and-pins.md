@@ -52,6 +52,6 @@ Migration `0021` (generated): `memberships.display_name/pin_set_at/pin_failed_co
 
 ## Out of scope
 
-- Cashier accounts: there is no invite flow yet, so cashiers cannot sign in to set their own PIN. Until it exists only owners and managers have PINs.
+- Cashiers are till-only staff (Phase 1 hardening, 2026-10-07): a manager adds them on Staff > Add cashier with a name and a PIN the cashier types on the manager's screen (`public.add_till_staff`, hashed on the server). They have no login or email; `memberships.user_id` is a fresh UUIDv7 with no auth user. Staff > Manage sets a new PIN (`public.set_member_pin`: managers for cashiers, owners also for managers) or removes the cashier (`public.remove_till_staff`, cashiers only; past sales keep the id). All audited (`staff.added`, `staff.pin_set`, `staff.removed`). A cashier who later needs back-office access still needs an invite flow (not built).
 - Sales queued on a device before this step have no cashier and show up in Needs attention.
 - Migration note: `0021` (generated) adds columns and `register_pairing_codes`; `0022` (generated) adds `register_approvals`; `0023` (hand-written) holds RLS, grants and every function. Drizzle's snapshot numbering is out of step with the hand-written files (see STATUS); the new snapshots are `0021_snapshot.json` and `0022_snapshot.json`.

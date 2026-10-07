@@ -29,8 +29,12 @@ export const getAuthUser = cache(async (): Promise<AuthUser | null> => {
   const name = businessName.safeParse(data.user.user_metadata?.business_name);
   return {
     id: data.user.id,
+    // From the access token getUser() just had the auth server check. If the call fails this is
+    // aal1, so anyone with a factor is sent to MFA (fails closed).
     aal: aal?.currentLevel === "aal2" ? "aal2" : "aal1",
-    hasVerifiedFactor: aal?.nextLevel === "aal2",
+    // From the auth server's user record, never the factor list cached in the session cookie
+    // (which the cookie holder could edit to skip MFA in the app).
+    hasVerifiedFactor: (data.user.factors ?? []).some((f) => f.status === "verified"),
     signUpBusinessName: name.success ? name.data : undefined,
   };
 });

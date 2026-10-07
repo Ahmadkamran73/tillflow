@@ -1,5 +1,6 @@
 import { changeDue, lineDiscountOf } from "@/lib/money";
 import { unitWithModifiers, type Cart, type PricedCart } from "@/lib/register/cart";
+import type { ReviewFlag } from "./process";
 import type { SyncSale } from "./protocol";
 
 /**
@@ -20,6 +21,8 @@ export function buildSaleRecord(args: {
   cart: Cart;
   priced: PricedCart;
   pricedAsOf: Date;
+  /** Saved but worth a manager's look (see process.ts). */
+  reviewFlags?: ReviewFlag[];
 }) {
   const { sale, cart, priced } = args;
   const { basket } = priced;
@@ -80,6 +83,8 @@ export function buildSaleRecord(args: {
       cash_rounding: basket.cashRounding,
       amount_due: basket.amountDue,
       client_due: sale.expectedDueCents,
+      client_vat: sale.expectedVatCents ?? null,
+      review_flags: args.reviewFlags ?? [],
     },
     lines,
     payment: {

@@ -196,3 +196,53 @@ test("the till locks after the Lock button and needs the PIN again", async ({ pa
   await expect(page.getByRole("heading", { name: "Who is using the till?" })).toBeVisible();
   await unlockTill(page);
 });
+
+test("a manager adds a cashier by name and PIN; the cashier unlocks the till and sells", async ({
+  page,
+}) => {
+  const orgId = await setup(page, "cashier");
+  await openTill(page, orgId);
+
+  // Back office: add Aoife. She types her own PIN on the manager's screen; no email, no login.
+  await page.goto(`/o/${orgId}/staff`);
+  await page.getByRole("link", { name: "Add cashier" }).click();
+  await hydrated(page);
+  await page.getByLabel("Name shown on the till").fill("Aoife");
+  await page.getByLabel("PIN (4 to 6 digits)").fill("4826");
+  await page.getByLabel("Repeat the PIN").fill("4826");
+  await page.getByRole("button", { name: "Add cashier" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Cashier added" })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "Aoife" })).toBeVisible();
+  expect(await audit(orgId, "staff.added")).toBe(1);
+
+  // The till picks her up at its next catalogue refresh (on load), then she sells.
+  await page.goto(`/register/${orgId}`);
+  await expect(page.getByRole("button", { name: /^Aoife/ })).toBeVisible({ timeout: 30_000 });
+  await unlockTill(page, "Aoife", "4826");
+  await page.getByRole("button", { name: /^Tea bags/ }).click();
+  await page.getByRole("button", { name: "Pay €10.00" }).click();
+  await page.getByRole("button", { name: /^Exact/ }).click();
+  await expect(page.getByRole("heading", { name: "Sale complete" })).toBeVisible();
+
+  const [aoife] =
+    await sql`select user_id from memberships where org_id = ${orgId} and display_name = 'Aoife'`;
+  await expect
+    .poll(async () => (await sql`select 1 from sales where org_id = ${orgId}`).length, {
+      timeout: 60_000,
+    })
+    .toBe(1);
+  const [sale] = await sql`select cashier_user_id, vat_cents, client_vat_cents, review_flags
+    from sales where org_id = ${orgId}`;
+  // The till's VAT travelled with the sale and matched the server's: nothing to review.
+  expect(sale).toMatchObject({ cashier_user_id: aoife!.user_id, client_vat_cents: 187 });
+  expect(sale!.vat_cents).toBe(187);
+  expect(sale!.review_flags).toEqual([]);
+
+  // Removing her keeps the sale, with her id on it.
+  await page.goto(`/o/${orgId}/staff`);
+  await page.getByRole("link", { name: "Manage Aoife" }).click();
+  await page.getByRole("link", { name: "Remove Aoife" }).click();
+  await page.getByRole("button", { name: "Yes, remove Aoife" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Cashier removed" })).toBeVisible();
+  expect((await sql`select 1 from sales where org_id = ${orgId}`).length).toBe(1);
+});

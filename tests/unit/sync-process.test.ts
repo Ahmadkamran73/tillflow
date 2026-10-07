@@ -402,3 +402,138 @@ describe("manager override and cashier attribution (step 1.7)", () => {
     expect(rejections[1]!.user_id).toBeNull();
   });
 });
+
+describe("review flags (saved, but worth a manager's look)", () => {
+  const flagsOf = (recorded: unknown[]) =>
+    (recorded[0] as { sale: { review_flags: string[]; client_vat: number | null } }).sale;
+
+  it("a sale whose till VAT matches has no flags; the till's VAT is stored", async () => {
+    const { d, recorded } = deps(() => 1234);
+    // €12.34 at 23%: VAT 231c.
+    await processBatch([sale({ expectedVatCents: 231 })], ctx, d);
+    expect(flagsOf(recorded)).toMatchObject({ review_flags: [], client_vat: 231 });
+  });
+
+  it("a VAT difference over 1c is saved and flagged, not rejected", async () => {
+    const { d, recorded, rejections } = deps(() => 1234);
+    const [r] = await processBatch([sale({ expectedVatCents: 200 })], ctx, d);
+    expect(r!.status).toBe("created");
+    expect(rejections).toHaveLength(0);
+    expect(flagsOf(recorded).review_flags).toEqual(["vat_differs"]);
+  });
+
+  it("an older till that sends no VAT is not flagged", async () => {
+    const { d, recorded } = deps(() => 1234);
+    await processBatch([sale()], ctx, d);
+    expect(flagsOf(recorded)).toMatchObject({ review_flags: [], client_vat: null });
+  });
+
+  it("a late sale priced at an older, cheaper catalogue is flagged old_prices", async () => {
+    // Rung up two days ago at €12.34; the price rose to €15.00 yesterday.
+    const completed = new Date(NOW.getTime() - 2 * 86_400_000);
+    const rise = new Date(NOW.getTime() - 86_400_000);
+    const { d, recorded } = deps((at) => (at < rise ? 1234 : 1500));
+    const [r] = await processBatch([sale({ completedAt: completed.toISOString() })], ctx, d);
+    expect(r!.status).toBe("created");
+    expect(flagsOf(recorded).review_flags).toEqual(["old_prices"]);
+  });
+
+  it("a late sale whose price has not risen since is not flagged", async () => {
+    const completed = new Date(NOW.getTime() - 2 * 86_400_000);
+    const { d, recorded } = deps(() => 1234);
+    await processBatch([sale({ completedAt: completed.toISOString() })], ctx, d);
+    expect(flagsOf(recorded).review_flags).toEqual([]);
+  });
+
+  it("a sale synced within the hour is never re-priced at today's catalogue", async () => {
+    const completed = new Date(NOW.getTime() - 30 * 60_000);
+    const asked: Date[] = [];
+    const { d, recorded } = deps((at) => {
+      asked.push(at);
+      return at < NOW ? 1234 : 1500;
+    });
+    await processBatch([sale({ completedAt: completed.toISOString() })], ctx, d);
+    expect(flagsOf(recorded).review_flags).toEqual([]);
+    expect(asked).toHaveLength(1);
+  });
+
+  it("a product removed since is not flagged (it cannot be priced today)", async () => {
+    const completed = new Date(NOW.getTime() - 2 * 86_400_000);
+    const { d, recorded } = deps((at) => (at < NOW ? 1234 : "unknown"));
+    await processBatch([sale({ completedAt: completed.toISOString() })], ctx, d);
+    expect(flagsOf(recorded).review_flags).toEqual([]);
+  });
+
+  it("both flags can apply to one sale", async () => {
+    const completed = new Date(NOW.getTime() - 2 * 86_400_000);
+    const { d, recorded } = deps((at) => (at < NOW ? 1234 : 1500));
+    await processBatch(
+      [sale({ completedAt: completed.toISOString(), expectedVatCents: 100 })],
+      ctx,
+      d,
+    );
+    expect(flagsOf(recorded).review_flags).toEqual(["vat_differs", "old_prices"]);
+  });
+});
+
+describe("review flags after the VAT audit", () => {
+  const recordOf = (recorded: unknown[]) =>
+    (recorded[0] as { sale: { review_flags: string[]; vat: number; priced_as_of: string } }).sale;
+
+  it("a till that stopped pulling the catalogue is flagged even when it syncs at once", async () => {
+    // Pulled five days ago at €12.34; the price rose to €15.00 since; sold ten minutes ago.
+    const pulled = new Date(NOW.getTime() - 5 * 86_400_000);
+    const rise = new Date(NOW.getTime() - 86_400_000);
+    const completed = new Date(NOW.getTime() - 10 * 60_000);
+    const { d, recorded } = deps((at) => (at < rise ? 1234 : 1500));
+    const [r] = await processBatch(
+      [sale({ completedAt: completed.toISOString(), catalogAsOf: pulled.toISOString() })],
+      ctx,
+      d,
+    );
+    expect(r!.status).toBe("created");
+    expect(recordOf(recorded).review_flags).toEqual(["old_prices"]);
+  });
+
+  it("prefers the catalogue moment that also gives the VAT the receipt printed", async () => {
+    // Same €12.34 price throughout, but the product moved from 9% to 23% after the till's pull.
+    const pulled = new Date(NOW.getTime() - 86_400_000);
+    const change = new Date(NOW.getTime() - 3_600_000);
+    const recorded: unknown[] = [];
+    const d: SyncDeps = {
+      now: () => NOW,
+      existingIds: async () => new Set(),
+      priceAt: async (s, at) => {
+        const rows = rowsAt(1234);
+        rows.products[0]!.taxCategory = at < change ? "SECOND_REDUCED" : "STANDARD";
+        const cart = buildServerCart(s, rows);
+        return {
+          cart,
+          priced: priceCart(cart, { country: "IE", date: "2026-10-06", rates: IRISH_RATES }),
+        };
+      },
+      recordSale: async (p) => {
+        recorded.push(p);
+        return "created";
+      },
+      recordRejection: async () => {},
+    };
+    // €12.34 at 9%: VAT 102c (at 23% it would be 231c).
+    await processBatch(
+      [sale({ catalogAsOf: pulled.toISOString(), expectedVatCents: 102 })],
+      ctx,
+      d,
+    );
+    const rec = recordOf(recorded);
+    expect(rec.vat).toBe(102);
+    expect(rec.priced_as_of).toBe(pulled.toISOString());
+    // Same price at both moments, so this is not "old prices" either.
+    expect(rec.review_flags).toEqual([]);
+  });
+
+  it("VAT must match exactly: 1c off is flagged", async () => {
+    const { d, recorded } = deps(() => 1234);
+    await processBatch([sale({ expectedVatCents: 230 })], ctx, d);
+    expect(recordOf(recorded).review_flags).toEqual(["vat_differs"]);
+  });
+});

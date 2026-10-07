@@ -597,3 +597,115 @@ describe("sales_known (replay dedupe)", () => {
       expect(await known(world.a.cashier, world.a.orgId, [other.sale.id])).toHaveLength(0);
     }));
 });
+
+describe("ops.record_sale re-checks (Phase 1 hardening)", () => {
+  const withToken = async (ctx: Ctx, p: unknown, token: string | null) =>
+    (await ctx.sql`select ops.record_sale(${json(ctx, p)}, ${token}) as r`)[0]!.r as string;
+
+  it("a sale that does not add up is refused, whichever sum is wrong", () =>
+    inWorld(async (ctx) => {
+      const { world, denied } = ctx;
+      const { pid, vid } = await seedProduct(ctx, world.a.orgId);
+      const bad: ((p: ReturnType<typeof salePayload>) => void)[] = [
+        (p) => (p.lines[0]!.net_cents = 570), // net + VAT is not the gross
+        (p) => (p.sale.items_total = 701),
+        (p) => (p.sale.vat = 130),
+        (p) => (p.sale.non_vat = 15),
+        (p) => (p.sale.cash_rounding = 3),
+        (p) => (p.sale.amount_due = 705),
+        (p) => (p.payment.amount = 650),
+        (p) => (p.payment.tendered = 600),
+        (p) => (p.payment.change = 250),
+        // Adds up, but the VAT is split at the wrong rate (9% instead of the line's 23%).
+        (p) => {
+          p.lines[0]!.net_cents = 642;
+          p.lines[0]!.vat_cents = 58;
+        },
+        (p) => (p.lines[0]!.tax_rate_bp = 10_001),
+        // The discount must be what the full price lost (2 x 350 - 700 = 0).
+        (p) => (p.lines[0]!.discount_cents = 50),
+        // A cash total that is not a multiple of 5c, though within 2c of the items.
+        (p) => {
+          p.sale.cash_rounding = 2;
+          p.sale.amount_due = 702;
+          p.payment.amount = 702;
+          p.payment.change = 298;
+        },
+        // A kind of line the server never writes.
+        (p) => (p.lines[0]!.kind = "levy"),
+        // vat_differs without the till's VAT to back it.
+        (p) => ((p.sale as Record<string, unknown>).review_flags = ["vat_differs"]),
+      ];
+      for (const [i, spoil] of bad.entries()) {
+        const p = salePayload(world.a, vid, pid, { receipt_seq: i + 1 });
+        spoil(p);
+        await denied(() => record(ctx, p), ["22023"]);
+      }
+      expect(await counts(ctx, world.a.orgId)).toMatchObject({ sales: 0, lines: 0, payments: 0 });
+    }));
+
+  it("with a device token, only that till's own shop and register are accepted", () =>
+    inWorld(async (ctx) => {
+      const { sql, world, denied } = ctx;
+      const { pid, vid } = await seedProduct(ctx, world.a.orgId);
+      const p = salePayload(world.a, vid, pid);
+      await denied(() => withToken(ctx, p, world.b.tokenHash));
+      await denied(() => withToken(ctx, p, "0".repeat(64)));
+      expect(await withToken(ctx, p, world.a.tokenHash)).toBe("created");
+      // A second till of the same shop cannot record a sale as the first one.
+      const other = randomUUID();
+      await sql`insert into registers (id, org_id, location_id, name, device_token_hash)
+                values (${other}, ${world.a.orgId}, ${world.a.locationId}, 'Till 2', ${"f".repeat(64)})`;
+      const q = salePayload(world.a, vid, pid, { id: randomUUID(), receipt_seq: 9 });
+      await denied(() => withToken(ctx, q, "f".repeat(64)));
+      // A till cannot name its own approver: approved_by is ignored with a token, so no override row.
+      const r = salePayload(world.a, vid, pid, {
+        id: randomUUID(),
+        receipt_seq: 10,
+        approved_by: world.a.owner.userId,
+      });
+      expect(await withToken(ctx, r, world.a.tokenHash)).toBe("created");
+      expect(
+        await sql`select 1 from audit_log where entity_id = ${r.sale.id} and action = 'sale.discount_override'`,
+      ).toHaveLength(0);
+    }));
+
+  it("stores the till's VAT and the review flags; an unknown flag is refused", () =>
+    inWorld(async (ctx) => {
+      const { sql, world, denied } = ctx;
+      const { pid, vid } = await seedProduct(ctx, world.a.orgId);
+      const p = salePayload(world.a, vid, pid, {
+        client_vat: 120,
+        review_flags: ["vat_differs", "old_prices"],
+      });
+      expect(await record(ctx, p)).toBe("created");
+      const [row] =
+        await sql`select client_vat_cents, review_flags from sales where id = ${p.sale.id}`;
+      expect(row).toEqual({ client_vat_cents: 120, review_flags: ["vat_differs", "old_prices"] });
+
+      const odd = salePayload(world.a, vid, pid, { receipt_seq: 2, review_flags: ["made_up"] });
+      await denied(() => record(ctx, odd), ["23514"]);
+    }));
+
+  it("a manager marks a flagged sale reviewed once; cashiers and Shop B cannot", () =>
+    inWorld(async (ctx) => {
+      const { sql, world, as, denied } = ctx;
+      const { pid, vid } = await seedProduct(ctx, world.a.orgId);
+      const flagged = salePayload(world.a, vid, pid, { review_flags: ["old_prices"] });
+      const plain = salePayload(world.a, vid, pid, { id: randomUUID(), receipt_seq: 2 });
+      await record(ctx, flagged);
+      await record(ctx, plain);
+      const review = (actor: Parameters<Ctx["as"]>[0], id: string) =>
+        as(actor, () => sql`select public.mark_sale_reviewed(${id}, 'Checked', ${randomUUID()})`);
+
+      for (const actor of [world.a.cashier, world.b.manager, world.b.owner, null]) {
+        await denied(() => review(actor, flagged.sale.id));
+      }
+      await denied(() => review(world.a.manager, plain.sale.id)); // nothing to review
+      await review(world.a.manager, flagged.sale.id);
+      await review(world.a.owner, flagged.sale.id); // already reviewed: no second row
+      const rows = await sql`select actor_user_id, after from audit_log
+        where org_id = ${world.a.orgId} and action = 'sale.reviewed' and entity_id = ${flagged.sale.id}`;
+      expect(rows).toEqual([{ actor_user_id: world.a.manager.userId, after: { note: "Checked" } }]);
+    }));
+});
