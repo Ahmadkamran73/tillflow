@@ -10,7 +10,7 @@ export type AuthUser = {
   id: string;
   /** aal2 once this sign-in has passed TOTP. */
   aal: "aal1" | "aal2";
-  /** True when the user has a verified TOTP factor (so aal2 is possible and therefore required). */
+  /** True when the user has a verified TOTP factor (so aal2 is required; without one MFA is optional). */
   hasVerifiedFactor: boolean;
   /** Business name typed at sign-up; only used to name the first organisation. */
   signUpBusinessName: string | undefined;
@@ -75,8 +75,9 @@ export async function provisionOrganisation(name: string): Promise<string> {
   return z.uuid().parse(data);
 }
 
-function mfaRequired(user: AuthUser, role: Role) {
-  return role === "owner" || user.hasVerifiedFactor;
+/** Two-step verification is optional: it is only demanded of someone who has set it up. */
+function mfaRequired(user: AuthUser) {
+  return user.hasVerifiedFactor;
 }
 
 function toMfa(next: string): never {
@@ -87,7 +88,7 @@ function toMfa(next: string): never {
  * Authorisation for a specific organisation. Call it in every back-office page, layout, server
  * action and route handler. `allowed` is the allow-list, e.g. requireRole(["owner", "manager"], orgId).
  * A stranger, a non-member and a role that is not allowed all get the same 404, so org ids cannot
- * be probed. Owners (and anyone with a TOTP factor) must have passed MFA this session.
+ * be probed. Anyone with a TOTP factor must have passed MFA this session.
  */
 export async function requireRole(allowed: Role | readonly Role[], orgId: string) {
   const allow: readonly Role[] = typeof allowed === "string" ? [allowed] : allowed;
@@ -95,7 +96,7 @@ export async function requireRole(allowed: Role | readonly Role[], orgId: string
   const user = await requireUser();
   const membership = (await getMemberships(user.id)).find((m) => m.orgId === orgId);
   if (!membership || !allow.includes(membership.role)) notFound();
-  if (mfaRequired(user, membership.role) && user.aal !== "aal2") toMfa("/o");
+  if (mfaRequired(user) && user.aal !== "aal2") toMfa("/o");
   return { user, orgId, role: membership.role };
 }
 
@@ -117,7 +118,7 @@ export async function authorizeApi(
   if (!user) return { ok: false, status: 401 };
   const membership = (await getMemberships(user.id)).find((m) => m.orgId === orgId);
   if (!membership || !allow.includes(membership.role)) return { ok: false, status: 404 };
-  if (mfaRequired(user, membership.role) && user.aal !== "aal2") return { ok: false, status: 403 };
+  if (mfaRequired(user) && user.aal !== "aal2") return { ok: false, status: 403 };
   return { ok: true, user, orgId, role: membership.role };
 }
 
@@ -133,7 +134,7 @@ export async function requireBackOffice(next: string) {
   const membership =
     memberships.find((m) => m.role === "owner") ?? memberships.find((m) => m.role === "manager");
   if (!membership) notFound(); // cashiers work on the register, not in the back office
-  if (mfaRequired(user, membership.role) && user.aal !== "aal2") {
+  if (mfaRequired(user) && user.aal !== "aal2") {
     toMfa(next);
   }
   return { user, orgId: membership.orgId, role: membership.role };

@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
-import { inWorld, sql, type Actor, type Ctx } from "./helpers";
+import { enrolTotp, inWorld, sql, type Actor, type Ctx } from "./helpers";
 
 afterAll(() => sql.end());
 
@@ -55,6 +55,7 @@ describe("complete_onboarding", () => {
       for (const actor of [world.a.manager, world.a.cashier, world.b.owner]) {
         await denied(() => onboard(ctx, actor, world.a.orgId), ["42501"]);
       }
+      await enrolTotp(sql, world.a.owner);
       await denied(
         () =>
           as(
@@ -134,6 +135,7 @@ describe("set_business_type", () => {
       for (const actor of [world.a.manager, world.a.cashier, world.b.owner]) {
         await denied(() => as(actor, call), ["42501"]);
       }
+      await enrolTotp(sql, world.a.owner);
       await denied(() => as(world.a.owner, call, { aal: "aal1" }), ["42501"]);
       await denied(() => as(null, call), ["42501"]);
       // A direct update would skip the audit row.
