@@ -212,7 +212,7 @@ test("a manager adds a cashier by name and PIN; the cashier unlocks the till and
   await page.getByLabel("Repeat the PIN").fill("4826");
   await page.getByRole("button", { name: "Add cashier" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Cashier added" })).toBeVisible();
-  await expect(page.getByRole("cell", { name: "Aoife" })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "Aoife", exact: true })).toBeVisible();
   expect(await audit(orgId, "staff.added")).toBe(1);
 
   // The till picks her up at its next catalogue refresh (on load), then she sells.
