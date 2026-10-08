@@ -86,6 +86,10 @@ VAT). The emailed-receipt request carries it too. The saved sale in progress (`m
 dropped after 12 hours, malformed carts are ignored, and the age check is asked again on restore.
 The cart and draft are deleted inside the same Dexie transaction as the outbox write.
 
+If the sale's mode differs from the shop's current preset the sale is still accepted as rung up and an
+audit row `sale.rounding_mode_differs` records both flags (`ops.record_sync_note`, migration 0027).
+`roundCash` must be a real boolean; the server always computes the amounts itself.
+
 ## Known limits
 
 - The card amount is what the cashier types; the control is the owner comparing the card total

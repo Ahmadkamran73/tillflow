@@ -128,6 +128,11 @@ export async function recordSyncRejection(payload: unknown): Promise<void> {
   await db()`select ops.record_sync_rejection(${db().json(payload as postgres.JSONValue)})`;
 }
 
+/** A note on an accepted sale, written to the audit log (ops.record_sync_note). */
+export async function recordSyncNote(payload: unknown): Promise<void> {
+  await db()`select ops.record_sync_note(${db().json(payload as postgres.JSONValue)})`;
+}
+
 export async function touchRegister(orgId: string, registerId: string, userId: string) {
   await db()`select ops.touch_register(${orgId}, ${registerId}, ${userId})`;
 }

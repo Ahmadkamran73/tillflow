@@ -15,6 +15,8 @@ export type SyncDeps = {
   priceAt: (sale: SyncSale, at: Date) => Promise<{ cart: Cart; priced: PricedCart }>;
   recordSale: (payload: unknown) => Promise<"created" | "duplicate" | "receipt_clash">;
   recordRejection: (payload: unknown) => Promise<void>;
+  /** Audit note on an accepted sale; failing to write it must never fail the sale. */
+  recordNote: (payload: unknown) => Promise<void>;
 };
 
 /** The shop and till come from the authenticated device (or the manager's session), never from the payload. */
@@ -27,6 +29,11 @@ export type SyncCtx = {
   tenderTypes: { id: string; method: string }[];
   /** Tips are only taken in cafés and restaurants. */
   tipsAllowed: boolean;
+  /**
+   * The shop's CURRENT rounding setting (business-type preset). Never used to price: a sale is priced
+   * with its own `roundCash`. Only compared with it, to leave an audit note when they differ.
+   */
+  shopRoundCash: boolean;
   /**
    * TRUSTED callers only (the back office re-running a held sale: the signed-in manager). The sync
    * route for tills never sets this; a till can only present an approvalId.
@@ -249,6 +256,21 @@ async function processOne(raw: unknown, ctx: SyncCtx, deps: SyncDeps): Promise<S
       });
     }
     return reject({ reason: "invalid", detail: { message: "sale could not be recorded" } });
+  }
+  if (outcome === "created" && sale.roundCash !== ctx.shopRoundCash) {
+    // Accepted and left exactly as rung up; the difference is for a manager to see in the audit log.
+    try {
+      await deps.recordNote({
+        kind: "rounding_mode_differs",
+        org_id: ctx.orgId,
+        sale_id: sale.id,
+        user_id: sale.cashierUserId,
+        sale_round_cash: sale.roundCash,
+        shop_round_cash: ctx.shopRoundCash,
+      });
+    } catch {
+      // Best effort: the sale is already recorded and a retry would only report "duplicate".
+    }
   }
   if (outcome === "receipt_clash") {
     return reject({ reason: "receipt_number_used", detail: { receiptSeq: sale.receiptSeq } });

@@ -32,6 +32,7 @@ const ctx = {
     { id: VOUCHER_TYPE, method: "voucher" },
   ],
   tipsAllowed: false,
+  shopRoundCash: true,
 };
 const CASHIER = "00000000-0000-4000-8000-0000000000d1";
 const MANAGER = "00000000-0000-4000-8000-0000000000d2";
@@ -61,6 +62,7 @@ const sale = (over: Partial<SyncSale> = {}): SyncSale => ({
 function deps(priceAt: (at: Date) => number | "unknown", over: Partial<SyncDeps> = {}) {
   const recorded: unknown[] = [];
   const rejections: Record<string, unknown>[] = [];
+  const notes: Record<string, unknown>[] = [];
   const d: SyncDeps = {
     now: () => NOW,
     existingIds: async () => new Set(),
@@ -80,9 +82,12 @@ function deps(priceAt: (at: Date) => number | "unknown", over: Partial<SyncDeps>
     recordRejection: async (p) => {
       rejections.push(p as Record<string, unknown>);
     },
+    recordNote: async (p) => {
+      notes.push(p as Record<string, unknown>);
+    },
     ...over,
   };
-  return { d, recorded, rejections };
+  return { d, recorded, rejections, notes };
 }
 
 describe("processBatch", () => {
@@ -570,5 +575,104 @@ describe("tenders (step 2.1)", () => {
     const [r] = await processBatch([bad], ctx, d);
     expect(r).toMatchObject({ status: "rejected", reason: "invalid" });
     expect(JSON.stringify(rejections[0])).not.toContain("4111111111111111");
+  });
+});
+
+describe("rounding mode of the sale vs the shop's current setting", () => {
+  const cashSale = (roundCash: boolean | unknown, due: number) =>
+    ({ ...sale({ expectedDueCents: due }), roundCash }) as SyncSale;
+
+  it("matching: syncs and leaves no note", async () => {
+    const { d, recorded, notes } = deps(() => 1234);
+    const [r] = await processBatch([cashSale(true, 1235)], ctx, d);
+    expect(r!.status).toBe("created");
+    expect(recorded).toHaveLength(1);
+    expect(notes).toHaveLength(0);
+    const exact = deps(() => 1234);
+    const [e] = await processBatch(
+      [cashSale(false, 1234)],
+      { ...ctx, shopRoundCash: false },
+      exact.d,
+    );
+    expect(e!.status).toBe("created");
+    expect(exact.notes).toHaveLength(0);
+  });
+
+  it("mismatch: still syncs, the sale keeps its own mode, and an audit note is written", async () => {
+    // Rung up exact (shop did not round then); the shop's setting is now "round".
+    const a = deps(() => 1234);
+    const s1 = cashSale(false, 1234);
+    const [r1] = await processBatch([s1], { ...ctx, shopRoundCash: true }, a.d);
+    expect(r1!.status).toBe("created");
+    const rec1 = a.recorded[0] as { sale: Record<string, number> };
+    expect(rec1.sale).toMatchObject({ amount_due: 1234, cash_rounding: 0 });
+    expect(a.notes).toEqual([
+      {
+        kind: "rounding_mode_differs",
+        org_id: ctx.orgId,
+        sale_id: s1.id,
+        user_id: CASHIER,
+        sale_round_cash: false,
+        shop_round_cash: true,
+      },
+    ]);
+
+    // Rung up rounded; the shop's setting is now "exact".
+    const b = deps(() => 1234);
+    const [r2] = await processBatch([cashSale(true, 1235)], { ...ctx, shopRoundCash: false }, b.d);
+    expect(r2!.status).toBe("created");
+    expect((b.recorded[0] as { sale: Record<string, number> }).sale).toMatchObject({
+      amount_due: 1235,
+      cash_rounding: 1,
+    });
+    expect(b.notes[0]).toMatchObject({ sale_round_cash: true, shop_round_cash: false });
+  });
+
+  it("the server still does the rounding: a till's own total or flag cannot move the amount", async () => {
+    // The sale says "round" but claims the unrounded total: the server computes 1235, 1c off is
+    // tolerated, the stored amount is the server's.
+    const { d, recorded } = deps(() => 1234);
+    const [r] = await processBatch([cashSale(true, 1234)], ctx, d);
+    expect(r!.status).toBe("created");
+    expect((recorded[0] as { sale: Record<string, number> }).sale.amount_due).toBe(1235);
+    // 2c away from what its own mode gives is refused.
+    const bad = deps(() => 1234);
+    const [x] = await processBatch([cashSale(true, 1237)], ctx, bad.d);
+    expect(x).toMatchObject({ status: "rejected", reason: "price_mismatch" });
+    expect(bad.notes).toHaveLength(0); // a refused sale gets no note
+  });
+
+  it("a note that cannot be written never fails the sale; a replay writes none", async () => {
+    const failing = deps(() => 1234, {
+      recordNote: async () => {
+        throw new Error("audit down");
+      },
+    });
+    const [r] = await processBatch([cashSale(false, 1234)], ctx, failing.d);
+    expect(r!.status).toBe("created");
+
+    const dup = deps(() => 1234, { recordSale: async () => "duplicate" });
+    await processBatch([cashSale(false, 1234)], ctx, dup.d);
+    expect(dup.notes).toHaveLength(0);
+  });
+
+  it("roundCash must be a real boolean: anything else is an invalid sale", async () => {
+    const { d, recorded, notes } = deps(() => 1234);
+    const results = await processBatch(
+      [cashSale("false", 1234), cashSale(0, 1234), cashSale(null, 1234)],
+      ctx,
+      d,
+    );
+    expect(results.map((r) => [r.status, r.reason])).toEqual([
+      ["rejected", "invalid"],
+      ["rejected", "invalid"],
+      ["rejected", "invalid"],
+    ]);
+    expect(recorded).toHaveLength(0);
+    expect(notes).toHaveLength(0);
+    // Missing = a sale queued before the flag existed = rounded.
+    const { roundCash: _r, ...legacy } = cashSale(true, 1235);
+    void _r;
+    expect((await processBatch([legacy], ctx, d))[0]!.status).toBe("created");
   });
 });

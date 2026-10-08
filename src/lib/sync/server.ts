@@ -8,6 +8,7 @@ import {
   deviceSyncMeta,
   deviceTenderTypes,
   recordSale,
+  recordSyncNote,
   recordSyncRejection,
 } from "@/lib/ops/db";
 import { presets } from "@/config/business-type-presets";
@@ -37,6 +38,7 @@ function run(
     },
     recordSale,
     recordRejection: recordSyncRejection,
+    recordNote: recordSyncNote,
   };
   return processBatch(rawSales, ctx, deps);
 }
@@ -66,6 +68,7 @@ export async function syncSalesFromDevice(
       discountOverrideBp: meta.discountOverrideBp,
       tenderTypes: tenderMeta.types,
       tipsAllowed: presets[tenderMeta.businessType].register.tips,
+      shopRoundCash: presets[tenderMeta.businessType].register.cashRounding5c,
     },
     meta,
     {
@@ -119,6 +122,7 @@ export async function syncSalesFromSession(
         method: t.method as string,
       })),
       tipsAllowed: presets[org.businessType].register.tips,
+      shopRoundCash: presets[org.businessType].register.cashRounding5c,
     },
     { timezone: location.timezone, taxRates },
     {
