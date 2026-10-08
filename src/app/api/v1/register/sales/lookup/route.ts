@@ -30,11 +30,15 @@ export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
   const orgId = z.uuid().safeParse(params.get("orgId"));
   if (!orgId.success) return Response.json({ error: "bad org" }, { status: 400 });
-  const viewer = z.uuid().safeParse(params.get("as"));
-  if (!viewer.success) return Response.json({ error: "bad query" }, { status: 400 });
-  const parsed = query.safeParse(
-    Object.fromEntries([...params].filter(([k]) => k !== "orgId" && k !== "as")),
-  );
+  // Who is serving is the server-signed token, never a name in the URL. The database verifies it;
+  // without a valid one the till is treated as a cashier with none of their own sales.
+  const serving = z
+    .string()
+    .max(500)
+    .optional()
+    .safeParse(request.headers.get("x-serving-token") ?? undefined);
+  if (!serving.success) return Response.json({ error: "bad query" }, { status: 400 });
+  const parsed = query.safeParse(Object.fromEntries([...params].filter(([k]) => k !== "orgId")));
   if (!parsed.success) return Response.json({ error: "bad query" }, { status: 400 });
 
   const auth = await authenticateDevice(orgId.data);
@@ -43,7 +47,7 @@ export async function GET(request: NextRequest) {
     return Response.json({ error: "slow down" }, { status: 429, headers: { "Retry-After": "30" } });
   }
   try {
-    const found = await deviceFindSale(auth.tokenHash, { ...parsed.data, viewer: viewer.data });
+    const found = await deviceFindSale(auth.tokenHash, { ...parsed.data, serving: serving.data ?? null });
     if (found === null) return Response.json({ error: "not allowed" }, { status: 401 });
     return Response.json(
       { sales: saleDetails.parse(found) },

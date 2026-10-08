@@ -89,6 +89,8 @@ export type LocalRefund = {
   /** A manager's server-issued PIN proof (online), or the manager the till names (offline). */
   approvalId?: string;
   claimedApprover?: string;
+  /** The server's signed proof of who was serving (online unlock); verified again by the server. */
+  servingToken?: string;
   originalSaleId: string;
   /** The original receipt number as printed ("Till 1 · 000042"), for the refund receipt. */
   originalReceiptNo: string;

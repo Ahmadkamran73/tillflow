@@ -856,6 +856,7 @@ export function Register({ orgId }: { orgId: string }) {
             register={preset!.register}
             role={cashier.role}
             cashierId={cashier.userId}
+            servingToken={cashier.servingToken}
             cartTotalCents={exchangeDraft ? 0 : (priced?.basket.total ?? 0)}
             staff={data.staff}
             offline={!online}

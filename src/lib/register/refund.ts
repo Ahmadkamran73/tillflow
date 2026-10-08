@@ -209,11 +209,11 @@ export type ServerLookup =
 export async function lookupOnServer(
   orgId: string,
   query: ServerLookup,
-  /** The person serving: a cashier finds this till's sales and their own, a manager any. */
-  viewerId: string,
+  /** The server's signed proof of who is serving: a cashier finds this till's sales and their own, a manager any. Without it the till is treated as a cashier with none of their own. */
+  servingToken: string | undefined,
   fetchFn: typeof fetch = fetch,
 ): Promise<{ status: "ok"; sales: SaleDetail[] } | { status: "offline" | "unpaired" | "failed" }> {
-  const params = new URLSearchParams({ orgId, by: query.by, as: viewerId });
+  const params = new URLSearchParams({ orgId, by: query.by });
   if (query.by === "id") params.set("id", query.id);
   else if (query.by === "receipt") {
     params.set("register_id", query.registerId);
@@ -224,6 +224,7 @@ export async function lookupOnServer(
     res = await fetchFn(`/api/v1/register/sales/lookup?${params}`, {
       credentials: "same-origin",
       cache: "no-store",
+      headers: servingToken ? { "x-serving-token": servingToken } : undefined,
     });
   } catch {
     return { status: "offline" };
@@ -249,6 +250,8 @@ export type RefundInput = {
   cashierUserId: string;
   approvalId?: string;
   claimedApprover?: string;
+  /** The server's signed proof of who is serving, when the PIN was checked online. */
+  servingToken?: string;
   originalSaleId: string;
   originalReceiptNo: string;
   kind: RefundKind;
@@ -294,6 +297,7 @@ export async function completeRefund(db: RegisterDb, input: RefundInput): Promis
       cashierUserId: input.cashierUserId,
       approvalId: input.approvalId,
       claimedApprover: input.approvalId ? undefined : input.claimedApprover,
+      servingToken: input.servingToken,
       originalSaleId: input.originalSaleId,
       originalReceiptNo: input.originalReceiptNo,
       kind: input.kind,

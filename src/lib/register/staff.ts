@@ -11,8 +11,11 @@ export type PinPurpose = "unlock" | "override";
 export type ApprovalFor = "discount" | "no_sale" | "refund";
 
 export type PinResult =
-  /** `approvalId`: the server's single-use proof of a manager PIN (online overrides only). */
-  | { status: "ok"; userId: string; role: Role; approvalId?: string }
+  /**
+   * `approvalId`: the server's single-use proof of a manager PIN (online overrides only).
+   * `servingToken`: the server-signed "serving as" proof (online unlocks only).
+   */
+  | { status: "ok"; userId: string; role: Role; approvalId?: string; servingToken?: string }
   | { status: "invalid" }
   | { status: "locked"; lockedUntil: number }
   /** The PIN was right but belongs to someone who may not approve (a cashier asked to override). */
@@ -45,11 +48,18 @@ const unlockResponse = (raw: unknown): PinResult | null => {
     role?: Role;
     lockedUntil?: string;
     approvalId?: string;
+    servingToken?: string;
   } | null;
   switch (r?.result) {
     case "ok":
       return r.userId && r.role
-        ? { status: "ok", userId: r.userId, role: r.role, approvalId: r.approvalId }
+        ? {
+            status: "ok",
+            userId: r.userId,
+            role: r.role,
+            approvalId: r.approvalId,
+            servingToken: r.servingToken,
+          }
         : null;
     case "invalid":
       return { status: "invalid" };

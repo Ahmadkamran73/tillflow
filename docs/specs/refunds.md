@@ -56,6 +56,26 @@ as credit towards a new sale). Money is integer cents; every amount goes through
   but **not proven**: each one also opens an item in **Needs attention** (`refund_unverified`,
   "this refund WAS recorded ... ask the cashier and the manager") that a manager closes with a
   note, and Sales > Refunds shows it as "Not verified" next to who rang it.
+- **Who is serving is proven by a server-signed token** (migration `0031`). When the unlock route
+  has checked a PIN it asks the database to sign a "serving as" token: the person, the shop, the till,
+  one hour (HMAC-SHA256 with a key that lives only in the database, `ops.signing_keys`, generated per
+  environment). The till keeps it in memory only and sends it with a refund (`servingToken`) and in
+  the `x-serving-token` header of the sale lookup. `ops.record_refund` and `ops.device_find_sale`
+  verify it themselves: signature, this shop, this till, valid when the refund was made (so a refund
+  made offline within the hour is still proven when it syncs), not more than a day past expiry on the
+  server's clock (no indefinite replay), and the person still staff. A token for someone other than
+  the named cashier is refused. A manager or owner with a valid token who needs an approval is
+  `verified`. No token, an altered or expired one, or one for another till or shop proves nothing
+  and the refund falls back to `self` / `unverified`: still recorded, shown as "Not verified" and
+  sent to Needs attention, never silently trusted. A manager's approval of someone else's refund
+  stays the single-use `register_approvals` row below (server-issued, bound to a sale and a value).
+  The token is also tied to the till's current pairing (pairing again ends every token), is dropped
+  from the device once the server has judged the refund it travelled with, and is never kept in a
+  rejection. **Residual:** it is a bearer credential for up to an hour (a day more for a refund made
+  offline): someone who copies a manager's live token from the paired device could, within that
+  window and on that till only, record over-limit refunds as `verified`. Per-method caps, the void
+  rules and the audit log still apply; making each over-limit refund need its own approval row would
+  close it, at the cost of the owner's rule that a manager at the till needs no second PIN.
 - **An approval is for one sale and one value.** The unlock step sends the sale id and the refund's
   value with the PIN; the server issues a single-use `refund` approval bound to that sale and
   that amount (`register_approvals.sale_id`, `max_cents`). A refund spends it only for that sale
@@ -125,10 +145,10 @@ New rejection reasons: `refund_exceeds`, `refund_mismatch`, `refund_needs_approv
   a cashier with a paired device could forge a `claimedApprover` and the owner would see it only
   there. A stricter rule (refuse every over-limit refund that has no server-issued approval)
   would make over-limit offline refunds impossible; revisit with the owner.
-- **Who is serving is the till's claim.** `cashier_user_id` is not tied to a PIN the server saw, so
-  a cashier with a paired device could name a manager as the cashier (`self`) or as approver
-  (`unverified`). Both are recorded as "Not verified" and shown with the cashier in Sales >
-  Refunds; a server-issued "serving as" proof from the unlock step would close it.
+- **Offline, nothing can be proven.** A till unlocked offline has no signed token, so a cashier
+  with a paired device could still name a manager as the cashier (`self`) or as approver
+  (`unverified`); both are recorded as "Not verified", shown with the cashier in Sales > Refunds and
+  sent to Needs attention. A token lasts an hour; one made offline within it is proven on sync.
 - A synced sale is refunded from the till's own copy when picked from the recent list (the server
   copy replaces it when found by search); a 1c difference in the sale's total is accepted by the
   server, but VAT that was flagged `vat_differs` would make the refund amount differ by a cent.

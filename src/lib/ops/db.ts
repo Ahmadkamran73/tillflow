@@ -308,6 +308,18 @@ export async function issueApproval(
   return row.id;
 }
 
+/**
+ * A short-lived, server-signed "serving as" token for someone whose PIN the unlock route has just
+ * verified: it names the person, the shop and the till. record_refund and the sale lookup verify it
+ * in the database, so who is serving never rests on what the till says.
+ */
+export async function issueServingToken(tokenHash: string, userId: string): Promise<string> {
+  const [row] = await db()<{ t: string }[]>`
+    select ops.issue_serving_token(${tokenHash}, ${userId}) as t`;
+  if (!row) throw new Error("issue_serving_token returned no row");
+  return row.t;
+}
+
 export async function recordRegisterEvents(tokenHash: string, events: unknown): Promise<string[]> {
   const rows = await db()<{ id: string }[]>`
     select ops.record_register_events(${tokenHash}, ${db().json(events as postgres.JSONValue)}) as id`;

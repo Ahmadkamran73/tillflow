@@ -469,6 +469,25 @@ describe("processRefunds", () => {
     expect(future.result).toMatchObject({ reason: "bad_time" });
   });
 
+  it("passes the signed serving token to the database, and never stores it in a rejection", async () => {
+    const withToken = await run(refund({ servingToken: "payload.sig" }));
+    expect(withToken.recorded[0]!.refund).toMatchObject({ serving_token: "payload.sig" });
+    expect((await run(refund())).recorded[0]!.refund).toMatchObject({ serving_token: null });
+    // a refund the server refuses keeps neither the token nor a reference
+    const refused = await run(refund({ servingToken: "payload.sig", expectedAmountCents: 999 }));
+    expect(refused.result.status).toBe("rejected");
+    expect(JSON.stringify(refused.rejections)).not.toContain("payload.sig");
+  });
+
+  it("keeps neither the token nor an approval proof from a refund it cannot even read", async () => {
+    const x = deps();
+    const unreadable = { ...refund(), lines: "nope", servingToken: "payload.sig", approvalId: "a1" };
+    const [r] = await processRefunds([unreadable], ctx, x.d);
+    expect(r).toMatchObject({ status: "rejected", reason: "invalid" });
+    expect(JSON.stringify(x.rejections)).not.toContain("payload.sig");
+    expect(JSON.stringify(x.rejections)).not.toContain('"a1"');
+  });
+
   it("passes the approval proof to the database, and maps its refusal to refund_needs_approval", async () => {
     const approvalId = "00000000-0000-4000-8000-0000000000aa";
     const withApproval = await run(refund({ approvalId, claimedApprover: CASHIER }));

@@ -138,6 +138,10 @@ const secondLegs = (s: { card: string; cash: string }) => [
   { method: "cash", amount: 300, type_id: s.cash },
 ];
 
+/** The server-signed "serving as" token the unlock route issues after it checked a PIN. */
+const serving = async (ctx: Ctx, shop: Shop, user: string) =>
+  (await ctx.sql`select ops.issue_serving_token(${shop.tokenHash}, ${user}) as t`)[0]!.t as string;
+
 const refund = async (ctx: Ctx, shop: Shop, p: unknown) =>
   (await ctx.sql`select ops.record_refund(${json(ctx, p)}, ${shop.tokenHash}) as r`)[0]!
     .r as string;
@@ -447,10 +451,10 @@ describe("ops.record_refund", () => {
       ).toBe(0);
 
       const found =
-        await sql`select ops.device_find_sale(${b.tokenHash}, ${json(ctx, { by: "id", id: s.saleId, viewer: b.owner.userId })}) as s`;
+        await sql`select ops.device_find_sale(${b.tokenHash}, ${json(ctx, { by: "id", id: s.saleId, serving: await serving(ctx, b, b.owner.userId) })}) as s`;
       expect(found[0]!.s).toEqual([]);
       const own =
-        await sql`select ops.device_find_sale(${a.tokenHash}, ${json(ctx, { by: "id", id: s.saleId, viewer: a.owner.userId })}) as s`;
+        await sql`select ops.device_find_sale(${a.tokenHash}, ${json(ctx, { by: "id", id: s.saleId, serving: await serving(ctx, a, a.owner.userId) })}) as s`;
       expect(own[0]!.s).toHaveLength(1);
     }));
 
@@ -518,7 +522,7 @@ describe("ops.record_refund", () => {
 
       const find = async (q: unknown) =>
         (
-          await sql`select ops.device_find_sale(${a.tokenHash}, ${json(ctx, { viewer: a.manager.userId, ...(q as object) })}) as s`
+          await sql`select ops.device_find_sale(${a.tokenHash}, ${json(ctx, { serving: await serving(ctx, a, a.manager.userId), ...(q as object) })}) as s`
         )[0]!.s as {
           sale: { receipt_seq: number };
           lines: { refunded_qty: number; line_no: number }[];
@@ -730,6 +734,270 @@ describe("hardening", () => {
     }));
 });
 
+describe("server-signed serving tokens", () => {
+  const issue = async (ctx: Ctx, shop: Shop, user: string, hash = shop.tokenHash) =>
+    (await ctx.sql`select ops.issue_serving_token(${hash}, ${user}) as t`)[0]!.t as string;
+
+  /** A token signed with this database's own key, for payloads the app never issues (expired...). */
+  const sign = async (ctx: Ctx, payload: Record<string, unknown>) => {
+    const p = Buffer.from(JSON.stringify(payload)).toString("base64");
+    const sig = (
+      await ctx.sql`select encode(extensions.hmac(convert_to(${p}, 'utf8'),
+                     (select key from ops.signing_keys where id = 1), 'sha256'), 'hex') as s`
+    )[0]!.s as string;
+    return `${p}.${sig}`;
+  };
+  const payloadFor = (a: Shop, user: string, over: Record<string, unknown> = {}) => {
+    const now = Math.floor(Date.now() / 1000);
+    return { v: 1, u: user, o: a.orgId, r: a.registerId, p: 0, iat: now, exp: now + 3600, jti: randomUUID(), ...over };
+  };
+
+  let attemptSeq = 100;
+  /** A refund above the 1.00 limit by the given cashier carrying the given token. */
+  async function attempt(ctx: Ctx, a: Shop, user: string, token: string | null, over: Record<string, unknown> = {}) {
+    await ctx.sql`update organisations set refund_override_cents = 100 where id = ${a.orgId}`;
+    const n = ++attemptSeq; // each attempt is its own sale with its own receipt numbers
+    const s = await makeSale(ctx, a, n);
+    const p = refundPayload(a, s, { user, seq: n, over: { serving_token: token, ...over } });
+    return { s, p, result: await refund(ctx, a, p) };
+  }
+  const stateOf = async (ctx: Ctx, id: string) =>
+    (await ctx.sql`select approval_state from refunds where id = ${id}`)[0]!.approval_state as string;
+  const attentionOf = async (ctx: Ctx, orgId: string) =>
+    (await ctx.sql`select id, reason from sync_rejections where org_id = ${orgId}`).map((r) => r.reason);
+
+  it("a valid token proves a manager is serving: recorded as verified, nothing for Needs attention", () =>
+    inWorld(async (ctx) => {
+      const a = ctx.world.a;
+      const token = await issue(ctx, a, a.manager.userId);
+      const { p, result } = await attempt(ctx, a, a.manager.userId, token);
+      expect(result).toBe("created");
+      expect(await stateOf(ctx, p.refund.id)).toBe("verified");
+      expect(await attentionOf(ctx, a.orgId)).toEqual([]);
+      const [audit] = await ctx.sql`select after from audit_log where entity_id = ${p.refund.id}`;
+      expect(audit!.after).toMatchObject({ approval: "verified", serving_verified: true });
+    }));
+
+  it("a valid token for a CASHIER still needs a manager's approval", () =>
+    inWorld(async (ctx) => {
+      const a = ctx.world.a;
+      const token = await issue(ctx, a, a.cashier.userId);
+      await ctx.sql`update organisations set refund_override_cents = 100 where id = ${a.orgId}`;
+      const s = await makeSale(ctx, a);
+      await ctx.denied(
+        () => refund(ctx, a, refundPayload(a, s, { over: { serving_token: token } })),
+        ["42501"],
+      );
+    }));
+
+  it("a token for someone else than the named cashier is refused", () =>
+    inWorld(async (ctx) => {
+      const a = ctx.world.a;
+      const managersToken = await issue(ctx, a, a.manager.userId);
+      await ctx.sql`update organisations set refund_override_cents = 100 where id = ${a.orgId}`;
+      const s = await makeSale(ctx, a);
+      // the cashier's refund carrying the manager's token
+      await ctx.denied(
+        () => refund(ctx, a, refundPayload(a, s, { over: { serving_token: managersToken } })),
+        ["42501"],
+      );
+    }));
+
+  it("a tampered token proves nothing: the claim stays Not verified and goes to Needs attention", () =>
+    inWorld(async (ctx) => {
+      const a = ctx.world.a;
+      const token = await issue(ctx, a, a.manager.userId);
+      const [payload, sig] = token.split(".");
+      const flipped = sig!.replace(/^./, (c) => (c === "0" ? "1" : "0"));
+      const forgedPayload = Buffer.from(
+        JSON.stringify({ ...payloadFor(a, a.owner.userId) }),
+      ).toString("base64");
+      for (const bad of [`${payload}.${flipped}`, `${forgedPayload}.${sig}`, "garbage", `${payload}`]) {
+        const { p, result } = await attempt(ctx, a, a.manager.userId, bad);
+        expect(result).toBe("created");
+        expect(await stateOf(ctx, p.refund.id)).toBe("self");
+      }
+      expect((await attentionOf(ctx, a.orgId)).every((r) => r === "refund_unverified")).toBe(true);
+      expect((await attentionOf(ctx, a.orgId)).length).toBe(4);
+    }));
+
+  it("an expired token proves nothing, and neither does one older than its day of grace", () =>
+    inWorld(async (ctx) => {
+      const a = ctx.world.a;
+      const now = Math.floor(Date.now() / 1000);
+      // made an hour ago, expired half an hour ago: the refund is made NOW
+      const expired = await sign(ctx, payloadFor(a, a.manager.userId, { iat: now - 5400, exp: now - 1800 }));
+      const one = await attempt(ctx, a, a.manager.userId, expired);
+      expect(await stateOf(ctx, one.p.refund.id)).toBe("self");
+
+      // (a refund made offline within the token's hour is proven on sync: see the next test)
+      // one older than a day past expiry is dead whatever time the till claims
+      const old = await sign(
+        ctx,
+        payloadFor(a, a.manager.userId, { iat: now - 3 * 86_400, exp: now - 3 * 86_400 + 3600 }),
+      );
+      const s3 = await makeSale(ctx, a, 3);
+      const stale = refundPayload(a, s3, {
+        seq: 3,
+        user: a.manager.userId,
+        over: {
+          serving_token: old,
+          completed_at: new Date(Date.now() - 3 * 86_400_000 + 1_800_000).toISOString(),
+        },
+      });
+      // the refund would pre-date its sale, so move the sale back in time too
+      await ctx.sql`set local session_replication_role = replica`;
+      await ctx.sql`update sales set completed_at = now() - interval '3 days' where id = ${s3.saleId}`;
+      await ctx.sql`set local session_replication_role = origin`;
+      expect(await refund(ctx, a, stale)).toBe("created");
+      expect(await stateOf(ctx, stale.refund.id)).toBe("self");
+    }));
+
+  it("a refund made offline within the token's hour is proven when it syncs, up to a day later", () =>
+    inWorld(async (ctx) => {
+      const { sql, world } = ctx;
+      const a = world.a;
+      const now = Math.floor(Date.now() / 1000);
+      // the manager unlocked 2 hours ago (token valid for the hour after that), made the refund 1.5
+      // hours ago offline, and the till syncs now
+      const token = await sign(ctx, payloadFor(a, a.manager.userId, { iat: now - 7200, exp: now - 3600 }));
+      await sql`update organisations set refund_override_cents = 100 where id = ${a.orgId}`;
+      const s = await makeSale(ctx, a, 2);
+      await sql`set local session_replication_role = replica`;
+      await sql`update sales set completed_at = now() - interval '3 hours' where id = ${s.saleId}`;
+      await sql`set local session_replication_role = origin`;
+      const p = refundPayload(a, s, {
+        seq: 2,
+        user: a.manager.userId,
+        over: {
+          serving_token: token,
+          completed_at: new Date(Date.now() - 5_400_000).toISOString(),
+        },
+      });
+      expect(await refund(ctx, a, p)).toBe("created");
+      expect(await stateOf(ctx, p.refund.id)).toBe("verified");
+      expect(await attentionOf(ctx, a.orgId)).toEqual([]);
+    }));
+
+  it("pairing the till again ends every token it had", () =>
+    inWorld(async (ctx) => {
+      const { sql, world } = ctx;
+      const a = world.a;
+      const token = await issue(ctx, a, a.manager.userId);
+      await sql`update registers set paired_at = now() + interval '1 second' where id = ${a.registerId}`;
+      const one = await attempt(ctx, a, a.manager.userId, token);
+      expect(await stateOf(ctx, one.p.refund.id)).toBe("self");
+      // a token issued after the new pairing works
+      const fresh = await issue(ctx, a, a.manager.userId);
+      const two = await attempt(ctx, a, a.manager.userId, fresh);
+      expect(await stateOf(ctx, two.p.refund.id)).toBe("verified");
+    }));
+
+  it("nobody can read, change or remove the signing key, not even the app's own roles", () =>
+    inWorld(async (ctx) => {
+      const { sql, denied } = ctx;
+      await denied(async () => {
+        await sql.unsafe("set local role tillflow_ops");
+        await sql`select key from ops.signing_keys`;
+      });
+      await denied(() => ctx.asService(() => sql`select key from ops.signing_keys`));
+      // even the owner of the table is stopped by the trigger
+      await denied(() => sql`delete from ops.signing_keys`);
+      await denied(() => sql`update ops.signing_keys set key = '\\x00'::bytea`);
+      await denied(() => sql`truncate ops.signing_keys`);
+      expect((await sql`select count(*)::int as n from ops.signing_keys`)[0]!.n).toBe(1);
+    }));
+
+  it("a token for a different till, or a different shop, proves nothing", () =>
+    inWorld(async (ctx) => {
+      const { sql, world } = ctx;
+      const [a, b] = [world.a, world.b];
+      const till2 = randomUUID();
+      const hash2 = "b".repeat(64);
+      await sql`insert into registers (id, org_id, location_id, name, device_token_hash)
+                values (${till2}, ${a.orgId}, ${a.locationId}, 'Till 2', ${hash2})`;
+      const forTill2 = await issue(ctx, a, a.manager.userId, hash2);
+      const one = await attempt(ctx, a, a.manager.userId, forTill2);
+      expect(await stateOf(ctx, one.p.refund.id)).toBe("self");
+      // shop B's own token, with shop A's manager named: not a member there, proves nothing here
+      await ctx.denied(() => issue(ctx, b, a.manager.userId), ["42501"]);
+      const forB = await issue(ctx, b, b.manager.userId);
+      const two = await attempt(ctx, a, a.manager.userId, forB);
+      expect(await stateOf(ctx, two.p.refund.id)).toBe("self");
+    }));
+
+  it("a cashier naming a manager (as cashier or as approver) without a valid token is never verified", () =>
+    inWorld(async (ctx) => {
+      const a = ctx.world.a;
+      // 1. the cashier's till says a manager is serving
+      const asManager = await attempt(ctx, a, a.manager.userId, null);
+      expect(await stateOf(ctx, asManager.p.refund.id)).toBe("self");
+      // 2. the cashier's till names a manager as approver
+      const named = await attempt(ctx, a, a.cashier.userId, null, { claimed_approver: a.manager.userId });
+      expect(await stateOf(ctx, named.p.refund.id)).toBe("unverified");
+      // 3. both are in Needs attention for a manager to check
+      expect(await attentionOf(ctx, a.orgId)).toEqual(["refund_unverified", "refund_unverified"]);
+      // 4. a plain cashier with neither is refused outright
+      await ctx.denied(() => attempt(ctx, a, a.cashier.userId, null), ["42501"]);
+    }));
+
+  it("an approval row, not a token, is what a cashier needs: verified, bound to the sale", () =>
+    inWorld(async (ctx) => {
+      const a = ctx.world.a;
+      await ctx.sql`update organisations set refund_override_cents = 100 where id = ${a.orgId}`;
+      const s = await makeSale(ctx, a);
+      const approval = (
+        await ctx.sql`select ops.issue_approval(${a.tokenHash}, ${a.manager.userId}, 'refund', ${s.saleId}::uuid, 100000::integer) as id`
+      )[0]!.id as string;
+      const token = await issue(ctx, a, a.cashier.userId);
+      const p = refundPayload(a, s, { over: { approval_id: approval, serving_token: token } });
+      expect(await refund(ctx, a, p)).toBe("created");
+      expect(await stateOf(ctx, p.refund.id)).toBe("verified");
+      expect(await attentionOf(ctx, a.orgId)).toEqual([]);
+    }));
+
+  it("only the server issues tokens, and only for staff on a paired till", () =>
+    inWorld(async (ctx) => {
+      const { world, as, denied } = ctx;
+      const a = world.a;
+      await denied(() => issue(ctx, a, randomUUID()), ["42501"]);
+      await denied(() => issue(ctx, a, a.cashier.userId, "0".repeat(64)), ["42501"]);
+      // clients cannot call it, and cannot read the signing key
+      for (const actor of [a.owner, a.manager, a.cashier]) {
+        await denied(() =>
+          as(actor, () => ctx.sql`select ops.issue_serving_token(${a.tokenHash}, ${actor.userId})`),
+        );
+        await denied(() => as(actor, () => ctx.sql`select key from ops.signing_keys`));
+      }
+      await denied(() => as(null, () => ctx.sql`select key from ops.signing_keys`));
+    }));
+
+  it("the lookup takes who is serving from the token: tampered, expired or missing means cashier-level", () =>
+    inWorld(async (ctx) => {
+      const { sql, world } = ctx;
+      const a = world.a;
+      const till2 = randomUUID();
+      await sql`insert into registers (id, org_id, location_id, name, device_token_hash)
+                values (${till2}, ${a.orgId}, ${a.locationId}, 'Till 2', 'y')`;
+      const other = await makeSale(ctx, { ...a, registerId: till2 }, 1);
+      const find = async (serving: string | null) =>
+        (
+          await sql`select ops.device_find_sale(${a.tokenHash}, ${json(ctx, { by: "id", id: other.saleId, serving })}) as s`
+        )[0]!.s as unknown[];
+      // a manager's valid token finds the other till's sale
+      expect(await find(await issue(ctx, a, a.manager.userId))).toHaveLength(1);
+      // no token, garbage, a tampered signature, and an expired token do not
+      const good = await issue(ctx, a, a.manager.userId);
+      const [payload, sig] = good.split(".");
+      const now = Math.floor(Date.now() / 1000);
+      const expired = await sign(ctx, payloadFor(a, a.manager.userId, { iat: now - 7200, exp: now - 3600 }));
+      for (const bad of [null, "garbage", `${payload}.${sig!.replace(/^./, (c) => (c === "0" ? "1" : "0"))}`, expired]) {
+        expect(await find(bad)).toHaveLength(0);
+      }
+      // a lookup is stricter than a refund: an expired token gets no day of grace
+    }));
+});
+
 describe("bound approvals, unverified refunds, lookup scope", () => {
   const issue = async (ctx: Ctx, a: Shop, sale: string | null, max: number | null) =>
     (
@@ -869,7 +1137,11 @@ describe("bound approvals, unverified refunds, lookup scope", () => {
 
       const find = async (id: string, viewer: string) =>
         (
-          await sql`select ops.device_find_sale(${a.tokenHash}, ${json(ctx, { by: "id", id, viewer })}) as s`
+          await sql`select ops.device_find_sale(${a.tokenHash}, ${json(ctx, {
+            by: "id",
+            id,
+            serving: await serving(ctx, a, viewer),
+          })}) as s`
         )[0]!.s as { sale: Record<string, unknown> }[];
 
       expect(await find(mine.saleId, a.cashier.userId)).toHaveLength(1);
@@ -887,7 +1159,7 @@ describe("bound approvals, unverified refunds, lookup scope", () => {
       // no cashier id leaves the database
       expect(JSON.stringify(own)).not.toContain(a.cashier.userId);
       expect(own[0]!.sale).not.toHaveProperty("cashier_user_id");
-      // the person serving must belong to this shop (not another shop's owner, not nobody)
+      // a token cannot be issued for someone who is not staff of this shop
       await ctx.denied(() => find(mine.saleId, world.b.owner.userId), ["42501"]);
       await ctx.denied(() => find(mine.saleId, randomUUID()), ["42501"]);
     }));

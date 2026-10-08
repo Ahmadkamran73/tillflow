@@ -177,7 +177,8 @@ export async function syncRefundsFromDevice(
         return new Set(await deviceRefundsKnown(device.tokenHash, ids));
       },
       async findSale(id) {
-        const found = await deviceFindSale(device.tokenHash, { by: "id", id });
+        // `internal`: the server's own sync check reads the sale it is judging, whoever is serving.
+        const found = await deviceFindSale(device.tokenHash, { by: "id", id, internal: true });
         if (found === null) throw new Error("Device is not paired");
         return saleDetails.parse(found)[0] ?? null;
       },

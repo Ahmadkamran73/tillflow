@@ -134,6 +134,7 @@ export function RefundDialog({
   register,
   role,
   cashierId,
+  servingToken,
   staff,
   offline,
   tenderOptions,
@@ -155,6 +156,8 @@ export function RefundDialog({
   register: RegisterOptions;
   role: Role;
   cashierId: string;
+  /** The server's signed proof of who is serving (online unlock); sent with the refund and the lookup. */
+  servingToken?: string;
   staff: StaffMember[];
   offline: boolean;
   tenderOptions: TenderOption[];
@@ -263,7 +266,7 @@ export function RefundDialog({
         const server = await lookupOnServer(
           orgId,
           q.by === "receipt" ? { by: "receipt", registerId: tillId, seq: q.seq } : q,
-          cashierId,
+          servingToken,
         );
         if (server.status === "ok") {
           // The server's copy knows refunds made at other tills; add only this device's unsent ones.
@@ -281,7 +284,7 @@ export function RefundDialog({
       setBusy(false);
       if (list.length === 1 && q.by === "id") choose(list[0]!);
     },
-    [db, localDetail, offline, orgId, tillId, cashierId],
+    [db, localDetail, offline, orgId, tillId, servingToken],
   );
 
   // A code scanned while this window is open, or handed in from the main screen.
@@ -466,6 +469,7 @@ export function RefundDialog({
       const input: RefundInput = {
         registerId: tillId,
         cashierUserId: cashierId,
+        servingToken,
         approvalId: approver?.approvalId,
         claimedApprover: approver?.approvalId ? undefined : approver?.userId,
         originalSaleId: detail.sale.id,
@@ -928,7 +932,7 @@ export function RefundDialog({
         </fieldset>
       )}
 
-      <div className="rounded-lg border-2 p-2" aria-live="polite">
+      <div className="rounded-lg border-2 p-2">
         <p className="flex justify-between font-semibold">
           <span>{t("refund.cashDue")}</span>
           <span className="font-mono tabular-nums">{formatCents(cashCents)}</span>

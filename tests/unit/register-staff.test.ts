@@ -28,6 +28,20 @@ const offline = (async () => {
 const serverSays = (status: number, body: unknown = {}) =>
   vi.fn(async () => Response.json(body, { status })) as unknown as typeof fetch;
 
+describe("the server-signed serving token", () => {
+  it("comes back with an online unlock, and is simply absent offline", async () => {
+    const online = (async () =>
+      Response.json({ result: "ok", userId: CSH, role: "cashier", servingToken: "payload.sig" })) as unknown as typeof fetch;
+    expect(await checkPin(db, cashier, "7391", "unlock", { fetchFn: online })).toMatchObject({
+      status: "ok",
+      servingToken: "payload.sig",
+    });
+    const result = await checkPin(db, cashier, "7391", "unlock", { fetchFn: offline });
+    expect(result).toMatchObject({ status: "ok" });
+    expect(result).not.toHaveProperty("servingToken");
+  });
+});
+
 describe("a refund approval names its sale and value", () => {
   it("sends the sale and the most it may be spent on with the PIN, only for refunds", async () => {
     const SALE = "00000000-0000-7000-8000-0000000000aa";

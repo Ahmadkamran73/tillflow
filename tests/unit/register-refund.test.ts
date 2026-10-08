@@ -423,6 +423,18 @@ describe("lookupOnServer", () => {
       return Response.json({ sales: [] });
     }) as unknown as typeof fetch;
     await lookupOnServer(ORG, { by: "receipt", registerId: REG, seq: 7 }, CASHIER, spy);
+    // who is serving travels as the server-signed token in a header, never as a name in the URL
+    const seen: { url: string; headers: unknown }[] = [];
+    const header = (async (u: string, init: RequestInit) => {
+      seen.push({ url: u, headers: init.headers });
+      return Response.json({ sales: [] });
+    }) as unknown as typeof fetch;
+    await lookupOnServer(ORG, { by: "serial", serial: "abc" }, "payload.sig", header);
+    await lookupOnServer(ORG, { by: "serial", serial: "abc" }, undefined, header);
+    expect(seen[0]!.headers).toEqual({ "x-serving-token": "payload.sig" });
+    expect(seen[0]!.url).not.toContain("payload.sig");
+    expect(seen[0]!.url).not.toContain("as=");
+    expect(seen[1]!.headers).toBeUndefined();
     expect(url).toContain("by=receipt");
     expect(url).toContain(`register_id=${REG}`);
     expect(url).toContain("seq=7");
@@ -499,6 +511,37 @@ describe("the outbox with refunds", () => {
     expect(s.sent[1]!.ids).toEqual([refund.id]);
     expect((await db.refunds.get(refund.id))!.syncState).toBe("synced");
     expect((await db.sales.get(sale.id))!.syncState).toBe("synced");
+  });
+
+  it("sends the signed serving token with the refund, and no other proof of who is serving", async () => {
+    const sale = await sell();
+    await refundOf(sale.id, { servingToken: "payload.sig" });
+    let body = "";
+    const fetchFn = (async (url: string, init: RequestInit) => {
+      if (url.includes("refunds")) body = init.body as string;
+      const parsed = JSON.parse(init.body as string) as { sales?: { id: string }[]; refunds?: { id: string }[] };
+      return Response.json({ results: (parsed.sales ?? parsed.refunds ?? []).map((i) => ({ id: i.id, status: "created" })) });
+    }) as unknown as typeof fetch;
+    await drainOutbox(db, ORG, { fetchFn, force: true });
+    expect(JSON.parse(body).refunds[0].servingToken).toBe("payload.sig");
+  });
+
+  it("drops the signed token from the device once the server has judged the refund", async () => {
+    const sale = await sell();
+    await db.sales.update(sale.id, { syncState: "synced" });
+    const ok = await refundOf(sale.id, { servingToken: "payload.sig" });
+    const bad = await refundOf(sale.id, { servingToken: "payload.sig2" });
+    expect((await db.refunds.get(ok.id))!.servingToken).toBe("payload.sig");
+    await drainOutbox(db, ORG, {
+      fetchFn: server((id) => (id === bad.id ? "rejected" : "created")).fetchFn,
+      force: true,
+    });
+    const synced = await db.refunds.get(ok.id);
+    const rejected = await db.refunds.get(bad.id);
+    expect(synced!.syncState).toBe("synced");
+    expect(rejected!.syncState).toBe("rejected");
+    expect(synced!.servingToken).toBeUndefined();
+    expect(rejected!.servingToken).toBeUndefined();
   });
 
   it("never sends the till's label or an unknown field in a refund", async () => {

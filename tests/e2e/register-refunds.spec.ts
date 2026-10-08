@@ -379,18 +379,16 @@ test("cancelling an exchange leaves nothing behind (the refund is only saved wit
   await expect(dialog(page).getByText("1 left")).toBeVisible();
 });
 
-test("a refund the till could only name a manager for is recorded and lands in Needs attention", async ({
+test("a manager who unlocked online is proven by the server's signed token: verified, nothing to check", async ({
   page,
 }) => {
-  const orgId = await setup(page, "unverified");
+  const orgId = await setup(page, "serving-token");
   await sellTea(page, 1);
   await waitFor(orgId, "sales", 1);
-  // Tills are paired by the owner; make the refund limit €5 so €12.34 needs a manager, and work with
-  // no connection so the manager's PIN can only be checked against the copy on the till.
   await sql`update organisations set refund_override_cents = 500 where id = ${orgId}`;
+  // the owner unlocks the till online: the server checks the PIN and signs who is serving
   await page.goto(`/register/${orgId}`);
   await unlockTill(page);
-  // the owner serving needs no PIN: the refund is recorded as "self" and flagged
   await openRefund(page);
   await pickRecent(page);
   await page.getByRole("button", { name: "Return one more Tea bags" }).click();
@@ -398,6 +396,39 @@ test("a refund the till could only name a manager for is recorded and lands in N
   await page.getByRole("button", { name: "Next: pay back" }).click();
   await page.getByRole("button", { name: "Complete refund" }).click();
   await expect(dialog(page).getByRole("heading", { name: "Refund saved" })).toBeVisible();
+
+  await waitFor(orgId, "refunds", 1);
+  const [refund] = await sql`select approval_state from refunds where org_id = ${orgId}`;
+  expect(refund!.approval_state).toBe("verified");
+  expect(
+    (await sql`select count(*)::int as n from sync_rejections where org_id = ${orgId}`)[0]!.n,
+  ).toBe(0);
+});
+
+test("a refund made after an OFFLINE unlock is recorded as Not verified and lands in Needs attention", async ({
+  page,
+  context,
+}) => {
+  const orgId = await setup(page, "unverified");
+  await sellTea(page, 1);
+  await waitFor(orgId, "sales", 1);
+  await sql`update organisations set refund_override_cents = 500 where id = ${orgId}`;
+  await page.goto(`/register/${orgId}`);
+  await unlockTill(page);
+  // Lock the till, lose the connection, and unlock with the PIN cached on the device: the server never
+  // sees this PIN, so there is no signed token and nothing is proven.
+  await page.getByRole("button", { name: /^Lock till/ }).click();
+  await context.setOffline(true);
+  await unlockTill(page);
+  await openRefund(page);
+  await pickRecent(page);
+  await page.getByRole("button", { name: "Return one more Tea bags" }).click();
+  await dialog(page).getByLabel("Reason").selectOption("damaged");
+  await page.getByRole("button", { name: "Next: pay back" }).click();
+  await page.getByRole("button", { name: "Complete refund" }).click();
+  await expect(dialog(page).getByRole("heading", { name: "Refund saved" })).toBeVisible();
+  await context.setOffline(false);
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
 
   await waitFor(orgId, "refunds", 1);
   const [refund] = await sql`select id, approval_state from refunds where org_id = ${orgId}`;

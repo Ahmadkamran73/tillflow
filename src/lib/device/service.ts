@@ -16,6 +16,7 @@ export {
   deviceSyncMeta,
   deviceTenderTypes,
   issueApproval,
+  issueServingToken,
   pairRegister,
   pinAttemptBegin,
   pinAttemptFinish,

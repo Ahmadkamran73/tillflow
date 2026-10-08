@@ -98,6 +98,7 @@ const toWireRefund = (r: LocalRefund): SyncRefund => ({
   cashierUserId: r.cashierUserId,
   approvalId: r.approvalId,
   claimedApprover: r.claimedApprover,
+  servingToken: r.servingToken,
   lines: r.lines.map((l) => ({ lineNo: l.lineNo, qty: l.qty, restock: l.restock })),
   // The till's label stays on the device (it is for the receipt).
   legs: r.legs.map((l) => ({
@@ -309,9 +310,18 @@ async function sendRefunds(
         unresolved++;
         await db.refunds.update(refund.id, { attempts: refund.attempts + 1 });
       } else if (r.status === "rejected") {
-        await db.refunds.update(refund.id, { syncState: "rejected", rejectReason: r.reason });
+        await db.refunds.update(refund.id, {
+          syncState: "rejected",
+          rejectReason: r.reason,
+          servingToken: undefined,
+        });
       } else {
-        await db.refunds.update(refund.id, { syncState: "synced", syncedAt: opts.now() });
+        // The signed token is a credential: it does not stay on the device once the server has judged the refund.
+        await db.refunds.update(refund.id, {
+          syncState: "synced",
+          syncedAt: opts.now(),
+          servingToken: undefined,
+        });
       }
     }
   });

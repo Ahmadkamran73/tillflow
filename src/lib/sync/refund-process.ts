@@ -137,7 +137,18 @@ async function processOne(raw: unknown, ctx: RefundCtx, deps: RefundDeps): Promi
       user_id: null,
       reason: "invalid",
       detail: { kind: "refund" },
-      payload: { invalid: true, kind: "refund", raw: storable({ raw: stripReferences(raw) }) },
+      // Neither a reference nor the signed token or approval proof is kept.
+      payload: {
+        invalid: true,
+        kind: "refund",
+        raw: storable({
+          raw: stripReferences({
+            ...(raw as Record<string, unknown>),
+            servingToken: undefined,
+            approvalId: undefined,
+          }),
+        }),
+      },
     });
     return { id, status: "rejected", reason: "invalid" };
   }
@@ -152,7 +163,10 @@ async function processOne(raw: unknown, ctx: RefundCtx, deps: RefundDeps): Promi
       reason: r.reason,
       detail: { ...r.detail, kind: "refund" },
       // Inputs only; the reference is for the payment row, never kept in a rejection.
-      payload: storable(stripReferences({ ...refund, kind_of: "refund" })),
+      // Neither a reference nor the signed token is kept in a rejection.
+      payload: storable(
+        stripReferences({ ...refund, servingToken: undefined, kind_of: "refund" }),
+      ),
     });
     return { id: refund.id, status: "rejected", reason: r.reason };
   };
@@ -242,6 +256,7 @@ async function processOne(raw: unknown, ctx: RefundCtx, deps: RefundDeps): Promi
         exchange_sale_id: refund.exchangeSaleId ?? null,
         approval_id: refund.approvalId ?? null,
         claimed_approver: refund.approvalId ? null : (refund.claimedApprover ?? null),
+        serving_token: refund.servingToken ?? null,
       },
       lines: lines.map((l) => ({
         line_no: l.lineNo,

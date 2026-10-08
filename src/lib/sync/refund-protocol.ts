@@ -57,6 +57,8 @@ export const syncRefund = z
     approvalId: z.uuid().optional(),
     /** Offline only: the manager whose cached PIN hash the till checked. Recorded as unverified. */
     claimedApprover: z.uuid().optional(),
+    /** The server's signed "serving as" token; the database verifies it and takes the cashier from it. */
+    servingToken: z.string().max(500).optional(),
     lines: z
       .array(
         z.strictObject({

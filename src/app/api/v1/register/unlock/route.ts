@@ -3,7 +3,12 @@ import { z } from "zod";
 import { verifyPin } from "@/lib/auth/pin";
 import { authenticateDevice } from "@/lib/device/auth";
 import { reportError } from "@/lib/errors";
-import { issueApproval, pinAttemptBegin, pinAttemptFinish } from "@/lib/device/service";
+import {
+  issueApproval,
+  issueServingToken,
+  pinAttemptBegin,
+  pinAttemptFinish,
+} from "@/lib/device/service";
 import { RATE_LIMIT_UNAVAILABLE_MESSAGE, rateLimit, rateLimitedMessage } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
@@ -109,7 +114,14 @@ export async function POST(request: NextRequest) {
         { headers: NO_STORE },
       );
     }
-    return Response.json({ result: "ok", userId, role: attempt.role }, { headers: NO_STORE });
+    // The PIN was just verified: sign who is serving on this till, for the next hour. Refunds and the
+    // sale lookup verify it in the database instead of trusting a user id from the till.
+    const servingToken =
+      purpose === "unlock" ? await issueServingToken(device.tokenHash, userId) : undefined;
+    return Response.json(
+      { result: "ok", userId, role: attempt.role, servingToken },
+      { headers: NO_STORE },
+    );
   } catch (e) {
     await reportError(e, { source: "server", route: "/api/v1/register/unlock" });
     return Response.json({ error: "try again" }, { status: 503, headers: NO_STORE });
