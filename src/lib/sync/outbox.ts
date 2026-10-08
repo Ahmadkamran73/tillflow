@@ -66,6 +66,7 @@ const toWire = (s: LocalSale): SyncSale => ({
   tenders: s.tenders.map(toWireTender),
   roundCash: s.roundCash ?? true,
   expectedDueCents: s.expectedDueCents,
+  expectedVatCents: s.expectedVatCents,
 });
 
 async function fail(db: RegisterDb, opts: Required<Pick<DrainOptions, "now" | "random">>) {

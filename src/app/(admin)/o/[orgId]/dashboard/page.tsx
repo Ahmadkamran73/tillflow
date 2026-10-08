@@ -38,7 +38,7 @@ export default async function DashboardPage({ params }: { params: Promise<{ orgI
         ))}
       </dl>
 
-      {(attention.open > 0 || attention.staleTills.length > 0) && (
+      {(attention.open > 0 || attention.toReview > 0 || attention.staleTills.length > 0) && (
         <section aria-labelledby="attention" className="surface-panel flex flex-col gap-2 p-5">
           <h2 id="attention" className="text-heading font-semibold">
             {t("tile.attention")}
@@ -47,6 +47,16 @@ export default async function DashboardPage({ params }: { params: Promise<{ orgI
             <p>
               <Link href={`/o/${orgId}/sales/attention`} className="font-medium underline">
                 {t("sales.attentionLink", { count: attention.open })}
+              </Link>
+            </p>
+          )}
+          {attention.toReview > 0 && (
+            <p>
+              <Link
+                href={`/o/${orgId}/sales/review`}
+                className="inline-flex min-h-12 items-center font-medium underline"
+              >
+                {t("sales.reviewLink", { count: attention.toReview })}
               </Link>
             </p>
           )}

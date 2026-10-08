@@ -108,7 +108,7 @@ export const deviceEnIE = {
   // Back office: staff
   "staff.title": "Staff",
   "staff.body":
-    "Everyone with access to this shop. A manager can clear a cashier's PIN if it is forgotten or locked.",
+    "Everyone with access to this shop. Add cashiers here: they only use the till, with a name and a PIN, and need no email or login.",
   "staff.name": "Name",
   "staff.role": "Role",
   "staff.pin": "Till PIN",
@@ -118,8 +118,48 @@ export const deviceEnIE = {
   "staff.noName": "Not named yet",
   "staff.reset": "Reset PIN",
   "staff.resetFor": "Reset PIN for {name}",
-  "staff.resetDone": "PIN cleared. They can set a new one under My till PIN.",
+  "staff.resetDone": "PIN cleared. Use Manage to set a new one.",
   "staff.error": "Something went wrong. Please try again.",
+  "staff.add": "Add cashier",
+  "staff.added":
+    "Cashier added. They appear on the till at its next catalogue update (within a minute).",
+  "staff.pinSetDone": "PIN saved. It works on the till at its next catalogue update.",
+  "staff.removed": "Cashier removed. Their past sales still show their name.",
+  "staff.manage": "Manage",
+  "staff.manageFor": "Manage {name}",
+  "staff.newTitle": "Add a cashier",
+  "staff.newBody":
+    "Type the cashier's name, then hand them the screen so they can choose their own 4 to 6 digit PIN. Avoid easy PINs like 1234 or 1111.",
+  "staff.nameLabel": "Name shown on the till",
+  "staff.pinLabel": "PIN (4 to 6 digits)",
+  "staff.confirmLabel": "Repeat the PIN",
+  "staff.save": "Add cashier",
+  "staff.nameInUse": "Someone in this shop already has that name. Add a surname or initial.",
+  "staff.mismatch": "The two PINs do not match.",
+  "staff.invalid":
+    "Check the name (1 to 40 characters) and the PIN (4 to 6 digits, not an easy one like 1234).",
+  "staff.setPinTitle": "Set a till PIN for {name}",
+  "staff.setPinBody":
+    "Hand the screen to {name} so they can type their new PIN. It replaces any old one and clears a lockout.",
+  "staff.setPin": "Save PIN",
+  "staff.removeTitle": "Remove from the till",
+  "staff.removeBody":
+    "{name} will no longer be able to unlock the till. Their past sales keep their name.",
+  "staff.remove": "Remove {name}",
+  "staff.back": "Back to Staff",
+  "staff.actions": "Actions",
+  "staff.manageTitle": "Manage cashier",
+  "staff.pinHint": "4 to 6 digits. Avoid easy PINs like 1234 or 1111.",
+  "staff.removeConfirm": "Remove {name} from the till? This cannot be undone.",
+  "staff.removeYes": "Yes, remove {name}",
+  "staff.cancel": "Cancel",
+  "mfa.reminderLabel": "Security",
+  "mfa.reminder": "Two-step verification is off. Turn it on to protect your shop's data.",
+  "mfa.reminderLink": "Set it up now",
+  "mfa.status": "Two-step verification:",
+  "mfa.on": "On",
+  "mfa.off": "Off",
+  "mfa.setUp": "Set it up",
 
   // Back office: discount limit
   "discountLimit.title": "Discount approval limit",

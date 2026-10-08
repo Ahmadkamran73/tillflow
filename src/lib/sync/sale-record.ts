@@ -1,5 +1,6 @@
 import { lineDiscountOf, type Settlement } from "@/lib/money";
 import { unitWithModifiers, type Cart, type PricedCart } from "@/lib/register/cart";
+import type { ReviewFlag } from "./process";
 import type { SyncSale } from "./protocol";
 
 /**
@@ -22,6 +23,8 @@ export function buildSaleRecord(args: {
   /** The payments checked against the priced total (`settleTenders`); must be ok. */
   settlement: Settlement;
   pricedAsOf: Date;
+  /** Saved but worth a manager's look (see process.ts). */
+  reviewFlags?: ReviewFlag[];
 }) {
   const { sale, cart, priced, settlement } = args;
   if (!settlement.ok) throw new RangeError(`payments do not settle the sale: ${settlement.error}`);
@@ -83,6 +86,8 @@ export function buildSaleRecord(args: {
       cash_rounding: settlement.rounding,
       amount_due: settlement.amountDue,
       client_due: sale.expectedDueCents,
+      client_vat: sale.expectedVatCents ?? null,
+      review_flags: args.reviewFlags ?? [],
     },
     lines,
     // Cash settles its share plus rounding (the rest of what was handed over is change); card and

@@ -36,6 +36,8 @@ const syncSaleShape = z.strictObject({
    */
   roundCash: z.boolean().default(true),
   expectedDueCents: z.int().min(0).max(100_000_000),
+  /** The VAT the till printed (newer tills): compared, never trusted; a difference flags the sale. */
+  expectedVatCents: z.int().min(0).max(100_000_000).optional(),
 });
 /**
  * Sales queued before tender types carried one `tenderedCents` (cash handed over): read them as a

@@ -112,28 +112,53 @@ revoke all on function public.tender_totals(uuid, timestamptz, timestamptz) from
 grant execute on function public.tender_totals(uuid, timestamptz, timestamptz) to authenticated;
 
 -- ---------------------------------------------------------------- ops.record_sale (replaced)
--- As in 0023, but a sale carries 1-10 payments (p -> 'payments'; the old single p -> 'payment' still
--- works for sales queued before tender types). The payments must add up to the amount due, at most
--- one is cash, and each tender type must belong to this till's location and match its method.
-create or replace function ops.record_sale(p jsonb) returns text
+-- Built on 0026's version (token check, every sum re-checked in SQL, review flags) and changed only
+-- in how payments are read: a sale carries 1-10 payments (p -> 'payments'; the old single
+-- p -> 'payment' still works). They must add up to amount_due, at most one is cash, tendered less
+-- change is the amount, change only on cash, and each tender type belongs to this till's location
+-- and matches its method. Any failure raises 22023, a rejection and never a retry.
+create or replace function ops.record_sale(p jsonb, p_token_hash text default null) returns text
 language plpgsql volatile security definer set search_path = ''
 as $$
 declare
   s jsonb := p -> 'sale';
+  -- 1-10 payments; the old single p -> 'payment' still works for sales queued before tender types.
+  v_pays jsonb := coalesce(p -> 'payments', jsonb_build_array(p -> 'payment'));
   v_org uuid := (s ->> 'org_id')::uuid;
   v_id uuid := (s ->> 'id')::uuid;
   v_reg uuid := (s ->> 'register_id')::uuid;
   v_user uuid := (s ->> 'user_id')::uuid;
-  -- approved_by is for TRUSTED callers only (the back office re-running a held sale as a manager).
-  -- A till never supplies it: it supplies approval_id, and the approver is derived from that.
   v_approver uuid := nullif(s ->> 'approved_by', '')::uuid;
   v_approval uuid := nullif(s ->> 'approval_id', '')::uuid;
   v_completed timestamptz := (s ->> 'completed_at')::timestamptz;
-  v_pays jsonb := coalesce(p -> 'payments', jsonb_build_array(p -> 'payment'));
+  v_items_total int := (s ->> 'items_total')::int;
+  v_vat int := (s ->> 'vat')::int;
+  v_non_vat int := (s ->> 'non_vat')::int;
+  v_rounding int := (s ->> 'cash_rounding')::int;
+  v_due int := (s ->> 'amount_due')::int;
+  v_flags text[] := coalesce(array(select jsonb_array_elements_text(coalesce(s -> 'review_flags', '[]'::jsonb))), '{}');
   v_loc uuid;
   v_inserted int;
   v_existing public.sales%rowtype;
+  v_sum_gross bigint;
+  v_sum_vat bigint;
+  v_sum_deposit bigint;
+  v_bad_lines int;
+  v_cash_n int;
+  v_pay_sum bigint;
+  v_bad_pays int;
+  v_bad_cash int;
 begin
+  -- A till never names an approver: with a token, the approver comes only from a spent,
+  -- PIN-verified register_approvals row below. approved_by is for the trusted back office alone.
+  if p_token_hash is not null then
+    v_approver := null;
+  end if;
+  if p_token_hash is not null and not exists (
+       select 1 from app.device_register(p_token_hash) d
+        where d.org_id = v_org and d.register_id = v_reg) then
+    raise exception 'not this till' using errcode = '42501';
+  end if;
   if not app.is_member(v_user, v_org) then
     raise exception 'not a member' using errcode = '42501';
   end if;
@@ -142,14 +167,86 @@ begin
     raise exception 'unknown register' using errcode = '42501';
   end if;
 
+  -- The sums, from the lines up. Any difference means the record is wrong: refuse it (the sync
+  -- route turns this into a rejection a manager sees, so it never blocks the till's queue).
+  -- Each item line: VAT split exactly as src/lib/money splitVat does it (net = gross * 10000 /
+  -- (10000 + rate), half away from zero, which is Postgres round(numeric)), and the discount is
+  -- what the full price lost. Each deposit line: unit x qty. No other kind of line yet.
+  select coalesce(sum((l ->> 'gross_cents')::bigint) filter (where l ->> 'kind' = 'item'), 0),
+         coalesce(sum((l ->> 'vat_cents')::bigint) filter (where l ->> 'kind' = 'item'), 0),
+         coalesce(sum((l ->> 'gross_cents')::bigint) filter (where l ->> 'kind' = 'deposit'), 0),
+         count(*) filter (where
+           case l ->> 'kind'
+             when 'item' then
+               num_nulls(l ->> 'gross_cents', l ->> 'net_cents', l ->> 'vat_cents', l ->> 'tax_rate_bp',
+                         l ->> 'unit_price_cents', l ->> 'qty') > 0
+               or (l ->> 'tax_rate_bp')::int not between 0 and 10000
+               or (l ->> 'net_cents')::bigint
+                  <> round((l ->> 'gross_cents')::numeric * 10000 / (10000 + (l ->> 'tax_rate_bp')::int))
+               or (l ->> 'net_cents')::bigint + (l ->> 'vat_cents')::bigint <> (l ->> 'gross_cents')::bigint
+               or coalesce((l ->> 'discount_cents')::bigint, 0) < 0
+               or coalesce((l ->> 'discount_cents')::bigint, 0)
+                  <> (l ->> 'unit_price_cents')::bigint * (l ->> 'qty')::bigint - (l ->> 'gross_cents')::bigint
+             when 'deposit' then
+               num_nulls(l ->> 'gross_cents', l ->> 'unit_price_cents', l ->> 'qty') > 0
+               or (l ->> 'gross_cents')::bigint
+                  <> (l ->> 'unit_price_cents')::bigint * (l ->> 'qty')::bigint
+             else true
+           end)
+    into v_sum_gross, v_sum_vat, v_sum_deposit, v_bad_lines
+    from jsonb_array_elements(p -> 'lines') l;
+  -- The payments, shaped before they are summed. Cash settles its share plus rounding (what was
+  -- handed over less the change); card and voucher settle exactly their amount, with no change.
+  if jsonb_typeof(v_pays) <> 'array' or jsonb_array_length(v_pays) not between 1 and 10
+     or exists (select 1 from jsonb_array_elements(v_pays) x
+                where jsonb_typeof(x) <> 'object'
+                   or coalesce(x ->> 'method', '') not in ('cash', 'card', 'voucher')
+                   or num_nulls(x ->> 'amount', x ->> 'tendered') > 0) then
+    raise exception 'payments are not valid' using errcode = '22023';
+  end if;
+  select count(*) filter (where x ->> 'method' = 'cash'),
+         coalesce(sum((x ->> 'amount')::bigint), 0),
+         count(*) filter (where (x ->> 'amount')::bigint < 0
+                            or coalesce((x ->> 'change')::bigint, 0) < 0
+                            or (x ->> 'tendered')::bigint - coalesce((x ->> 'change')::bigint, 0)
+                               is distinct from (x ->> 'amount')::bigint
+                            or (x ->> 'method' <> 'cash' and coalesce((x ->> 'change')::bigint, 0) <> 0)),
+         -- When the cash share was rounded, the cash taken for it ends in 0 or 5.
+         count(*) filter (where x ->> 'method' = 'cash' and v_rounding <> 0
+                            and mod((x ->> 'amount')::bigint, 5) <> 0)
+    into v_cash_n, v_pay_sum, v_bad_pays, v_bad_cash
+    from jsonb_array_elements(v_pays) x;
+  if exists (select 1 from jsonb_array_elements(v_pays) x
+             where nullif(x ->> 'type_id', '') is not null
+               and not exists (select 1 from public.tender_types tt
+                               where tt.id = (x ->> 'type_id')::uuid and tt.org_id = v_org
+                                 and tt.location_id = v_loc and tt.method = x ->> 'method')) then
+    raise exception 'unknown payment type' using errcode = '22023';
+  end if;
+
+  if num_nulls(v_items_total, v_vat, v_non_vat, v_rounding, v_due) > 0
+     or v_bad_lines > 0
+     or v_sum_gross <> v_items_total or v_sum_vat <> v_vat or v_sum_deposit <> v_non_vat
+     or v_due <> v_items_total + v_non_vat + v_rounding
+     -- 5c cash rounding moves the cash share by at most 2c (and only where the shop rounds).
+     or v_rounding not between -2 and 2
+     or v_pay_sum <> v_due or v_cash_n > 1 or v_bad_pays > 0 or v_bad_cash > 0 then
+    raise exception 'sale does not add up' using errcode = '22023';
+  end if;
+  -- The till's VAT is compared, never trusted; the flag must agree with it.
+  if 'vat_differs' = any (v_flags) and (s ->> 'client_vat') is null then
+    raise exception 'bad input' using errcode = '22023';
+  end if;
+
   begin
     insert into public.sales (id, org_id, register_id, location_id, receipt_seq, mode, completed_at,
                               priced_as_of, cashier_user_id, items_total_cents, vat_cents, non_vat_cents,
-                              cash_rounding_cents, amount_due_cents, client_due_cents)
-    values (v_id, v_org, v_reg, v_loc, (s ->> 'receipt_seq')::int, s ->> 'mode',
-            (s ->> 'completed_at')::timestamptz, (s ->> 'priced_as_of')::timestamptz, v_user,
-            (s ->> 'items_total')::int, (s ->> 'vat')::int, (s ->> 'non_vat')::int,
-            (s ->> 'cash_rounding')::int, (s ->> 'amount_due')::int, (s ->> 'client_due')::int)
+                              cash_rounding_cents, amount_due_cents, client_due_cents,
+                              client_vat_cents, review_flags)
+    values (v_id, v_org, v_reg, v_loc, (s ->> 'receipt_seq')::int, s ->> 'mode', v_completed,
+            (s ->> 'priced_as_of')::timestamptz, v_user, v_items_total, v_vat, v_non_vat,
+            v_rounding, v_due, (s ->> 'client_due')::int,
+            nullif(s ->> 'client_vat', '')::int, v_flags)
     on conflict (id) do nothing;
     get diagnostics v_inserted = row_count;
   exception when unique_violation then
@@ -158,15 +255,12 @@ begin
 
   if v_inserted = 0 then
     select * into v_existing from public.sales where id = v_id;
-    -- A sale id that belongs to another shop is never reported as ours.
     if v_existing.org_id = v_org and v_existing.register_id = v_reg then
       return 'duplicate';
     end if;
     raise exception 'sale id in use' using errcode = '23505';
   end if;
 
-  -- A till's approval: single use, this register, purpose discount, spent within 30 minutes of the
-  -- PIN check (by the sale's own time, so a sale made online-then-queued still counts).
   if v_approval is not null then
     v_approver := null;
     select a.approver_user_id into v_approver
@@ -196,42 +290,17 @@ begin
          (l.value ->> 'vat_cents')::int, (l.value ->> 'gross_cents')::int
   from jsonb_array_elements(p -> 'lines') with ordinality as l(value, ord);
 
-  -- Payments: re-checked here because this function is the last line of defence. Any failure
-  -- raises 22023, which the route turns into a rejection a manager sees (and rolls the sale back).
-  if jsonb_typeof(v_pays) <> 'array' or jsonb_array_length(v_pays) not between 1 and 10 then
-    raise exception 'payments must be 1 to 10' using errcode = '22023';
-  end if;
-  if (select count(*) from jsonb_array_elements(v_pays) x where x ->> 'method' = 'cash') > 1 then
-    raise exception 'more than one cash payment' using errcode = '22023';
-  end if;
-  if (select coalesce(sum((x ->> 'amount')::int), 0) from jsonb_array_elements(v_pays) x)
-       <> (s ->> 'amount_due')::int then
-    raise exception 'payments do not add up to the amount due' using errcode = '22023';
-  end if;
-  -- What was handed over less the change is what the payment settles.
-  if exists (select 1 from jsonb_array_elements(v_pays) x
-             where (x ->> 'tendered')::int - coalesce((x ->> 'change')::int, 0) is distinct from (x ->> 'amount')::int) then
-    raise exception 'tendered less change is not the amount' using errcode = '22023';
-  end if;
-  if exists (select 1 from jsonb_array_elements(v_pays) x
-             where nullif(x ->> 'type_id', '') is not null
-               and not exists (select 1 from public.tender_types tt
-                               where tt.id = (x ->> 'type_id')::uuid and tt.org_id = v_org
-                                 and tt.location_id = v_loc and tt.method = x ->> 'method')) then
-    raise exception 'unknown payment type' using errcode = '22023';
-  end if;
-
   insert into public.payments (id, org_id, sale_id, tender_type_id, label, method, amount_cents,
                                tendered_cents, change_cents, tip_cents, provider_ref)
   select gen_random_uuid(), v_org, v_id, nullif(x ->> 'type_id', '')::uuid,
          coalesce((select tt.label from public.tender_types tt
-                   where tt.org_id = v_org and tt.id = nullif(x ->> 'type_id', '')::uuid), initcap(x ->> 'method')),
-         coalesce(x ->> 'method', 'cash'), (x ->> 'amount')::int, (x ->> 'tendered')::int,
+                   where tt.org_id = v_org and tt.id = nullif(x ->> 'type_id', '')::uuid),
+                  initcap(x ->> 'method')),
+         x ->> 'method', (x ->> 'amount')::int, (x ->> 'tendered')::int,
          coalesce((x ->> 'change')::int, 0), coalesce((x ->> 'tip')::int, 0),
          nullif(x ->> 'reference', '')
   from jsonb_array_elements(v_pays) x;
 
-  -- One ledger row per tracked variant. Negative stock is allowed (reported, not blocked).
   insert into public.stock_movements (id, org_id, variant_id, location_id, qty_delta, reason, ref_id, actor_user_id)
   select gen_random_uuid(), v_org, l.variant_id, v_loc, -sum(l.qty)::int, 'sale', v_id, v_user
   from public.sale_lines l
@@ -254,6 +323,3 @@ begin
 end
 $$;
 
-
-revoke all on function ops.record_sale(jsonb) from public, anon, authenticated;
-grant execute on function ops.record_sale(jsonb) to service_role, tillflow_ops;

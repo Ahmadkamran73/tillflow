@@ -1,3 +1,4 @@
+import type { ReviewFlag } from "@/lib/sync/process";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -13,6 +14,7 @@ import { createSupabaseServerClient, requireRole } from "@/lib/auth";
 import { getLocation } from "@/lib/catalog";
 import { t } from "@/lib/i18n";
 import { startOfLocalDay } from "@/lib/local-day";
+import { getSalesToReview } from "@/lib/sync/attention";
 import { formatCents } from "@/lib/money";
 import { receiptNo } from "@/lib/register/sale";
 
@@ -26,10 +28,12 @@ export default async function SalesPage({ params }: { params: Promise<{ orgId: s
   if (!location) notFound();
 
   const supabase = await createSupabaseServerClient();
-  const [sales, registers, attention] = await Promise.all([
+  const [sales, registers, attention, toReview] = await Promise.all([
     supabase
       .from("sales")
-      .select("id, register_id, receipt_seq, completed_at, vat_cents, amount_due_cents")
+      .select(
+        "id, register_id, receipt_seq, completed_at, vat_cents, amount_due_cents, review_flags",
+      )
       .eq("org_id", orgId)
       .order("completed_at", { ascending: false })
       .limit(50),
@@ -39,6 +43,7 @@ export default async function SalesPage({ params }: { params: Promise<{ orgId: s
       .select("id", { count: "exact", head: true })
       .eq("org_id", orgId)
       .eq("status", "open"),
+    getSalesToReview(orgId),
   ]);
   if (sales.error || registers.error) throw new Error("Could not load sales");
   const tills = new Map((registers.data ?? []).map((r) => [r.id as string, r.name as string]));
@@ -75,6 +80,16 @@ export default async function SalesPage({ params }: { params: Promise<{ orgId: s
           {open > 0 ? t("sales.attentionLink", { count: open }) : t("sales.attentionNone")}
         </Link>
       </p>
+      {toReview.length > 0 && (
+        <p>
+          <Link
+            href={`/o/${orgId}/sales/review`}
+            className="inline-flex min-h-12 items-center font-medium underline"
+          >
+            {t("sales.reviewLink", { count: toReview.length })}
+          </Link>
+        </p>
+      )}
       <section aria-labelledby="by-tender" className="surface-panel flex flex-col gap-3 p-5">
         <h2 id="by-tender" className="font-display text-heading font-semibold">
           {t("sales.byTender")}
@@ -147,6 +162,7 @@ export default async function SalesPage({ params }: { params: Promise<{ orgId: s
                 <TableHead scope="col" className="text-right">
                   {t("sales.col.total")}
                 </TableHead>
+                <TableHead scope="col">{t("sales.col.check")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -164,6 +180,17 @@ export default async function SalesPage({ params }: { params: Promise<{ orgId: s
                   </TableCell>
                   <TableCell className="text-right font-mono tabular-nums">
                     {formatCents(s.amount_due_cents as number)}
+                  </TableCell>
+                  <TableCell className="text-sm">
+                    {((s.review_flags as string[] | null) ?? []).length > 0 ? (
+                      <Link href={`/o/${orgId}/sales/review`} className="underline">
+                        {(s.review_flags as string[])
+                          .map((f) => t(`sales.flag.${f as ReviewFlag}`))
+                          .join("; ")}
+                      </Link>
+                    ) : (
+                      t("sales.flag.none")
+                    )}
                   </TableCell>
                 </TableRow>
               ))}

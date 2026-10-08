@@ -1,6 +1,6 @@
 {
-  "id": "3bd566fe-5db7-4906-b6e1-fa5a1988e99c",
-  "prevId": "f15a8036-3204-4690-94af-ad584766787a",
+  "id": "c35f5f11-2a36-46e3-ba83-9e1e7e1c3763",
+  "prevId": "3bd566fe-5db7-4906-b6e1-fa5a1988e99c",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1483,6 +1483,18 @@
           "primaryKey": false,
           "notNull": true
         },
+        "tender_type_id": {
+          "name": "tender_type_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "label": {
+          "name": "label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "method": {
           "name": "method",
           "type": "text",
@@ -1549,6 +1561,27 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "payments_org_created_idx": {
+          "name": "payments_org_created_idx",
+          "columns": [
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -1579,6 +1612,21 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "payments_org_tender_type_fk": {
+          "name": "payments_org_tender_type_fk",
+          "tableFrom": "payments",
+          "tableTo": "tender_types",
+          "columnsFrom": [
+            "org_id",
+            "tender_type_id"
+          ],
+          "columnsTo": [
+            "org_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1588,6 +1636,22 @@
         "payments_method": {
           "name": "payments_method",
           "value": "\"payments\".\"method\" in ('cash', 'card', 'voucher')"
+        },
+        "payments_amount": {
+          "name": "payments_amount",
+          "value": "\"payments\".\"amount_cents\" >= 0"
+        },
+        "payments_change_cash_only": {
+          "name": "payments_change_cash_only",
+          "value": "\"payments\".\"method\" = 'cash' or \"payments\".\"change_cents\" = 0"
+        },
+        "payments_tip": {
+          "name": "payments_tip",
+          "value": "\"payments\".\"tip_cents\" = 0 or (\"payments\".\"method\" = 'card' and \"payments\".\"tip_cents\" <= \"payments\".\"amount_cents\")"
+        },
+        "payments_provider_ref": {
+          "name": "payments_provider_ref",
+          "value": "\"payments\".\"provider_ref\" is null or (char_length(\"payments\".\"provider_ref\") <= 40 and \"payments\".\"provider_ref\" ~ '^[A-Za-z0-9 /-]*$' and char_length(regexp_replace(\"payments\".\"provider_ref\", '[^0-9]', '', 'g')) < 13)"
         }
       },
       "isRLSEnabled": false
@@ -2080,7 +2144,7 @@
         },
         "sales_review_flags": {
           "name": "sales_review_flags",
-          "value": "\"sales\".\"review_flags\" <@ array['vat_differs', 'old_prices']::text[]"
+          "value": "\"sales\".\"review_flags\" <@ array['vat_differs', 'old_prices', 'rounding_differs']::text[]"
         }
       },
       "isRLSEnabled": false
@@ -3177,6 +3241,167 @@
       },
       "policies": {},
       "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.tender_types": {
+      "name": "tender_types",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "org_id": {
+          "name": "org_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "location_id": {
+          "name": "location_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "method": {
+          "name": "method",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "label": {
+          "name": "label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sort": {
+          "name": "sort",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "archived_at": {
+          "name": "archived_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "tender_types_org_location_idx": {
+          "name": "tender_types_org_location_idx",
+          "columns": [
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "location_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "sort",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tender_types_one_cash_key": {
+          "name": "tender_types_one_cash_key",
+          "columns": [
+            {
+              "expression": "location_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"tender_types\".\"method\" = 'cash'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "tender_types_org_id_organisations_id_fk": {
+          "name": "tender_types_org_id_organisations_id_fk",
+          "tableFrom": "tender_types",
+          "tableTo": "organisations",
+          "columnsFrom": [
+            "org_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "tender_types_org_location_fk": {
+          "name": "tender_types_org_location_fk",
+          "tableFrom": "tender_types",
+          "tableTo": "locations",
+          "columnsFrom": [
+            "org_id",
+            "location_id"
+          ],
+          "columnsTo": [
+            "org_id",
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "tender_types_org_id_id_key": {
+          "name": "tender_types_org_id_id_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "org_id",
+            "id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "tender_types_method": {
+          "name": "tender_types_method",
+          "value": "\"tender_types\".\"method\" in ('cash', 'card', 'voucher')"
+        },
+        "tender_types_label": {
+          "name": "tender_types_label",
+          "value": "char_length(btrim(\"tender_types\".\"label\")) between 1 and 40"
+        }
+      },
       "isRLSEnabled": false
     }
   },

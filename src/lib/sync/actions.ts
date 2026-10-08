@@ -87,3 +87,34 @@ export async function resolveRejectedSaleAction(formData: FormData): Promise<voi
   }
   redirect(`${page(orgId)}?result=resolved`);
 }
+
+const reviewInput = z.object({
+  orgId: z.uuid(),
+  id: z.uuid(),
+  note: z.string().trim().max(500),
+});
+
+/** A manager has looked at a flagged sale. The sale stays as it is; the review is an audit row. */
+export async function markSaleReviewedAction(formData: FormData): Promise<void> {
+  const parsed = reviewInput.safeParse({
+    orgId: str(formData, "orgId"),
+    id: str(formData, "id"),
+    note: str(formData, "note"),
+  });
+  if (!parsed.success) redirect("/o");
+  const { orgId, id, note } = parsed.data;
+  await requireRole(["owner", "manager"], orgId);
+  const review = `/o/${orgId}/sales/review`;
+
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase.rpc("mark_sale_reviewed", {
+    p_sale: id,
+    p_note: note,
+    p_audit_id: uuidv7(),
+  });
+  if (error) {
+    logger.error({ code: error.code }, "mark_sale_reviewed failed");
+    redirect(`${review}?result=error&n=${Date.now()}`);
+  }
+  redirect(`${review}?result=reviewed&n=${Date.now()}`);
+}

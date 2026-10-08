@@ -533,6 +533,7 @@ export function Register({ orgId }: { orgId: string }) {
           tenders.map((x) => ({ method: x.method, amount: x.amountCents, tip: x.tipCents })),
           { roundCash },
         ).amountDue,
+        expectedVatCents: priced.basket.vatTotal,
       });
     } catch {
       say(t("register.saveFailed"));

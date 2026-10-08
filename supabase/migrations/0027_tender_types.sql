@@ -13,6 +13,7 @@ CREATE TABLE "tender_types" (
 	CONSTRAINT "tender_types_label" CHECK (char_length(btrim("tender_types"."label")) between 1 and 40)
 );
 --> statement-breakpoint
+ALTER TABLE "sales" DROP CONSTRAINT "sales_review_flags";--> statement-breakpoint
 ALTER TABLE "payments" ADD COLUMN "tender_type_id" uuid;--> statement-breakpoint
 ALTER TABLE "payments" ADD COLUMN "label" text;--> statement-breakpoint
 ALTER TABLE "tender_types" ADD CONSTRAINT "tender_types_org_id_organisations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organisations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -24,4 +25,5 @@ CREATE INDEX "payments_org_created_idx" ON "payments" USING btree ("org_id","cre
 ALTER TABLE "payments" ADD CONSTRAINT "payments_amount" CHECK ("payments"."amount_cents" >= 0);--> statement-breakpoint
 ALTER TABLE "payments" ADD CONSTRAINT "payments_change_cash_only" CHECK ("payments"."method" = 'cash' or "payments"."change_cents" = 0);--> statement-breakpoint
 ALTER TABLE "payments" ADD CONSTRAINT "payments_tip" CHECK ("payments"."tip_cents" = 0 or ("payments"."method" = 'card' and "payments"."tip_cents" <= "payments"."amount_cents"));--> statement-breakpoint
-ALTER TABLE "payments" ADD CONSTRAINT "payments_provider_ref" CHECK ("payments"."provider_ref" is null or (char_length("payments"."provider_ref") <= 40 and "payments"."provider_ref" ~ '^[A-Za-z0-9 /-]*$' and char_length(regexp_replace("payments"."provider_ref", '[^0-9]', '', 'g')) < 13));
+ALTER TABLE "payments" ADD CONSTRAINT "payments_provider_ref" CHECK ("payments"."provider_ref" is null or (char_length("payments"."provider_ref") <= 40 and "payments"."provider_ref" ~ '^[A-Za-z0-9 /-]*$' and char_length(regexp_replace("payments"."provider_ref", '[^0-9]', '', 'g')) < 13));--> statement-breakpoint
+ALTER TABLE "sales" ADD CONSTRAINT "sales_review_flags" CHECK ("sales"."review_flags" <@ array['vat_differs', 'old_prices', 'rounding_differs']::text[]);

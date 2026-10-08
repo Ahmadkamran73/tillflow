@@ -137,7 +137,7 @@ describe("ops.record_sale with split payments", () => {
           ["22023"],
         ],
         [[{ method: "cash", amount: 700, tendered: 800, change: 50 }], ["22023"]],
-        [[{ method: "card", amount: 700, tendered: 800, change: 100 }], ["23514"]],
+        [[{ method: "card", amount: 700, tendered: 800, change: 100 }], ["22023", "23514"]],
         [[{ method: "cash", amount: 700, tendered: 700, change: 0, tip: 10 }], ["23514"]],
         [[{ method: "card", amount: 700, tendered: 700, change: 0, tip: 701 }], ["23514"]],
         [[], ["22023"]],
@@ -167,7 +167,7 @@ describe("ops.record_sale with split payments", () => {
                 { method: "card", amount: 700, tendered: 700, change: 0, reference: ref },
               ]),
             ),
-          ["23514"],
+          ["22023", "23514"],
         );
       }
       const ok = sale(a, vid, pid, [
@@ -213,6 +213,89 @@ describe("ops.record_sale with split payments", () => {
           ]),
         ),
       ).toBe("created");
+    }));
+});
+
+describe("rounding in ops.record_sale (merged with the sale-sum checks)", () => {
+  it("accepts the rounding_differs review flag, refuses an unknown flag", () =>
+    inWorld(async (ctx) => {
+      const a = ctx.world.a;
+      const { pid, vid } = await seedProduct(ctx, a.orgId);
+      const pay = [{ method: "cash", amount: 700, tendered: 700, change: 0 }];
+      const ok = sale(a, vid, pid, pay, { review_flags: ["rounding_differs"] });
+      expect(await record(ctx, ok)).toBe("created");
+      expect(
+        (await ctx.sql`select review_flags from sales where id = ${ok.sale.id}`)[0]!.review_flags,
+      ).toEqual(["rounding_differs"]);
+      await ctx.denied(
+        () => record(ctx, sale(a, vid, pid, pay, { review_flags: ["bogus"], receipt_seq: 2 })),
+        ["22023", "23514"],
+      );
+    }));
+
+  it("a rounded cash share ends in 0 or 5; an unrounded sale (shop does not round) may end anywhere", () =>
+    inWorld(async (ctx) => {
+      const a = ctx.world.a;
+      const { pid, vid } = await seedProduct(ctx, a.orgId);
+      // 7.00 total, card 2.03 + cash 4.97 -> rounded to 4.95 (-2c): due 6.98, cash taken ends in 5
+      const rounded = sale(
+        a,
+        vid,
+        pid,
+        [
+          { method: "card", amount: 203, tendered: 203, change: 0 },
+          { method: "cash", amount: 495, tendered: 500, change: 5 },
+        ],
+        { cash_rounding: -2, amount_due: 698, client_due: 698, receipt_seq: 1 },
+      );
+      expect(await record(ctx, rounded)).toBe("created");
+      // The same sale claiming a rounded cash amount that does not end in 0 or 5 is refused.
+      await ctx.denied(
+        () =>
+          record(
+            ctx,
+            sale(
+              a,
+              vid,
+              pid,
+              [
+                { method: "card", amount: 203, tendered: 203, change: 0 },
+                { method: "cash", amount: 496, tendered: 500, change: 4 },
+              ],
+              { cash_rounding: -1, amount_due: 699, client_due: 699, receipt_seq: 2 },
+            ),
+          ),
+        ["22023"],
+      );
+      // A shop that does not round: exact cash, rounding 0, any cents.
+      const exact = sale(
+        a,
+        vid,
+        pid,
+        [{ method: "cash", amount: 700, tendered: 1000, change: 300 }],
+        {
+          receipt_seq: 3,
+        },
+      );
+      expect(await record(ctx, exact)).toBe("created");
+    }));
+
+  it("the sum of the payments must equal the amount due, with rounding included", () =>
+    inWorld(async (ctx) => {
+      const a = ctx.world.a;
+      const { pid, vid } = await seedProduct(ctx, a.orgId);
+      await ctx.denied(
+        () =>
+          record(
+            ctx,
+            sale(a, vid, pid, [{ method: "cash", amount: 700, tendered: 700, change: 0 }], {
+              cash_rounding: 2,
+              amount_due: 702,
+              client_due: 702,
+            }),
+          ),
+        ["22023"],
+      );
     }));
 });
 

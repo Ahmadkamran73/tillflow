@@ -49,6 +49,13 @@ export const sales = pgTable(
     amountDueCents: integer("amount_due_cents").notNull(),
     /** What the till showed; within 1c of `amountDueCents` or the sale is rejected. */
     clientDueCents: integer("client_due_cents").notNull(),
+    /** The VAT the till printed (newer tills only); compared with `vatCents`, never trusted. */
+    clientVatCents: integer("client_vat_cents"),
+    /** Saved but worth a manager's look: vat_differs, old_prices, rounding_differs. Set at insert only. */
+    reviewFlags: text("review_flags")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
     createdAt: createdAtCol(),
   },
   (t) => [
@@ -69,6 +76,10 @@ export const sales = pgTable(
     check("sales_mode", sql`${t.mode} in ('eat_in', 'take_away')`),
     check("sales_receipt_seq", sql`${t.receiptSeq} between 1 and 99999999`),
     check("sales_due_close", sql`abs(${t.amountDueCents} - ${t.clientDueCents}) <= 1`),
+    check(
+      "sales_review_flags",
+      sql`${t.reviewFlags} <@ array['vat_differs', 'old_prices', 'rounding_differs']::text[]`,
+    ),
   ],
 );
 

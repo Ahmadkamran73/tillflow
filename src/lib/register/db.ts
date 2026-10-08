@@ -31,6 +31,8 @@ export type LocalSale = {
   roundCash?: boolean;
   /** What the till charged; the server recalculates and compares (within 1c). */
   expectedDueCents: number;
+  /** The VAT the till printed; the server compares it and flags a difference (sales from 2026-10 on). */
+  expectedVatCents?: number;
   /** When this till last pulled the catalogue: lets the server price at what the till showed. */
   catalogAsOf?: string;
   syncState: SyncState;

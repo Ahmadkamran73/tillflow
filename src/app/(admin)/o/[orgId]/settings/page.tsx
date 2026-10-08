@@ -39,14 +39,14 @@ export default async function SettingsPage({ params }: { params: Promise<{ orgId
       </ul>
       <p className="surface-panel flex flex-wrap items-center justify-between gap-3 px-5 py-3">
         <span>
-          Two-step verification: <strong>{user.hasVerifiedFactor ? "On" : "Off"}</strong>
+          {t("mfa.status")} <strong>{user.hasVerifiedFactor ? t("mfa.on") : t("mfa.off")}</strong>
         </span>
         {user.hasVerifiedFactor ? null : (
           <Link
             href={`/mfa?next=${encodeURIComponent(`/o/${orgId}/settings`)}`}
             className="inline-flex min-h-12 items-center font-medium underline underline-offset-4"
           >
-            Set it up
+            {t("mfa.setUp")}
           </Link>
         )}
       </p>

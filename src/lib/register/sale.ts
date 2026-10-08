@@ -26,6 +26,7 @@ export async function completeSale(
     roundCash?: boolean;
     /** What the shop is paid for the sale: total plus the 5c rounding on the cash share. */
     expectedDueCents: number;
+    expectedVatCents?: number;
   },
 ): Promise<LocalSale> {
   return db.transaction("rw", db.meta, db.sales, async () => {
@@ -46,6 +47,7 @@ export async function completeSale(
       tenders: input.tenders,
       roundCash: input.roundCash ?? true,
       expectedDueCents: input.expectedDueCents,
+      expectedVatCents: input.expectedVatCents,
       catalogAsOf: typeof pulledAt === "string" ? pulledAt : undefined,
       syncState: "pending",
       attempts: 0,
