@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { LocalSale, RegisterDb } from "@/lib/register/db";
+import { toWireTender } from "@/lib/register/tender-input";
 import { MAX_BATCH, syncResponse, type SyncSale } from "./protocol";
 
 // The device side of docs/PLAN.md section 9. Runs in the page and in the service worker, so it
@@ -62,7 +63,8 @@ const toWire = (s: LocalSale): SyncSale => ({
     discount: l.discount,
   })),
   basketDiscount: s.cart.discount,
-  tenderedCents: s.tenderedCents,
+  tenders: s.tenders.map(toWireTender),
+  roundCash: s.roundCash ?? true,
   expectedDueCents: s.expectedDueCents,
   expectedVatCents: s.expectedVatCents,
 });

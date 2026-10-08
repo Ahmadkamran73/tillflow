@@ -1,7 +1,8 @@
 import { z } from "zod";
-import { discountNeedsOverride } from "@/lib/money";
+import { discountNeedsOverride, settleTenders, type Settlement } from "@/lib/money";
 import { lineTotal, unitWithModifiers, type Cart, type PricedCart } from "@/lib/register/cart";
 import { SaleError } from "@/lib/register/sale-input";
+import { stripReferences } from "@/lib/register/tender-input";
 import { buildSaleRecord } from "./sale-record";
 import { syncSale, type SyncReason, type SyncResult, type SyncSale } from "./protocol";
 
@@ -22,6 +23,15 @@ export type SyncCtx = {
   registerId: string;
   /** A discount above this share (basis points) of a line or the sale needs a manager's approval. */
   discountOverrideBp: number;
+  /** The payment types of the till's location (archived ones too: an offline sale may use one). */
+  tenderTypes: { id: string; method: string }[];
+  /** Tips are only taken in cafés and restaurants. */
+  tipsAllowed: boolean;
+  /**
+   * The shop's CURRENT rounding setting (business-type preset). Never used to price: a sale is priced
+   * with its own `roundCash`. Only compared with it, to leave an audit note when they differ.
+   */
+  shopRoundCash: boolean;
   /**
    * TRUSTED callers only (the back office re-running a held sale: the signed-in manager). The sync
    * route for tills never sets this; a till can only present an approvalId.
@@ -46,7 +56,7 @@ export const VAT_TOLERANCE_CENTS = 0;
 export const LATE_SYNC_MS = 60 * 60_000;
 
 /** Saved, but worth a manager's look. Keep in step with the sales_review_flags check in SQL. */
-export type ReviewFlag = "vat_differs" | "old_prices";
+export type ReviewFlag = "vat_differs" | "old_prices" | "rounding_differs";
 
 /** A real UUID, or undefined: an id that only looks like one would make the database throw and block the till. */
 const uuidOfField = (raw: unknown, field: string): string | undefined => {
@@ -83,6 +93,12 @@ const isDeterministic = (e: unknown) =>
   (typeof (e as { code?: unknown })?.code === "string" &&
     /^(22|23|42501)/.test((e as { code: string }).code));
 
+const tenderLine = (t: SyncSale["tenders"][number]) => ({
+  method: t.method,
+  amount: t.amountCents,
+  tip: t.tipCents,
+});
+
 type Rejection = { reason: SyncReason; detail: Record<string, unknown> };
 
 /** Prices a sale at each plausible catalogue moment and returns the first that matches the till. */
@@ -100,11 +116,15 @@ async function priceMatching(sale: SyncSale, deps: SyncDeps) {
   let firstError: Rejection | undefined;
   let firstPriced: number | undefined;
   // The first moment whose total matches, kept in case no moment matches the till's VAT as well.
-  let dueOnly: { at: Date; cart: Cart; priced: PricedCart } | undefined;
+  let dueOnly: { at: Date; cart: Cart; priced: PricedCart; settlement: Settlement } | undefined;
   for (const at of moments) {
     try {
       const r = await deps.priceAt(sale, at);
-      const due = r.priced.basket.amountDue;
+      // The basket is priced with no cash rounding; rounding applies to the cash share only.
+      const settlement = settleTenders(r.priced.basket.total, sale.tenders.map(tenderLine), {
+        roundCash: sale.roundCash,
+      });
+      const due = settlement.amountDue;
       if (Math.abs(due - sale.expectedDueCents) <= TOLERANCE_CENTS) {
         // A VAT category can change with no price change: prefer the moment that also gives the
         // VAT the receipt printed, so the books agree with it whenever they can.
@@ -112,9 +132,9 @@ async function priceMatching(sale: SyncSale, deps: SyncDeps) {
           sale.expectedVatCents === undefined ||
           Math.abs(r.priced.basket.vatTotal - sale.expectedVatCents) <= VAT_TOLERANCE_CENTS
         ) {
-          return { ok: true as const, at, atNow: at === now, ...r };
+          return { ok: true as const, at, atNow: at === now, settlement, ...r };
         }
-        dueOnly ??= { at, ...r };
+        dueOnly ??= { at, settlement, ...r };
         continue;
       }
       firstPriced ??= due;
@@ -184,7 +204,8 @@ async function processOne(raw: unknown, ctx: SyncCtx, deps: SyncDeps): Promise<S
       user_id: uuidOfField(raw, "cashierUserId") ?? null,
       reason: "invalid",
       detail: {},
-      payload: { invalid: true, raw: storable({ raw }) },
+      // A reference that failed validation may be the very card number we refuse to keep.
+      payload: { invalid: true, raw: storable({ raw: stripReferences(raw) }) },
     });
     return { id, status: "rejected", reason: "invalid" };
   }
@@ -199,7 +220,8 @@ async function processOne(raw: unknown, ctx: SyncCtx, deps: SyncDeps): Promise<S
       reason: r.reason,
       detail: r.detail,
       // Cart inputs only: the VAT invoice (customer data) is never part of a sale on the wire.
-      payload: storable({ ...sale }),
+      // References are never kept in a rejection (they are for the payment row only).
+      payload: storable(stripReferences({ ...sale })),
     });
     return { id: sale.id, status: "rejected", reason: r.reason };
   };
@@ -238,12 +260,23 @@ async function processOne(raw: unknown, ctx: SyncCtx, deps: SyncDeps): Promise<S
     });
   }
 
-  const due = match.priced.basket.amountDue;
-  if (sale.tenderedCents < due) {
-    return reject({
-      reason: "short_tender",
-      detail: { tenderedCents: sale.tenderedCents, dueCents: due },
-    });
+  const settlement: Settlement = match.settlement;
+  const known = new Map(ctx.tenderTypes.map((t) => [t.id, t.method]));
+  if (sale.tenders.some((t) => t.typeId !== null && known.get(t.typeId) !== t.method)) {
+    return reject({ reason: "unknown_tender", detail: {} });
+  }
+  if (!settlement.ok) {
+    return reject(
+      settlement.error === "short"
+        ? {
+            reason: "short_tender",
+            detail: { balanceCents: settlement.balance, dueCents: settlement.amountDue },
+          }
+        : { reason: "tender_mismatch", detail: { error: settlement.error } },
+    );
+  }
+  if (settlement.tips > 0 && !ctx.tipsAllowed) {
+    return reject({ reason: "tender_mismatch", detail: { error: "tips_not_allowed" } });
   }
 
   const reviewFlags: ReviewFlag[] = [];
@@ -254,6 +287,9 @@ async function processOne(raw: unknown, ctx: SyncCtx, deps: SyncDeps): Promise<S
     reviewFlags.push("vat_differs");
   }
   if (await cheaperThanItShouldBe(sale, match, deps)) reviewFlags.push("old_prices");
+  // Priced with the mode it was rung up with (never the shop's current one); if the shop's setting
+  // has changed since, the sale still syncs unchanged and a manager sees it under Needs attention.
+  if (sale.roundCash !== ctx.shopRoundCash) reviewFlags.push("rounding_differs");
 
   let outcome;
   try {
@@ -267,6 +303,7 @@ async function processOne(raw: unknown, ctx: SyncCtx, deps: SyncDeps): Promise<S
         sale,
         cart: match.cart,
         priced: match.priced,
+        settlement,
         pricedAsOf: match.at,
         reviewFlags,
       }),

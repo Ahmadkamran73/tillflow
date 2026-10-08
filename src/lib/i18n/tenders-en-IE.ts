@@ -1,0 +1,30 @@
+/** Strings for Settings > Payment types and the sales page's totals by payment type (back office). */
+export const tendersEnIE = {
+  "tenders.title": "Payment types",
+  "tenders.body":
+    "The ways your till takes payment. Card means a payment taken on your own card terminal: Tillflow only records the amount, never card details. Add one per terminal (for example Card - AIB terminal).",
+  "tenders.cashNote": "Cash is built in and cannot be changed or removed.",
+  "tenders.method": "Type",
+  "tenders.method.card": "Card (your own terminal)",
+  "tenders.method.voucher": "Voucher",
+  "tenders.method.cash": "Cash",
+  "tenders.label": "Name on the till",
+  "tenders.add": "Add payment type",
+  "tenders.rename": "Rename",
+  "tenders.renameFor": "New name for {label}",
+  "tenders.archive": "Remove from till",
+  "tenders.restore": "Put back on till",
+  "tenders.archived": "Removed from the till",
+  "tenders.saved": "Saved.",
+  "tenders.invalid": "Enter a name of 1 to 40 characters.",
+  "tenders.error": "Could not save. Try again.",
+  "tenders.list": "Payment types",
+  "sales.byTender": "Today by payment type",
+  "sales.byTenderNote":
+    "Compare the card total with your card terminal's end-of-day report. Tips are on top of the sale amount.",
+  "sales.byTenderNone": "No payments yet today.",
+  "sales.tender.type": "Payment type",
+  "sales.tender.count": "Payments",
+  "sales.tender.amount": "Amount",
+  "sales.tender.tips": "Tips",
+} as const;

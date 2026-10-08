@@ -9,10 +9,30 @@ import { IRISH_RATES } from "./money/irish-rates";
 const NOW = new Date("2026-10-06T12:00:00.000Z");
 const V1 = "00000000-0000-4000-8000-000000000001";
 const P1 = "00000000-0000-4000-8000-0000000000a1";
+const CASH_TYPE = "00000000-0000-4000-8000-0000000000c1";
+const CARD_TYPE = "00000000-0000-4000-8000-0000000000c2";
+const VOUCHER_TYPE = "00000000-0000-4000-8000-0000000000c3";
+const TYPE = { cash: CASH_TYPE, card: CARD_TYPE, voucher: VOUCHER_TYPE };
+let tn = 0;
+const tender = (method: "cash" | "card" | "voucher", amountCents: number, extra = {}) => ({
+  id: `00000000-0000-7000-9000-${String(++tn).padStart(12, "0")}`,
+  typeId: TYPE[method],
+  method,
+  amountCents,
+  tipCents: 0,
+  ...extra,
+});
 const ctx = {
   orgId: "00000000-0000-4000-8000-0000000000f1",
   registerId: "00000000-0000-4000-8000-0000000000e1",
   discountOverrideBp: 1000,
+  tenderTypes: [
+    { id: CASH_TYPE, method: "cash" },
+    { id: CARD_TYPE, method: "card" },
+    { id: VOUCHER_TYPE, method: "voucher" },
+  ],
+  tipsAllowed: false,
+  shopRoundCash: true,
 };
 const CASHIER = "00000000-0000-4000-8000-0000000000d1";
 const MANAGER = "00000000-0000-4000-8000-0000000000d2";
@@ -32,7 +52,8 @@ const sale = (over: Partial<SyncSale> = {}): SyncSale => ({
   completedAt: NOW.toISOString(),
   mode: "eat_in",
   lines: [{ variantId: V1, qty: 1, modifierIds: [] }],
-  tenderedCents: 2000,
+  tenders: [tender("cash", 2000)],
+  roundCash: true,
   expectedDueCents: 1235, // €12.34 rounds to €12.35 for cash
   ...over,
 });
@@ -161,7 +182,7 @@ describe("processBatch", () => {
 
   it("rejects cash that does not cover the amount due", async () => {
     const { d, recorded } = deps(() => 1234);
-    const [r] = await processBatch([sale({ tenderedCents: 1000 })], ctx, d);
+    const [r] = await processBatch([sale({ tenders: [tender("cash", 1000)] })], ctx, d);
     expect(r).toMatchObject({ status: "rejected", reason: "short_tender" });
     expect(recorded).toHaveLength(0);
   });
@@ -293,9 +314,10 @@ describe("manager override and cashier attribution (step 1.7)", () => {
       ...over,
     });
     const cart = buildServerCart(base, rowsAt(1234));
-    const due = priceCart(cart, { country: "IE", date: "2026-10-06", rates: IRISH_RATES }).basket
-      .amountDue;
-    return { ...base, expectedDueCents: due, tenderedCents: 5000 };
+    // Cash-only: the rounding is on the whole total.
+    const due = priceCart(cart, { country: "IE", date: "2026-10-06", rates: IRISH_RATES }, "cash")
+      .basket.amountDue;
+    return { ...base, expectedDueCents: due, tenders: [tender("cash", 5000)] };
   };
 
   it("records the sale under the cashier who rang it up", async () => {
@@ -400,6 +422,242 @@ describe("manager override and cashier attribution (step 1.7)", () => {
     await processBatch([named, nameless], ctx, d);
     expect(rejections[0]!.user_id).toBe(CASHIER);
     expect(rejections[1]!.user_id).toBeNull();
+  });
+});
+
+describe("tenders (step 2.1)", () => {
+  // The item is 12.34. Card and voucher are exact; the 5c rounding is on the cash share only.
+  const split = (tenders: ReturnType<typeof tender>[], due: number) =>
+    sale({ tenders, expectedDueCents: due });
+
+  it("accepts card only, exact, with no rounding and a recorded reference", async () => {
+    const { d, recorded } = deps(() => 1234);
+    const s = split([tender("card", 1234, { reference: "AUTH 123456" })], 1234);
+    expect((await processBatch([s], ctx, d))[0]!.status).toBe("created");
+    const rec = recorded[0] as {
+      sale: Record<string, number>;
+      payments: Record<string, unknown>[];
+    };
+    expect(rec.sale).toMatchObject({ amount_due: 1234, cash_rounding: 0 });
+    expect(rec.payments).toEqual([
+      {
+        type_id: CARD_TYPE,
+        method: "card",
+        amount: 1234,
+        tendered: 1234,
+        change: 0,
+        tip: 0,
+        reference: "AUTH 123456",
+      },
+    ]);
+  });
+
+  it("a shop that does not round cash: exact cash, no rounding line, a rounded till total is refused", async () => {
+    const exact = ctx;
+    const { d, recorded } = deps(() => 1234);
+    const ok = await processBatch(
+      [{ ...split([tender("cash", 2000)], 1234), roundCash: false }],
+      exact,
+      d,
+    );
+    expect(ok[0]!.status).toBe("created");
+    const rec = recorded[0] as { sale: Record<string, number>; payments: Record<string, number>[] };
+    expect(rec.sale).toMatchObject({ amount_due: 1234, cash_rounding: 0 });
+    expect(rec.payments[0]).toMatchObject({ amount: 1234, tendered: 2000, change: 766 });
+    // The sale's own mode decides, not the shop's setting at sync time: a till that did not round
+    // but claims a rounded total is refused, and one that rounded is accepted.
+    const off = await processBatch(
+      [{ ...split([tender("cash", 2000)], 1237), roundCash: false }],
+      exact,
+      d,
+    );
+    expect(off[0]).toMatchObject({ status: "rejected", reason: "price_mismatch" });
+    const rounded = await processBatch([split([tender("cash", 2000)], 1235)], exact, d);
+    expect(rounded[0]!.status).toBe("created"); // no flag = rounded, as before
+  });
+
+  it("accepts card + cash: rounding only on the cash share, change only from cash", async () => {
+    const { d, recorded } = deps(() => 1234);
+    // card 5.00 -> cash share 7.34 rounds to 7.35; 10.00 handed over -> change 2.65
+    const s = split([tender("card", 500), tender("cash", 1000)], 1235);
+    expect((await processBatch([s], ctx, d))[0]!.status).toBe("created");
+    const rec = recorded[0] as { sale: Record<string, number>; payments: Record<string, number>[] };
+    expect(rec.sale).toMatchObject({ amount_due: 1235, cash_rounding: 1 });
+    expect(rec.payments[1]).toMatchObject({
+      method: "cash",
+      amount: 735,
+      tendered: 1000,
+      change: 265,
+    });
+  });
+
+  it("accepts voucher + card + cash in any order", async () => {
+    const { d } = deps(() => 1234);
+    const s = split([tender("cash", 600), tender("voucher", 300), tender("card", 400)], 1235);
+    expect((await processBatch([s], ctx, d))[0]!.status).toBe("created");
+  });
+
+  it("rejects card or voucher above the total", async () => {
+    const { d, recorded } = deps(() => 1234);
+    const r = await processBatch([split([tender("card", 1300)], 1234)], ctx, d);
+    expect(r[0]).toMatchObject({ status: "rejected", reason: "tender_mismatch" });
+    expect(recorded).toHaveLength(0);
+  });
+
+  it("rejects payments that do not cover the amount due", async () => {
+    const { d } = deps(() => 1234);
+    const r = await processBatch([split([tender("card", 1000)], 1234)], ctx, d);
+    expect(r[0]).toMatchObject({ status: "rejected", reason: "short_tender" });
+  });
+
+  it("rejects a till total that differs from the server's split total", async () => {
+    const { d } = deps(() => 1234);
+    // card only: the server's due is 1234, not the cash-rounded 1235
+    const r = await processBatch([split([tender("card", 1234)], 1240)], ctx, d);
+    expect(r[0]).toMatchObject({ status: "rejected", reason: "price_mismatch" });
+  });
+
+  it("rejects a payment type that is not this shop's, or has the wrong method", async () => {
+    const { d, rejections } = deps(() => 1234);
+    const other = tender("card", 1234, { typeId: "00000000-0000-4000-8000-0000000000ff" });
+    const wrong = tender("card", 1234, { typeId: CASH_TYPE });
+    for (const t of [other, wrong]) {
+      const [r] = await processBatch([split([t], 1234)], ctx, d);
+      expect(r).toMatchObject({ status: "rejected", reason: "unknown_tender" });
+    }
+    expect(rejections).toHaveLength(2);
+  });
+
+  it("tips: stored on the card, outside the total, only where the shop takes tips", async () => {
+    const { d, recorded } = deps(() => 1234);
+    const tipped = split([tender("card", 1234, { tipCents: 150 })], 1234);
+    const no = await processBatch([tipped], ctx, d);
+    expect(no[0]).toMatchObject({ status: "rejected", reason: "tender_mismatch" });
+    const yes = await processBatch(
+      [{ ...tipped, id: sale().id }],
+      { ...ctx, tipsAllowed: true },
+      d,
+    );
+    expect(yes[0]!.status).toBe("created");
+    const rec = recorded[0] as { sale: Record<string, number>; payments: Record<string, number>[] };
+    expect(rec.sale.amount_due).toBe(1234);
+    expect(rec.payments[0]).toMatchObject({ amount: 1234, tip: 150 });
+  });
+
+  it("refuses a tip on cash or above the card amount at the door (invalid)", async () => {
+    const { d } = deps(() => 1234);
+    const cashTip = split([tender("cash", 2000, { tipCents: 5 })], 1235);
+    const big = split([tender("card", 1234, { tipCents: 1235 })], 1234);
+    const results = await processBatch([cashTip, big], { ...ctx, tipsAllowed: true }, d);
+    expect(results[0]).toMatchObject({ status: "rejected", reason: "invalid" });
+    expect(results[1]).toMatchObject({ status: "rejected", reason: "tender_mismatch" });
+  });
+
+  it("still accepts a sale queued with the old single tenderedCents", async () => {
+    const { d, recorded } = deps(() => 1234);
+    const { tenders: _t, ...rest } = sale();
+    void _t;
+    const legacy = { ...rest, tenderedCents: 2000 };
+    expect((await processBatch([legacy], ctx, d))[0]!.status).toBe("created");
+    const rec = recorded[0] as { payments: Record<string, unknown>[] };
+    expect(rec.payments).toEqual([
+      { type_id: null, method: "cash", amount: 1235, tendered: 2000, change: 765 },
+    ]);
+  });
+
+  it("never keeps a card-number-like reference in a stored rejection", async () => {
+    const { d, rejections } = deps(() => 1234);
+    const bad = sale({ tenders: [tender("card", 1234, { reference: "4111111111111111" })] });
+    const [r] = await processBatch([bad], ctx, d);
+    expect(r).toMatchObject({ status: "rejected", reason: "invalid" });
+    expect(JSON.stringify(rejections[0])).not.toContain("4111111111111111");
+  });
+});
+
+describe("rounding mode of the sale vs the shop's current setting", () => {
+  const cashSale = (roundCash: boolean | unknown, due: number) =>
+    ({ ...sale({ expectedDueCents: due }), roundCash }) as SyncSale;
+  const saleOf = (recorded: unknown[]) => (recorded[0] as { sale: Record<string, unknown> }).sale;
+
+  it("matching: syncs with no flag", async () => {
+    const { d, recorded } = deps(() => 1234);
+    const [r] = await processBatch([cashSale(true, 1235)], ctx, d);
+    expect(r!.status).toBe("created");
+    expect(saleOf(recorded).review_flags).toEqual([]);
+    const exact = deps(() => 1234);
+    const [e] = await processBatch(
+      [cashSale(false, 1234)],
+      { ...ctx, shopRoundCash: false },
+      exact.d,
+    );
+    expect(e!.status).toBe("created");
+    expect(saleOf(exact.recorded).review_flags).toEqual([]);
+  });
+
+  it("mismatch: still syncs with its own mode, flagged rounding_differs for a manager", async () => {
+    // Rung up exact (shop did not round then); the shop's setting is now "round".
+    const a = deps(() => 1234);
+    const [r1] = await processBatch([cashSale(false, 1234)], { ...ctx, shopRoundCash: true }, a.d);
+    expect(r1!.status).toBe("created");
+    expect(saleOf(a.recorded)).toMatchObject({
+      amount_due: 1234,
+      cash_rounding: 0,
+      review_flags: ["rounding_differs"],
+    });
+
+    // Rung up rounded; the shop's setting is now "exact".
+    const b = deps(() => 1234);
+    const [r2] = await processBatch([cashSale(true, 1235)], { ...ctx, shopRoundCash: false }, b.d);
+    expect(r2!.status).toBe("created");
+    expect(saleOf(b.recorded)).toMatchObject({
+      amount_due: 1235,
+      cash_rounding: 1,
+      review_flags: ["rounding_differs"],
+    });
+  });
+
+  it("the server still does the rounding: a till's own total or flag cannot move the amount", async () => {
+    // The sale says "round" but claims the unrounded total: the server computes 1235, 1c off is
+    // tolerated, the stored amount is the server's.
+    const { d, recorded } = deps(() => 1234);
+    const [r] = await processBatch([cashSale(true, 1234)], ctx, d);
+    expect(r!.status).toBe("created");
+    expect(saleOf(recorded).amount_due).toBe(1235);
+    // 2c away from what its own mode gives is refused, and a refused sale is not flagged.
+    const bad = deps(() => 1234);
+    const [x] = await processBatch([cashSale(true, 1237)], ctx, bad.d);
+    expect(x).toMatchObject({ status: "rejected", reason: "price_mismatch" });
+    expect(bad.recorded).toHaveLength(0);
+  });
+
+  it("the flag sits beside the other review flags", async () => {
+    const { d, recorded } = deps(() => 1234);
+    // Till VAT is 1c off (231 -> 230 is within tolerance 0? it is not: flagged) and the mode differs.
+    await processBatch(
+      [{ ...cashSale(false, 1234), expectedVatCents: 230 }],
+      { ...ctx, shopRoundCash: true },
+      d,
+    );
+    expect(saleOf(recorded).review_flags).toEqual(["vat_differs", "rounding_differs"]);
+  });
+
+  it("roundCash must be a real boolean: anything else is an invalid sale", async () => {
+    const { d, recorded } = deps(() => 1234);
+    const results = await processBatch(
+      [cashSale("false", 1234), cashSale(0, 1234), cashSale(null, 1234)],
+      ctx,
+      d,
+    );
+    expect(results.map((r) => [r.status, r.reason])).toEqual([
+      ["rejected", "invalid"],
+      ["rejected", "invalid"],
+      ["rejected", "invalid"],
+    ]);
+    expect(recorded).toHaveLength(0);
+    // Missing = a sale queued before the flag existed = rounded.
+    const { roundCash: _r, ...legacy } = cashSale(true, 1235);
+    void _r;
+    expect((await processBatch([legacy], ctx, d))[0]!.status).toBe("created");
   });
 });
 

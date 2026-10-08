@@ -13,6 +13,16 @@ import {
   pendingSales,
 } from "@/lib/sync/outbox";
 
+const CASH_2000 = [
+  {
+    id: "00000000-0000-7000-9000-000000000001",
+    typeId: null,
+    method: "cash" as const,
+    amountCents: 2000,
+    tipCents: 0,
+    label: "Cash",
+  },
+];
 const ORG = "00000000-0000-4000-8000-0000000000f1";
 const REG = "00000000-0000-4000-8000-0000000000e1";
 const V1 = "00000000-0000-4000-8000-000000000001";
@@ -46,7 +56,13 @@ const CASHIER = "00000000-0000-4000-8000-0000000000d1";
 const sell = (n = 1) =>
   Promise.all(
     Array.from({ length: n }, () =>
-      completeSale(db, { registerId: REG, cashierUserId: CASHIER, cart, tenderedCents: 2000, expectedDueCents: 1235 }),
+      completeSale(db, {
+        registerId: REG,
+        cashierUserId: CASHIER,
+        cart,
+        tenders: CASH_2000,
+        expectedDueCents: 1235,
+      }),
     ),
   );
 
@@ -90,14 +106,14 @@ describe("completeSale (the outbox write)", () => {
       cashierUserId: CASHIER,
       registerId: REG,
       cart,
-      tenderedCents: 2000,
+      tenders: CASH_2000,
       expectedDueCents: 1,
     });
     const b = await completeSale(db, {
       cashierUserId: CASHIER,
       registerId: REG,
       cart,
-      tenderedCents: 2000,
+      tenders: CASH_2000,
       expectedDueCents: 1,
     });
     expect([a.receiptSeq, b.receiptSeq]).toEqual([41, 42]);
@@ -113,7 +129,7 @@ describe("drainOutbox", () => {
         cashierUserId: CASHIER,
         registerId: REG,
         cart,
-        tenderedCents: 2000,
+        tenders: CASH_2000,
         expectedDueCents: 1235,
       });
       await new Promise((r) => setTimeout(r, 1));
@@ -177,7 +193,7 @@ describe("drainOutbox", () => {
         cashierUserId: CASHIER,
         registerId: REG,
         cart,
-        tenderedCents: 2000,
+        tenders: CASH_2000,
         expectedDueCents: 1235,
       });
       await new Promise((r) => setTimeout(r, 1));
@@ -216,7 +232,7 @@ describe("drainOutbox", () => {
         cashierUserId: CASHIER,
         registerId: REG,
         cart,
-        tenderedCents: 2000,
+        tenders: CASH_2000,
         expectedDueCents: 1235,
       });
       await new Promise((r) => setTimeout(r, 1));
@@ -264,10 +280,14 @@ describe("drainOutbox", () => {
         "lines",
         "mode",
         "receiptSeq",
-        "tenderedCents",
+        "roundCash",
+        "tenders",
       ].sort(),
     );
     expect(sale.lines).toEqual([{ variantId: V1, qty: 1, modifierIds: [] }]);
+    expect(sale.roundCash).toBe(true); // sales queued before the flag always rounded
+    // The label is for the till's receipts only; it never goes to the server.
+    expect((sale.tenders as Record<string, unknown>[])[0]).not.toHaveProperty("label");
   });
 
   it("drops synced sales after 30 days, never pending or rejected ones", async () => {
@@ -276,7 +296,7 @@ describe("drainOutbox", () => {
       cashierUserId: CASHIER,
       registerId: REG,
       cart,
-      tenderedCents: 2000,
+      tenders: CASH_2000,
       expectedDueCents: 1,
     });
     await db.sales.bulkAdd([
@@ -351,6 +371,11 @@ describe("Dexie upgrade from v2", () => {
     const upgraded = new RegisterDb(name.replace("tillflow-", ""));
     const rows = await upgraded.sales.toArray();
     expect(rows[0]).toMatchObject({ syncState: "pending", attempts: 0, expectedDueCents: 1235 });
+    // v5: the one cash amount became a list of payments.
+    expect(rows[0]!.tenders).toEqual([
+      expect.objectContaining({ method: "cash", amountCents: 2000, typeId: null, label: "Cash" }),
+    ]);
+    expect(rows[0]).not.toHaveProperty("tenderedCents");
     expect(await pendingSales(upgraded)).toHaveLength(1);
     upgraded.close();
     await Dexie.delete(name);

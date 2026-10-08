@@ -1,6 +1,6 @@
 import type { ReceiptOptions } from "@/config/business-type-presets";
 import { t } from "@/lib/i18n";
-import { changeDue, formatCents, lineDiscountOf, localDate } from "@/lib/money";
+import { formatCents, lineDiscountOf, localDate, settleTenders } from "@/lib/money";
 import { lineTotal, unitWithModifiers, type PricedCart } from "./cart";
 import type { ReceiptSale } from "./db";
 import { receiptNo } from "./sale";
@@ -41,7 +41,16 @@ export type Receipt = {
   totalCents: number;
   roundingCents: number;
   dueCents: number;
-  tenderedCents: number;
+  /** One per payment: cash shows what was handed over; card and voucher what they settled. */
+  payments: {
+    label: string;
+    method: "cash" | "card" | "voucher";
+    cents: number;
+    /** Card tip, outside the total. */
+    tipCents: number;
+    /** Terminal receipt or voucher number the cashier typed; never a card number. */
+    reference?: string;
+  }[];
   changeCents: number;
   footer: string | null;
   customer?: { name: string; address: string; vatNumber: string };
@@ -74,6 +83,13 @@ export function buildReceipt(args: {
 }): Receipt {
   const { sale, priced, header, options } = args;
   const { basket } = priced;
+  // `priced` has no cash rounding; it applies to the cash share of the payments only.
+  const settlement = settleTenders(
+    basket.total,
+    sale.tenders.map((t) => ({ method: t.method, amount: t.amountCents, tip: t.tipCents })),
+    { roundCash: sale.roundCash ?? true },
+  );
+  if (!settlement.ok) throw new RangeError(`payments do not settle the sale: ${settlement.error}`);
   const when = new Date(sale.completedAt);
   const fmt = new Intl.DateTimeFormat("en-IE", {
     timeZone: header.timezone,
@@ -129,10 +145,16 @@ export function buildReceipt(args: {
       grossCents: r.gross,
     })),
     totalCents: basket.total,
-    roundingCents: basket.cashRounding,
-    dueCents: basket.amountDue,
-    tenderedCents: sale.tenderedCents,
-    changeCents: changeDue(sale.tenderedCents, basket.amountDue),
+    roundingCents: settlement.rounding,
+    dueCents: settlement.amountDue,
+    payments: sale.tenders.map((t) => ({
+      label: t.label,
+      method: t.method,
+      cents: t.amountCents,
+      tipCents: t.tipCents,
+      ...(t.reference ? { reference: t.reference } : {}),
+    })),
+    changeCents: settlement.change,
     footer: header.receiptFooter,
     ...(isInvoice ? { customer: sale.invoice } : {}),
   };
@@ -201,8 +223,12 @@ export function receiptText(r: Receipt, cols: 32 | 42 | 48, labels: ReceiptLabel
     row(labels.rounding, formatCents(r.roundingCents));
   }
   row(labels.total.toUpperCase(), formatCents(r.dueCents));
-  row(labels.cash, formatCents(r.tenderedCents));
-  row(labels.change, formatCents(r.changeCents));
+  for (const p of r.payments) {
+    row(p.label, formatCents(p.cents));
+    if (p.tipCents > 0) row(`  ${labels.tip}`, formatCents(p.tipCents));
+    if (p.reference) wrap(`${labels.reference} ${p.reference}`, "  ");
+  }
+  if (r.changeCents > 0) row(labels.change, formatCents(r.changeCents));
   rule();
   for (const v of r.vat)
     row(
@@ -228,7 +254,8 @@ export type ReceiptLabels = {
   subtotal: string;
   rounding: string;
   total: string;
-  cash: string;
+  tip: string;
+  reference: string;
   change: string;
   takeAway: string;
   discount: string;
@@ -246,7 +273,8 @@ export const receiptLabels = (): ReceiptLabels => ({
   subtotal: t("receipt.subtotal"),
   rounding: t("receipt.rounding"),
   total: t("receipt.total"),
-  cash: t("receipt.cash"),
+  tip: t("receipt.tip"),
+  reference: t("receipt.reference"),
   change: t("receipt.change"),
   takeAway: t("receipt.takeAway"),
   discount: t("receipt.discount"),

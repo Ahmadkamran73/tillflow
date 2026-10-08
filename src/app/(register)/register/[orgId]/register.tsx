@@ -23,10 +23,10 @@ import { Input } from "@/components/ui/input";
 import { presets } from "@/config/business-type-presets";
 import { t } from "@/lib/i18n";
 import {
-  changeDue,
   discountNeedsOverride,
   formatCents,
   localDate,
+  settleTenders,
   type Discount,
 } from "@/lib/money";
 import {
@@ -45,7 +45,8 @@ import {
   type LineModifier,
   type Prompt,
 } from "@/lib/register/cart";
-import { registerDb, type LocalSale, type RegisterDb } from "@/lib/register/db";
+import { registerDb, type LocalSale, type LocalTender, type RegisterDb } from "@/lib/register/db";
+import { toWireTender } from "@/lib/register/tender-input";
 import { checkPin, type ApprovalFor, type StaffMember } from "@/lib/register/staff";
 import type { InvoiceInput } from "@/lib/register/invoice";
 import {
@@ -72,13 +73,8 @@ import {
   VariantPicker,
   type ModifierGroupView,
 } from "./dialogs";
-import {
-  DoneDialog,
-  EmailDialog,
-  InvoiceDialog,
-  PrinterDialog,
-  TenderDialog,
-} from "./sale-dialogs";
+import { DoneDialog, EmailDialog, InvoiceDialog, PrinterDialog } from "./sale-dialogs";
+import { TenderDialog, type TenderOption } from "./tender-dialog";
 import { LockScreen, type Cashier } from "./lock-screen";
 import { OverrideDialog } from "./override-dialog";
 
@@ -109,6 +105,30 @@ type Dialog =
   | { kind: "email"; sale: LocalSale; status: string; sending: boolean }
   | { kind: "invoice"; sale: LocalSale };
 
+/** A sale in progress older than this is dropped rather than restored. */
+const CART_KEEP_MS = 12 * 3_600_000;
+
+/**
+ * The saved sale in progress, if it is recent and well-formed; otherwise undefined. The age check
+ * is asked again (ageChecked false) because a different person may be serving by now.
+ */
+function restorableCart(value: unknown): Cart | undefined {
+  const v = value as { cart?: Cart; savedAt?: number } | undefined;
+  const cart = v?.cart;
+  if (!cart || typeof v?.savedAt !== "number" || Date.now() - v.savedAt > CART_KEEP_MS) return;
+  if (!Array.isArray(cart.lines) || cart.lines.length === 0 || cart.lines.length > 100) return;
+  const sane = cart.lines.every(
+    (l) =>
+      typeof l?.id === "string" &&
+      typeof l.variantId === "string" &&
+      Number.isInteger(l.qty) &&
+      l.qty >= 1 &&
+      Number.isInteger(l.unitPriceCents) &&
+      Array.isArray(l.modifiers),
+  );
+  return sane ? { ...cart, ageChecked: false } : undefined;
+}
+
 const ratePercent = (bp: number) => `${bp / 100}%`; // display only
 
 export function Register({ orgId }: { orgId: string }) {
@@ -137,6 +157,30 @@ export function Register({ orgId }: { orgId: string }) {
     key: string;
   } | null>(null);
   const [online, setOnline] = useState(true);
+  // Payments already taken for the cart on screen (e.g. a card approved on the terminal), kept in
+  // IndexedDB so a reload does not lose them. Tied to the exact cart, never to a different one.
+  const [draft, setDraft] = useState<LocalTender[]>([]);
+  // The sale in progress is kept in IndexedDB, so a reload, a crash or a sleeping tablet does not
+  // lose it (a card already approved on the terminal would otherwise have no sale to belong to).
+  const [cartRestored, setCartRestored] = useState(false);
+  useEffect(() => {
+    if (!db) return;
+    let live = true;
+    void db.meta.get("currentCart").then((row) => {
+      if (!live) return;
+      const saved = restorableCart(row?.value);
+      if (saved) dispatch({ type: "load", cart: saved });
+      setCartRestored(true);
+    });
+    return () => {
+      live = false;
+    };
+  }, [db]);
+  useEffect(() => {
+    if (!db || !cartRestored) return;
+    if (cart.lines.length === 0) void db.meta.delete("currentCart");
+    else void db.meta.put({ key: "currentCart", value: { cart, savedAt: Date.now() } });
+  }, [db, cart, cartRestored]);
 
   useEffect(() => {
     if (!db) return;
@@ -184,6 +228,8 @@ export function Register({ orgId }: { orgId: string }) {
   );
 
   const preset = data?.org ? presets[data.org.businessType] : null;
+  // Cash is rounded to 5c only in shops whose preset says so.
+  const roundCash = preset?.register.cashRounding5c ?? true;
 
   // Lookups over the local catalogue.
   const index = useMemo(() => {
@@ -440,7 +486,22 @@ export function Register({ orgId }: { orgId: string }) {
     say(r === "printed" ? t("register.drawerOpened") : t("register.drawerFailed"));
   }
 
-  async function tender(tenderedCents: number) {
+  /** Keeps (or clears) the payments taken so far for this exact cart. */
+  function saveDraft(tenders: LocalTender[]) {
+    if (!db) return;
+    if (tenders.length === 0) void db.meta.delete("tenderDraft");
+    else
+      void db.meta.put({ key: "tenderDraft", value: { cartKey: JSON.stringify(cart), tenders } });
+  }
+
+  async function openTender() {
+    const saved = (await db?.meta.get("tenderDraft"))?.value as
+      { cartKey: string; tenders: LocalTender[] } | undefined;
+    setDraft(saved && saved.cartKey === JSON.stringify(cart) ? saved.tenders : []);
+    setDialog({ kind: "tender" });
+  }
+
+  async function tender(tenders: LocalTender[]) {
     if (!db || !till || !priced || !ctx || !data?.org) return;
     // The sale is stamped with the real time: if the day changed since the cart was priced, the
     // amount may differ, so show the new amount instead of taking cash against the old one.
@@ -465,16 +526,21 @@ export function Register({ orgId }: { orgId: string }) {
         cashierUserId: cashier.userId,
         approvalId: needsApproval ? approval?.approvalId : undefined,
         cart,
-        tenderedCents,
-        expectedDueCents: priced.basket.amountDue,
+        tenders,
+        roundCash,
+        expectedDueCents: settleTenders(
+          priced.basket.total,
+          tenders.map((x) => ({ method: x.method, amount: x.amountCents, tip: x.tipCents })),
+          { roundCash },
+        ).amountDue,
         expectedVatCents: priced.basket.vatTotal,
       });
     } catch {
       say(t("register.saveFailed"));
       return;
     }
-    // A cash sale: the drawer opens with the receipt.
-    const status = `${t("register.saved")} ${await print(sale, { kick: true })}`;
+    // The drawer opens with the receipt only when cash was taken.
+    const status = `${t("register.saved")} ${await print(sale, { kick: tenders.some((x) => x.method === "cash") })}`;
     setDialog({ kind: "done", sale, status });
     say(status);
     outbox.kick(); // only now, after the receipt: the sale never waits for the network
@@ -490,8 +556,19 @@ export function Register({ orgId }: { orgId: string }) {
     if (!till) return;
     if (needsApproval && approval?.key !== discountKey) {
       setDialog({ kind: "override", ask: overrideAsk });
-    } else setDialog({ kind: "tender" });
+    } else void openTender();
   }
+
+  // The location's payment types; before the first pull a till offers the plain three.
+  const tenderOptions: TenderOption[] = data?.tenderTypes.length
+    ? [...data.tenderTypes]
+        .sort((a, b) => a.sort - b.sort)
+        .map((x) => ({ id: x.id, method: x.method, label: x.label }))
+    : [
+        { id: null, method: "cash", label: t("tender.cashLabel") },
+        { id: null, method: "card", label: t("tender.cardLabel") },
+        { id: null, method: "voucher", label: t("tender.voucherLabel") },
+      ];
 
   const itemCount = cart.lines.reduce((n, l) => n + l.qty, 0);
   const due = priced ? priced.basket.amountDue : 0;
@@ -605,10 +682,14 @@ export function Register({ orgId }: { orgId: string }) {
       case "tender":
         return (
           <TenderDialog
-            due={due}
-            rounding={priced?.basket.cashRounding ?? 0}
+            total={priced?.basket.total ?? 0}
+            options={tenderOptions}
+            tipsAllowed={!!preset?.register.tips}
+            roundCash={roundCash}
+            initial={draft}
+            onChange={saveDraft}
             onClose={close}
-            onTender={tender}
+            onComplete={tender}
           />
         );
       case "override":
@@ -627,7 +708,7 @@ export function Register({ orgId }: { orgId: string }) {
               if (dialog.ask.kind === "discount") {
                 setApproval({ userId, approvalId, key: dialog.ask.key });
                 say(t("override.approved", { name }));
-                setDialog({ kind: "tender" });
+                void openTender();
               } else {
                 close();
                 await openDrawer({ userId, approvalId });
@@ -657,7 +738,17 @@ export function Register({ orgId }: { orgId: string }) {
         );
       case "done": {
         const { sale } = dialog;
-        const change = ctx ? changeDue(sale.tenderedCents, priceSale(sale).basket.amountDue) : 0;
+        const change = ctx
+          ? settleTenders(
+              priceSale(sale).basket.total,
+              sale.tenders.map((x) => ({
+                method: x.method,
+                amount: x.amountCents,
+                tip: x.tipCents,
+              })),
+              { roundCash: sale.roundCash ?? true },
+            ).change
+          : 0;
         return (
           <DoneDialog
             change={change}
@@ -696,8 +787,17 @@ export function Register({ orgId }: { orgId: string }) {
                   })),
                   basketDiscount: sale.cart.discount,
                   mode: sale.cart.mode ?? "eat_in",
-                  expectedDueCents: priceSale(sale).basket.amountDue,
-                  tenderedCents: sale.tenderedCents,
+                  expectedDueCents: settleTenders(
+                    priceSale(sale).basket.total,
+                    sale.tenders.map((x) => ({
+                      method: x.method,
+                      amount: x.amountCents,
+                      tip: x.tipCents,
+                    })),
+                    { roundCash: sale.roundCash ?? true },
+                  ).amountDue,
+                  roundCash: sale.roundCash ?? true,
+                  tenders: sale.tenders.map(toWireTender),
                   receiptSeq: sale.receiptSeq,
                   registerName: tillName(sale.registerId),
                   completedAt: sale.completedAt,
@@ -1058,12 +1158,6 @@ export function Register({ orgId }: { orgId: string }) {
                   <div className="text-muted-foreground flex justify-between">
                     <dt>{t("register.deposit")}</dt>
                     <dd>{formatCents(priced.basket.nonVatTotal)}</dd>
-                  </div>
-                )}
-                {priced && priced.basket.cashRounding !== 0 && (
-                  <div className="text-muted-foreground flex justify-between">
-                    <dt>{t("register.rounding")}</dt>
-                    <dd>{formatCents(priced.basket.cashRounding)}</dd>
                   </div>
                 )}
                 <div className="border-solid-border flex items-baseline justify-between border-t-2 pt-2">

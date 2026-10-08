@@ -56,6 +56,7 @@ test("general store: 3 items in 3 taps and cash tender; scan, discount, park and
   await expect(page.getByRole("button", { name: "Pay €16.00" })).toBeVisible();
   await expect(page.getByText("VAT included 23%")).toBeVisible();
   await page.getByRole("button", { name: "Pay €16.00" }).click();
+  await page.getByRole("button", { name: "Cash", exact: true }).click();
   await page.getByRole("button", { name: /^Exact/ }).click();
   await expect(page.getByRole("heading", { name: "Sale complete" })).toBeVisible();
   await page.getByRole("button", { name: "New sale" }).click();

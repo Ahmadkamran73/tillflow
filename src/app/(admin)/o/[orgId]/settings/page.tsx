@@ -14,6 +14,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ orgId
 
   const links: { href: string; label: MessageKey }[] = [
     { href: "tills", label: "tills.title" },
+    { href: "tenders", label: "tenders.title" },
     { href: "pin", label: "pin.title" },
     ...(role === "owner"
       ? ([

@@ -2,12 +2,12 @@
 
 import { presets } from "@/config/business-type-presets";
 import { authenticateDevice } from "@/lib/device/auth";
-import { parseFeedMeta, mapTaxRates } from "@/lib/device/meta";
-import { deviceFeedMeta, deviceSaleCatalogAsOf } from "@/lib/device/service";
+import { parseFeedMeta, parseTenderMeta, mapTaxRates } from "@/lib/device/meta";
+import { deviceFeedMeta, deviceSaleCatalogAsOf, deviceTenderTypes } from "@/lib/device/service";
 import { sendMail } from "@/lib/email";
 import { t } from "@/lib/i18n";
 import { rateLimit } from "@/lib/rate-limit";
-import { changeDue } from "@/lib/money";
+import { settleTenders } from "@/lib/money";
 import { priceRows } from "@/lib/register/price-server";
 import { buildReceipt, receiptLabels, receiptText } from "@/lib/register/receipt";
 import { emailReceiptInput, SaleError } from "@/lib/register/sale-input";
@@ -51,7 +51,11 @@ export async function emailReceipt(orgId: string, raw: unknown): Promise<EmailRe
   const rawMeta = await deviceFeedMeta(device.tokenHash);
   if (!rawMeta) return { ok: false, reason: "unpaired" };
   const meta = parseFeedMeta(rawMeta);
-  const org = { name: meta.org.name, legalName: meta.org.legal_name, vatNumber: meta.org.vat_number };
+  const org = {
+    name: meta.org.name,
+    legalName: meta.org.legal_name,
+    vatNumber: meta.org.vat_number,
+  };
   const location = meta.location;
 
   let priced;
@@ -67,9 +71,26 @@ export async function emailReceipt(orgId: string, raw: unknown): Promise<EmailRe
   } catch (e) {
     return { ok: false, reason: e instanceof SaleError ? "prices" : "failed" };
   }
-  const due = priced.priced.basket.amountDue;
-  if (due !== data.expectedDueCents || data.tenderedCents < due)
+  // The payments must settle the server's total exactly as the till showed it.
+  const settlement = settleTenders(
+    priced.priced.basket.total,
+    data.tenders.map((t) => ({ method: t.method, amount: t.amountCents, tip: t.tipCents })),
+    { roundCash: data.roundCash },
+  );
+  if (!settlement.ok || settlement.amountDue !== data.expectedDueCents)
     return { ok: false, reason: "prices" };
+  const rawTypes = await deviceTenderTypes(device.tokenHash);
+  const typeMeta = rawTypes ? parseTenderMeta(rawTypes) : null;
+  if (!typeMeta) return { ok: false, reason: "unpaired" };
+  if (settlement.tips > 0 && !presets[typeMeta.businessType].register.tips)
+    return { ok: false, reason: "prices" };
+  const labelOf = new Map(typeMeta.types.map((x) => [x.id, x]));
+  const tenders = [];
+  for (const t of data.tenders) {
+    const known = t.typeId ? labelOf.get(t.typeId) : undefined;
+    if (t.typeId && known?.method !== t.method) return { ok: false, reason: "invalid" } as const;
+    tenders.push({ ...t, label: known?.label ?? t.method[0]!.toUpperCase() + t.method.slice(1) });
+  }
 
   const receipt = buildReceipt({
     sale: {
@@ -78,7 +99,8 @@ export async function emailReceipt(orgId: string, raw: unknown): Promise<EmailRe
       receiptSeq: data.receiptSeq,
       completedAt: data.completedAt,
       cart: priced.cart,
-      tenderedCents: data.tenderedCents,
+      tenders,
+      roundCash: data.roundCash,
       invoice: data.invoice,
     },
     priced: priced.priced,
@@ -95,7 +117,6 @@ export async function emailReceipt(orgId: string, raw: unknown): Promise<EmailRe
     options: presets[meta.org.business_type].receipt,
     asInvoice: !!data.invoice,
   });
-  changeDue(receipt.tenderedCents, receipt.dueCents); // throws only if the checks above were skipped
   const text = receiptText(receipt, 42, receiptLabels()).join("\n");
   const result = await sendMail({
     from: senderFor(org.name),

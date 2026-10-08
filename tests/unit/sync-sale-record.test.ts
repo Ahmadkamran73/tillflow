@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { settleTenders } from "@/lib/money";
 import { priceCart, type Cart, type CartLine } from "@/lib/register/cart";
 import { syncRejectionReasons } from "@/db/schema/sales";
 import { rowsFromAsOf } from "@/lib/sync/as-of";
@@ -22,7 +23,8 @@ const line = (over: Partial<CartLine> = {}): CartLine => ({
 
 const record = (cart: Cart, tendered = 5000) => {
   const priced = priceCart(cart, { country: "IE", date: "2026-10-06", rates: IRISH_RATES });
-  const due = priced.basket.amountDue;
+  const settlement = settleTenders(priced.basket.total, [{ method: "cash", amount: tendered }]);
+  const due = settlement.amountDue;
   const rec = buildSaleRecord({
     orgId: "o",
     registerId: "r",
@@ -34,11 +36,21 @@ const record = (cart: Cart, tendered = 5000) => {
       completedAt: "2026-10-06T12:00:00.000Z",
       mode: "eat_in",
       lines: [],
-      tenderedCents: tendered,
+      tenders: [
+        {
+          id: "00000000-0000-7000-9000-000000000001",
+          typeId: null,
+          method: "cash",
+          amountCents: tendered,
+          tipCents: 0,
+        },
+      ],
+      roundCash: true,
       expectedDueCents: due,
     },
     cart,
     priced,
+    settlement,
     pricedAsOf: new Date("2026-10-06T12:00:00.000Z"),
   });
   return { rec, priced };
@@ -75,8 +87,9 @@ describe("buildSaleRecord", () => {
     expect(rec.sale.items_total + rec.sale.non_vat + rec.sale.cash_rounding).toBe(
       rec.sale.amount_due,
     );
-    expect(rec.payment).toMatchObject({ amount: rec.sale.amount_due, tendered: 5000 });
-    expect(rec.payment.change).toBe(5000 - rec.sale.amount_due);
+    expect(rec.payments).toHaveLength(1);
+    expect(rec.payments[0]).toMatchObject({ amount: rec.sale.amount_due, tendered: 5000 });
+    expect(rec.payments[0]!.change).toBe(5000 - rec.sale.amount_due);
     expect(items[1]).toMatchObject({ serial: "SN1", unit_price_cents: 645 });
     expect(deposits[0]).toMatchObject({ kind: "deposit", qty: 4, unit_price_cents: 15 });
   });
@@ -119,10 +132,21 @@ describe("protocol", () => {
       receiptSeq: 1,
       completedAt: "2026-10-06T12:00:00.000Z",
       lines: [{ variantId: "00000000-0000-4000-8000-000000000001", qty: 1, modifierIds: [] }],
-      tenderedCents: 100,
+      tenders: [
+        {
+          id: "00000000-0000-7000-9000-000000000001",
+          typeId: null,
+          method: "cash",
+          amountCents: 100,
+        },
+      ],
       expectedDueCents: 100,
     };
     expect(syncSale.safeParse(ok).success).toBe(true);
+    // The old shape (one cash amount) is still read, as a single cash payment.
+    const { tenders: _t, ...rest } = ok;
+    void _t;
+    expect(syncSale.safeParse({ ...rest, tenderedCents: 100 }).success).toBe(true);
     expect(syncSale.safeParse({ ...ok, totalCents: 1 }).success).toBe(false);
     expect(syncSale.safeParse({ ...ok, lines: [] }).success).toBe(false);
     expect(syncSale.safeParse({ ...ok, expectedDueCents: 1.5 }).success).toBe(false);

@@ -1,4 +1,4 @@
-import { changeDue, lineDiscountOf } from "@/lib/money";
+import { lineDiscountOf, type Settlement } from "@/lib/money";
 import { unitWithModifiers, type Cart, type PricedCart } from "@/lib/register/cart";
 import type { ReviewFlag } from "./process";
 import type { SyncSale } from "./protocol";
@@ -20,11 +20,14 @@ export function buildSaleRecord(args: {
   sale: SyncSale;
   cart: Cart;
   priced: PricedCart;
+  /** The payments checked against the priced total (`settleTenders`); must be ok. */
+  settlement: Settlement;
   pricedAsOf: Date;
   /** Saved but worth a manager's look (see process.ts). */
   reviewFlags?: ReviewFlag[];
 }) {
-  const { sale, cart, priced } = args;
+  const { sale, cart, priced, settlement } = args;
+  if (!settlement.ok) throw new RangeError(`payments do not settle the sale: ${settlement.error}`);
   const { basket } = priced;
   const lines: Record<string, unknown>[] = [];
 
@@ -80,18 +83,33 @@ export function buildSaleRecord(args: {
       items_total: basket.itemsTotal,
       vat: basket.vatTotal,
       non_vat: basket.nonVatTotal,
-      cash_rounding: basket.cashRounding,
-      amount_due: basket.amountDue,
+      cash_rounding: settlement.rounding,
+      amount_due: settlement.amountDue,
       client_due: sale.expectedDueCents,
       client_vat: sale.expectedVatCents ?? null,
       review_flags: args.reviewFlags ?? [],
     },
     lines,
-    payment: {
-      method: "cash",
-      amount: basket.amountDue,
-      tendered: sale.tenderedCents,
-      change: changeDue(sale.tenderedCents, basket.amountDue),
-    },
+    // Cash settles its share plus rounding (the rest of what was handed over is change); card and
+    // voucher settle exactly their amount. Tips ride on the card payment, outside the sale total.
+    payments: sale.tenders.map((t) =>
+      t.method === "cash"
+        ? {
+            type_id: t.typeId,
+            method: t.method,
+            amount: settlement.cashShare + settlement.rounding,
+            tendered: t.amountCents,
+            change: settlement.change,
+          }
+        : {
+            type_id: t.typeId,
+            method: t.method,
+            amount: t.amountCents,
+            tendered: t.amountCents,
+            change: 0,
+            tip: t.tipCents,
+            reference: t.reference ?? null,
+          },
+    ),
   };
 }

@@ -13,6 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { products, variants } from "./products";
 import { locations, organisations, registers } from "./tenancy";
+import { tenderTypes } from "./tenders";
 
 const orgCol = () =>
   uuid("org_id")
@@ -50,7 +51,7 @@ export const sales = pgTable(
     clientDueCents: integer("client_due_cents").notNull(),
     /** The VAT the till printed (newer tills only); compared with `vatCents`, never trusted. */
     clientVatCents: integer("client_vat_cents"),
-    /** Saved but worth a manager's look: vat_differs, old_prices. Set at insert only. */
+    /** Saved but worth a manager's look: vat_differs, old_prices, rounding_differs. Set at insert only. */
     reviewFlags: text("review_flags")
       .array()
       .notNull()
@@ -77,7 +78,7 @@ export const sales = pgTable(
     check("sales_due_close", sql`abs(${t.amountDueCents} - ${t.clientDueCents}) <= 1`),
     check(
       "sales_review_flags",
-      sql`${t.reviewFlags} <@ array['vat_differs', 'old_prices']::text[]`,
+      sql`${t.reviewFlags} <@ array['vat_differs', 'old_prices', 'rounding_differs']::text[]`,
     ),
   ],
 );
@@ -140,12 +141,16 @@ export const payments = pgTable(
     id: uuid("id").primaryKey(),
     orgId: orgCol(),
     saleId: uuid("sale_id").notNull(),
+    /** The location tender type used; null on payments recorded before tender types existed. */
+    tenderTypeId: uuid("tender_type_id"),
+    /** The type's label when the sale was made (a later rename does not change old receipts). */
+    label: text("label"),
     method: text("method").notNull(),
     amountCents: integer("amount_cents").notNull(),
     tenderedCents: integer("tendered_cents").notNull(),
     changeCents: integer("change_cents").notNull(),
     tipCents: integer("tip_cents").notNull().default(0),
-    /** Terminal receipt reference for card tenders (step 2.1); never a card number. */
+    /** Terminal receipt reference for a card tender, or a voucher number; never a card number. */
     providerRef: text("provider_ref"),
     createdAt: createdAtCol(),
   },
@@ -155,8 +160,27 @@ export const payments = pgTable(
       columns: [t.orgId, t.saleId],
       foreignColumns: [sales.orgId, sales.id],
     }),
+    foreignKey({
+      name: "payments_org_tender_type_fk",
+      columns: [t.orgId, t.tenderTypeId],
+      foreignColumns: [tenderTypes.orgId, tenderTypes.id],
+    }),
     index("payments_org_sale_idx").on(t.orgId, t.saleId),
+    index("payments_org_created_idx").on(t.orgId, t.createdAt),
     check("payments_method", sql`${t.method} in ('cash', 'card', 'voucher')`),
+    // A cash remainder of 1-2c rounds to a zero amount, so zero is allowed; never negative.
+    check("payments_amount", sql`${t.amountCents} >= 0`),
+    check("payments_change_cash_only", sql`${t.method} = 'cash' or ${t.changeCents} = 0`),
+    check(
+      "payments_tip",
+      sql`${t.tipCents} = 0 or (${t.method} = 'card' and ${t.tipCents} <= ${t.amountCents})`,
+    ),
+    // Never a card number: at most 40 characters of letters, digits, space, - and /, and fewer than
+    // 13 digits in all. Keep in step with `looksLikeCardNumber` in src/lib/register/tender-input.ts.
+    check(
+      "payments_provider_ref",
+      sql`${t.providerRef} is null or (char_length(${t.providerRef}) <= 40 and ${t.providerRef} ~ '^[A-Za-z0-9 /-]*$' and char_length(regexp_replace(${t.providerRef}, '[^0-9]', '', 'g')) < 13)`,
+    ),
   ],
 );
 
@@ -170,6 +194,8 @@ export const syncRejectionReasons = [
   "receipt_number_used",
   "cannot_price",
   "discount_needs_approval",
+  "tender_mismatch",
+  "unknown_tender",
 ] as const;
 
 /** A sale the server refused: the manager's "Needs attention" list. `id` is the sale id. */

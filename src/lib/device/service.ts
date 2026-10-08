@@ -11,6 +11,7 @@ export {
   deviceSaleCatalogAsOf,
   deviceSalesKnown,
   deviceSyncMeta,
+  deviceTenderTypes,
   issueApproval,
   pairRegister,
   pinAttemptBegin,

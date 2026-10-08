@@ -1,6 +1,6 @@
 import { v7 as uuidv7 } from "uuid";
 import type { Cart } from "./cart";
-import type { LocalSale, RegisterDb } from "./db";
+import type { LocalSale, LocalTender, RegisterDb } from "./db";
 import type { Feed } from "./feed";
 
 /** "Till 1 · 000042" */
@@ -22,7 +22,9 @@ export async function completeSale(
     /** Set only when a discount above the shop's limit was approved with a manager's PIN (online). */
     approvalId?: string;
     cart: Cart;
-    tenderedCents: number;
+    tenders: LocalTender[];
+    roundCash?: boolean;
+    /** What the shop is paid for the sale: total plus the 5c rounding on the cash share. */
     expectedDueCents: number;
     expectedVatCents?: number;
   },
@@ -42,7 +44,8 @@ export async function completeSale(
       receiptSeq: seq,
       completedAt: new Date().toISOString(),
       cart: input.cart,
-      tenderedCents: input.tenderedCents,
+      tenders: input.tenders,
+      roundCash: input.roundCash ?? true,
       expectedDueCents: input.expectedDueCents,
       expectedVatCents: input.expectedVatCents,
       catalogAsOf: typeof pulledAt === "string" ? pulledAt : undefined,
@@ -51,6 +54,10 @@ export async function completeSale(
     };
     await db.meta.put({ key, value: seq });
     await db.sales.add(sale);
+    // In the same transaction as the outbox write: a crash can never leave the finished cart (or
+    // its card payments) behind to be restored and rung up a second time.
+    await db.meta.delete("currentCart");
+    await db.meta.delete("tenderDraft");
     return sale;
   });
 }

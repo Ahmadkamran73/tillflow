@@ -1,3 +1,4 @@
+import type { ReviewFlag } from "@/lib/sync/process";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -71,7 +72,7 @@ export default async function SalesToReviewPage({
                 <ul className="list-disc pl-5 text-sm">
                   {s.flags.map((f) => (
                     <li key={f}>
-                      {t(`sales.flag.${f as "vat_differs" | "old_prices"}`)}
+                      {t(`sales.flag.${f as ReviewFlag}`)}
                       {f === "vat_differs" && s.clientVatCents !== null
                         ? ` (${t("sales.review.tillVat", {
                             till: formatCents(s.clientVatCents),

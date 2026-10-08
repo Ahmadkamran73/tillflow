@@ -1,14 +1,16 @@
 import "server-only";
 import { createSupabaseServerClient } from "@/lib/auth";
 import { getLocation, getTaxRates } from "@/lib/catalog";
-import { parseSyncMeta } from "@/lib/device/meta";
+import { parseSyncMeta, parseTenderMeta } from "@/lib/device/meta";
 import {
   deviceSaleCatalogAsOf,
   deviceSalesKnown,
   deviceSyncMeta,
+  deviceTenderTypes,
   recordSale,
   recordSyncRejection,
 } from "@/lib/ops/db";
+import { presets } from "@/config/business-type-presets";
 import { getOrganisation } from "@/lib/org";
 import { loadRowsAsOf, priceRows } from "@/lib/register/price-server";
 import type { RateRow } from "@/lib/money";
@@ -54,6 +56,9 @@ export async function syncSalesFromDevice(
   const raw = await deviceSyncMeta(device.tokenHash);
   if (!raw) throw new Error("Device is not paired");
   const meta = parseSyncMeta(raw);
+  const rawTypes = await deviceTenderTypes(device.tokenHash);
+  if (!rawTypes) throw new Error("Device is not paired");
+  const tenderMeta = parseTenderMeta(rawTypes);
 
   return run(
     rawSales,
@@ -61,6 +66,9 @@ export async function syncSalesFromDevice(
       orgId: device.orgId,
       registerId: device.registerId,
       discountOverrideBp: meta.discountOverrideBp,
+      tenderTypes: tenderMeta.types,
+      tipsAllowed: presets[tenderMeta.businessType].register.tips,
+      shopRoundCash: presets[tenderMeta.businessType].register.cashRounding5c,
     },
     meta,
     {
@@ -97,10 +105,26 @@ export async function syncSalesFromSession(
   ]);
   if (!location || !org) throw new Error("Shop has no location");
   const supabase = await createSupabaseServerClient();
+  // RLS: a manager (who presses Try again) reads the payment types of their shop.
+  const { data: tenderTypes, error: tenderError } = await supabase
+    .from("tender_types")
+    .select("id, method")
+    .eq("org_id", ctx.orgId)
+    .eq("location_id", location.id);
+  if (tenderError) throw new Error("Could not load payment types");
 
   return run(
     rawSales,
-    { ...ctx, discountOverrideBp: org.discountOverrideBp },
+    {
+      ...ctx,
+      discountOverrideBp: org.discountOverrideBp,
+      tenderTypes: (tenderTypes ?? []).map((t) => ({
+        id: t.id as string,
+        method: t.method as string,
+      })),
+      tipsAllowed: presets[org.businessType].register.tips,
+      shopRoundCash: presets[org.businessType].register.cashRounding5c,
+    },
     { timezone: location.timezone, taxRates },
     {
       tokenHash: null,

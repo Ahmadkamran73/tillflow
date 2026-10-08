@@ -37,6 +37,25 @@ export function parseSyncMeta(raw: unknown) {
   };
 }
 
+const tenderTypeRow = z.object({
+  id: z.string(),
+  method: z.enum(["cash", "card", "voucher"]),
+  label: z.string(),
+  sort: z.int(),
+  archived: z.boolean(),
+});
+
+const tenderMeta = z.object({
+  business_type: z.enum(businessTypes),
+  types: z.array(tenderTypeRow),
+});
+
+/** The location's payment types and the business type (ops.device_tender_types). */
+export function parseTenderMeta(raw: unknown) {
+  const m = tenderMeta.parse(raw);
+  return { businessType: m.business_type, types: m.types };
+}
+
 const feedMeta = z.object({
   org: z.object({
     business_type: z.enum(businessTypes),
