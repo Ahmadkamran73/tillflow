@@ -4,6 +4,7 @@ import { mapTaxRates, parseFeedMeta, parseTenderMeta } from "@/lib/device/meta";
 import {
   deviceFeedMeta,
   deviceFeedTable,
+  deviceRefundMeta,
   deviceTenderTypes,
   type FeedTable,
 } from "@/lib/device/service";
@@ -46,6 +47,9 @@ export async function getCatalogFeed(
   const rawMeta = await deviceFeedMeta(tokenHash);
   if (!rawMeta) return null;
   const meta = parseFeedMeta(rawMeta);
+  const refundMeta = z
+    .object({ refund_override_cents: z.int().min(0), last_refund_seq: z.int().min(0) })
+    .safeParse(await deviceRefundMeta(tokenHash));
   const rawTypes = await deviceTenderTypes(tokenHash);
   const tenderTypes = rawTypes ? parseTenderMeta(rawTypes).types.filter((t) => !t.archived) : [];
 
@@ -72,6 +76,7 @@ export async function getCatalogFeed(
       eircode: meta.location.eircode,
       receiptFooter: meta.location.receipt_footer,
       discountOverrideBp: meta.org.discount_override_bp,
+      refundOverrideCents: refundMeta.success ? refundMeta.data.refund_override_cents : undefined,
     },
     staff: meta.staff.map((s) => ({
       userId: s.user_id,
@@ -87,7 +92,12 @@ export async function getCatalogFeed(
     })),
     serverTime: new Date().toISOString(),
     registers: [
-      { id: meta.register.id, name: meta.register.name, lastSeq: meta.register.last_seq },
+      {
+        id: meta.register.id,
+        name: meta.register.name,
+        lastSeq: meta.register.last_seq,
+        lastRefundSeq: refundMeta.success ? refundMeta.data.last_refund_seq : 0,
+      },
     ],
     taxRates: mapTaxRates(meta.tax_rates),
     categories: categories

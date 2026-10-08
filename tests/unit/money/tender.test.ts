@@ -11,6 +11,21 @@ const cash = (amount: number): TenderLine => ({ method: "cash", amount });
 const card = (amount: number, tip?: number): TenderLine => ({ method: "card", amount, tip });
 const voucher = (amount: number): TenderLine => ({ method: "voucher", amount });
 
+describe("settleTenders with exchange credit", () => {
+  it("settles exchange credit exactly, like a voucher, and only cash is rounded", () => {
+    const s = settleTenders(1633, [{ method: "exchange", amount: 1000 }, cash(635)]);
+    expect(s).toMatchObject({ nonCash: 1000, cashShare: 633, rounding: 2, change: 0, ok: true });
+    expect(settleTenders(1000, [{ method: "exchange", amount: 1000 }])).toMatchObject({
+      ok: true,
+      rounding: 0,
+    });
+    expect(settleTenders(1000, [{ method: "exchange", amount: 1100 }]).error).toBe("non_cash_over");
+    expect(settleTenders(1000, [{ method: "exchange", amount: 500, tip: 5 }]).error).toBe(
+      "tip_not_card",
+    );
+  });
+});
+
 describe("settleTenders", () => {
   it("cash only matches the single-cash behaviour (5c rounding, change)", () => {
     const s = settleTenders(1633, [cash(2000)]);

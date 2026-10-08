@@ -109,6 +109,8 @@ export function buildSaleRecord(args: {
             change: 0,
             tip: t.tipCents,
             reference: t.reference ?? null,
+            // Exchange credit names the refund whose returned goods paid for it.
+            ...(t.refundId ? { refund_id: t.refundId } : {}),
           },
     ),
   };

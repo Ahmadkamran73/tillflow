@@ -45,6 +45,8 @@ export const organisations = pgTable(
     vatRatesConfirmedBy: uuid("vat_rates_confirmed_by"),
     /** A discount above this share (basis points) of a line or sale needs a manager PIN. */
     discountOverrideBp: integer("discount_override_bp").notNull().default(1000),
+    /** A cashier refund above this many cents needs a manager PIN. */
+    refundOverrideCents: integer("refund_override_cents").notNull().default(2000),
     status: orgStatus("status").notNull().default("trial"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -53,6 +55,7 @@ export const organisations = pgTable(
     check("organisations_country_len", sql`char_length(${t.country}) = 2`),
     // Shape only; the mod-23 check digit is verified in src/lib/onboarding.ts.
     check("organisations_discount_override_bp", sql`${t.discountOverrideBp} between 0 and 10000`),
+    check("organisations_refund_override_cents", sql`${t.refundOverrideCents} between 0 and 1000000`),
     check(
       "organisations_vat_number_ie",
       sql`${t.vatNumber} is null or ${t.vatNumber} ~ '^IE([0-9]{7}[A-W][A-IW]?|[0-9][A-Z+*][0-9]{5}[A-W])$'`,
@@ -195,6 +198,9 @@ export const registerApprovals = pgTable(
     consumedAt: timestamp("consumed_at", { withTimezone: true }),
     /** The sale or event the approval was spent on. */
     consumedFor: uuid("consumed_for"),
+    /** A refund approval is for ONE sale and up to this value (cents); null for other purposes. */
+    saleId: uuid("sale_id"),
+    maxCents: integer("max_cents"),
     createdAt: createdAt(),
   },
   (t) => [
@@ -204,6 +210,7 @@ export const registerApprovals = pgTable(
       foreignColumns: [registers.orgId, registers.id],
     }),
     check("register_approvals_purpose", sql`${t.purpose} in ('discount', 'no_sale', 'refund')`),
+    check("register_approvals_max_cents", sql`${t.maxCents} is null or ${t.maxCents} >= 0`),
     index("register_approvals_org_register_idx").on(t.orgId, t.registerId, t.createdAt),
   ],
 );

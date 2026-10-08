@@ -60,6 +60,19 @@ describe("tender input", () => {
   });
 });
 
+describe("exchange credit as a tender", () => {
+  const credit = { ...base, method: "exchange" as const, refundId: id };
+  it("names the refund that gave the credit, has no payment type, and at most one", () => {
+    expect(tenderInput.safeParse(credit).success).toBe(true);
+    expect(tenderInput.safeParse({ ...credit, refundId: undefined }).success).toBe(false);
+    expect(tenderInput.safeParse({ ...base, refundId: id }).success).toBe(false); // card with a refund id
+    expect(tenderInput.safeParse({ ...credit, typeId: id }).success).toBe(false);
+    expect(tenderInput.safeParse({ ...credit, tipCents: 5 }).success).toBe(false);
+    expect(tendersInput.safeParse([credit, credit]).success).toBe(false);
+    expect(tendersInput.safeParse([credit, { ...base, method: "cash" as const }]).success).toBe(true);
+  });
+});
+
 describe("stripReferences", () => {
   it("removes every reference, deeply, and leaves the rest", () => {
     const out = stripReferences({

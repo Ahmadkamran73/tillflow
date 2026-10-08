@@ -8,7 +8,8 @@ export type TenderMethod = "cash" | "card" | "voucher";
  * kept apart from the sale total.
  */
 export interface TenderLine {
-  method: TenderMethod;
+  /** `exchange` is credit from goods returned in an exchange: exact, like a voucher. */
+  method: TenderMethod | "exchange";
   amount: number;
   tip?: number;
 }

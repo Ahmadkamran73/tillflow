@@ -28,7 +28,15 @@ export const LOCK_MS = 15 * 60_000;
 
 export const canApprove = (role: Role) => role === "owner" || role === "manager";
 
-type Deps = { fetchFn?: typeof fetch; now?: () => number; approvalFor?: ApprovalFor };
+/** What a refund approval is for: one sale, and up to this value (cents). */
+export type RefundBind = { saleId: string; maxCents: number };
+
+type Deps = {
+  fetchFn?: typeof fetch;
+  now?: () => number;
+  approvalFor?: ApprovalFor;
+  bind?: RefundBind;
+};
 
 const unlockResponse = (raw: unknown): PinResult | null => {
   const r = raw as {
@@ -63,6 +71,7 @@ async function checkOnline(
   purpose: PinPurpose,
   fetchFn: typeof fetch,
   approvalFor?: ApprovalFor,
+  bind?: RefundBind,
 ): Promise<PinResult | null> {
   let res: Response;
   try {
@@ -76,6 +85,7 @@ async function checkOnline(
         pin,
         purpose,
         approvalFor: purpose === "override" ? approvalFor : undefined,
+        ...(purpose === "override" && approvalFor === "refund" && bind ? bind : {}),
       }),
     });
   } catch {
@@ -102,7 +112,7 @@ export async function checkPin(
   member: StaffMember,
   pin: string,
   purpose: PinPurpose,
-  { fetchFn = fetch, now = Date.now, approvalFor }: Deps = {},
+  { fetchFn = fetch, now = Date.now, approvalFor, bind }: Deps = {},
 ): Promise<PinResult> {
   const lockOf = async () => {
     const a = await db.pinAttempts.get(member.userId);
@@ -120,7 +130,7 @@ export async function checkPin(
   const held = await lockOf();
   if (held) return { status: "locked", lockedUntil: held };
 
-  const online = await checkOnline(member.userId, pin, purpose, fetchFn, approvalFor);
+  const online = await checkOnline(member.userId, pin, purpose, fetchFn, approvalFor, bind);
   if (online) {
     if (online.status === "ok" || online.status === "not_allowed") {
       await db.pinAttempts.delete(member.userId);

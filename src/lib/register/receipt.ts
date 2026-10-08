@@ -3,7 +3,9 @@ import { t } from "@/lib/i18n";
 import { formatCents, lineDiscountOf, localDate, settleTenders } from "@/lib/money";
 import { lineTotal, unitWithModifiers, type PricedCart } from "./cart";
 import type { ReceiptSale } from "./db";
+import { BARCODE_MARK } from "./print/escpos";
 import { receiptNo } from "./sale";
+import { saleCode } from "./sale-code";
 
 export type ReceiptHeader = {
   name: string;
@@ -44,7 +46,7 @@ export type Receipt = {
   /** One per payment: cash shows what was handed over; card and voucher what they settled. */
   payments: {
     label: string;
-    method: "cash" | "card" | "voucher";
+    method: "cash" | "card" | "voucher" | "exchange";
     cents: number;
     /** Card tip, outside the total. */
     tipCents: number;
@@ -53,6 +55,8 @@ export type Receipt = {
   }[];
   changeCents: number;
   footer: string | null;
+  /** The sale's code, printed as a barcode so a refund can find the sale by scanning it. */
+  code?: string;
   customer?: { name: string; address: string; vatNumber: string };
 };
 
@@ -156,6 +160,7 @@ export function buildReceipt(args: {
     })),
     changeCents: settlement.change,
     footer: header.receiptFooter,
+    code: saleCode(sale.id),
     ...(isInvoice ? { customer: sale.invoice } : {}),
   };
 }
@@ -239,6 +244,7 @@ export function receiptText(r: Receipt, cols: 32 | 42 | 48, labels: ReceiptLabel
     rule();
     r.footer.split("\n").forEach((f) => wrap(f));
   }
+  if (r.code) out.push(BARCODE_MARK + r.code);
   return out;
 }
 

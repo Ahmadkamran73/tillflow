@@ -11,6 +11,7 @@ const orgRow = z.object({
   onboarded_at: z.string().nullable(),
   vat_rates_confirmed_at: z.string().nullable(),
   discount_override_bp: z.number().int(),
+  refund_override_cents: z.number().int(),
 });
 
 /** An organisation the caller belongs to. RLS returns nothing for any other org. */
@@ -19,7 +20,7 @@ export async function getOrganisation(orgId: string) {
   const { data } = await supabase
     .from("organisations")
     .select(
-      "name, legal_name, vat_number, business_type, onboarded_at, vat_rates_confirmed_at, discount_override_bp",
+      "name, legal_name, vat_number, business_type, onboarded_at, vat_rates_confirmed_at, discount_override_bp, refund_override_cents",
     )
     .eq("id", orgId)
     .maybeSingle();
@@ -33,6 +34,7 @@ export async function getOrganisation(orgId: string) {
     onboardedAt: row.onboarded_at,
     vatRatesConfirmedAt: row.vat_rates_confirmed_at,
     discountOverrideBp: row.discount_override_bp,
+    refundOverrideCents: row.refund_override_cents,
   };
 }
 

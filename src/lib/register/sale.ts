@@ -21,6 +21,10 @@ export async function completeSale(
     cashierUserId: string;
     /** Set only when a discount above the shop's limit was approved with a manager's PIN (online). */
     approvalId?: string;
+    /** An exchange sale: its id was made first, because its refund names it. */
+    id?: string;
+    /** An exchange sale: the refund whose returned goods pay for part of it. */
+    exchangeRefundId?: string;
     cart: Cart;
     tenders: LocalTender[];
     roundCash?: boolean;
@@ -37,7 +41,7 @@ export async function completeSale(
     const seq = Math.max(local, known) + 1;
     const pulledAt = (await db.meta.get("pulledAt"))?.value;
     const sale: LocalSale = {
-      id: uuidv7(),
+      id: input.id ?? uuidv7(),
       registerId: input.registerId,
       cashierUserId: input.cashierUserId,
       approvalId: input.approvalId,
@@ -49,6 +53,7 @@ export async function completeSale(
       expectedDueCents: input.expectedDueCents,
       expectedVatCents: input.expectedVatCents,
       catalogAsOf: typeof pulledAt === "string" ? pulledAt : undefined,
+      exchangeRefundId: input.exchangeRefundId,
       syncState: "pending",
       attempts: 0,
     };
@@ -58,6 +63,7 @@ export async function completeSale(
     // its card payments) behind to be restored and rung up a second time.
     await db.meta.delete("currentCart");
     await db.meta.delete("tenderDraft");
+    if (input.exchangeRefundId) await db.meta.delete("exchangeDraft");
     return sale;
   });
 }

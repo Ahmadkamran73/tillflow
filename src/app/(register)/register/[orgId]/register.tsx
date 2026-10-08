@@ -9,6 +9,7 @@ import {
   PercentIcon,
   PrinterIcon,
   PlusIcon,
+  RotateCcwIcon,
   SearchIcon,
   Trash2Icon,
   TriangleAlertIcon,
@@ -45,7 +46,17 @@ import {
   type LineModifier,
   type Prompt,
 } from "@/lib/register/cart";
-import { registerDb, type LocalSale, type LocalTender, type RegisterDb } from "@/lib/register/db";
+import {
+  registerDb,
+  type ExchangeDraft,
+  type LocalRefund,
+  type LocalSale,
+  type LocalTender,
+  type RegisterDb,
+} from "@/lib/register/db";
+import { completeExchange } from "@/lib/register/refund";
+import { buildRefundReceipt, refundReceiptText } from "@/lib/register/refund-receipt";
+import { saleIdOfCode } from "@/lib/register/refund";
 import { toWireTender } from "@/lib/register/tender-input";
 import { checkPin, type ApprovalFor, type StaffMember } from "@/lib/register/staff";
 import type { InvoiceInput } from "@/lib/register/invoice";
@@ -58,7 +69,12 @@ import {
 } from "@/lib/register/print";
 import { buildReceipt, receiptLabels, receiptText } from "@/lib/register/receipt";
 import { completeSale, setInvoice } from "@/lib/register/sale";
-import { discountLimitOf, type FeedProduct, type FeedVariant } from "@/lib/register/feed";
+import {
+  discountLimitOf,
+  refundLimitOf,
+  type FeedProduct,
+  type FeedVariant,
+} from "@/lib/register/feed";
 import { useCatalog, useCatalogRefresh } from "@/lib/register/use-catalog";
 import { useSync } from "@/lib/sync/use-sync";
 import { useScanner } from "@/lib/register/use-scanner";
@@ -74,6 +90,7 @@ import {
   type ModifierGroupView,
 } from "./dialogs";
 import { DoneDialog, EmailDialog, InvoiceDialog, PrinterDialog } from "./sale-dialogs";
+import { RefundDialog, RefundDoneDialog } from "./refund-dialog";
 import { TenderDialog, type TenderOption } from "./tender-dialog";
 import { LockScreen, type Cashier } from "./lock-screen";
 import { OverrideDialog } from "./override-dialog";
@@ -103,7 +120,9 @@ type Dialog =
   | { kind: "printer" }
   | { kind: "done"; sale: LocalSale; status: string }
   | { kind: "email"; sale: LocalSale; status: string; sending: boolean }
-  | { kind: "invoice"; sale: LocalSale };
+  | { kind: "invoice"; sale: LocalSale }
+  | { kind: "refund"; code?: string }
+  | { kind: "refundDone"; refund: LocalRefund; status: string };
 
 /** A sale in progress older than this is dropped rather than restored. */
 const CART_KEEP_MS = 12 * 3_600_000;
@@ -157,6 +176,22 @@ export function Register({ orgId }: { orgId: string }) {
     key: string;
   } | null>(null);
   const [online, setOnline] = useState(true);
+  // An exchange in progress: the returned goods are credit on the sale being rung up. NOTHING is
+  // recorded until that sale is complete: then the refund and the sale are saved together in one
+  // transaction, so an exchange can be cancelled with no trace and never half-exists. Kept in
+  // IndexedDB so a reload keeps it.
+  const [exchangeDraft, setExchangeDraft] = useState<ExchangeDraft | null>(null);
+  useEffect(() => {
+    if (!db) return;
+    let live = true;
+    void db.meta.get("exchangeDraft").then((row) => {
+      const v = row?.value as typeof exchangeDraft;
+      if (live && v && typeof v.refundId === "string") setExchangeDraft(v);
+    });
+    return () => {
+      live = false;
+    };
+  }, [db]);
   // Payments already taken for the cart on screen (e.g. a card approved on the terminal), kept in
   // IndexedDB so a reload does not lose them. Tied to the exact cart, never to a different one.
   const [draft, setDraft] = useState<LocalTender[]>([]);
@@ -366,6 +401,11 @@ export function Register({ orgId }: { orgId: string }) {
     async (code) => {
       if (!db) return;
       setQuery(""); // the code may also have been typed into the search box
+      // A receipt's own barcode starts a refund for that sale.
+      if (saleIdOfCode(code)) {
+        setDialog({ kind: "refund", code });
+        return;
+      }
       try {
         const variant = await db.variants.where("barcode").equals(code).first();
         const product = variant && index.products.get(variant.productId);
@@ -486,6 +526,55 @@ export function Register({ orgId }: { orgId: string }) {
     say(r === "printed" ? t("register.drawerOpened") : t("register.drawerFailed"));
   }
 
+  /** Prints a refund, void or exchange receipt; the drawer opens when cash goes back. */
+  async function printRefund(refund: LocalRefund, kick: boolean): Promise<string> {
+    if (!data?.org) return "";
+    const receipt = buildRefundReceipt({
+      refund,
+      registerName: tillName(refund.registerId),
+      header: data.org,
+    });
+    const lines = refundReceiptText(receipt, printer.cols);
+    const result = await printLines(printer, lines, kick);
+    if (result === "printed") return t("refund.printed");
+    setPrintJob((j) => ({ n: (j?.n ?? 0) + 1, lines }));
+    return result === "failed" ? t("register.printFallback") : t("refund.printed");
+  }
+
+  /** An exchange refund is saved: print its slip, then take payment for the new items. */
+  async function exchanged(e: { input: ExchangeDraft["input"]; saleId: string; creditCents: number }) {
+    if (!db || !e.input.id) return;
+    const next: ExchangeDraft = {
+      refundId: e.input.id,
+      saleId: e.saleId,
+      creditCents: e.creditCents,
+      input: e.input,
+    };
+    await db.meta.put({ key: "exchangeDraft", value: next });
+    setExchangeDraft(next);
+    say(t("refund.exchangeDone", { amount: formatCents(e.creditCents) }));
+    await openTender(next); // the state above has not re-rendered yet
+  }
+
+  /** Abandons an exchange: nothing was recorded, so there is nothing to undo. */
+  async function cancelExchange() {
+    if (!db) return;
+    await db.meta.delete("exchangeDraft");
+    await db.meta.delete("tenderDraft");
+    setExchangeDraft(null);
+    say(t("refund.exchangeCancelled"));
+  }
+
+  async function refunded(refund: LocalRefund) {
+    const status = await printRefund(
+      refund,
+      refund.legs.some((l) => l.method === "cash"),
+    );
+    setDialog({ kind: "refundDone", refund, status });
+    say(status);
+    outbox.kick(); // only after the receipt: the refund never waits for the network
+  }
+
   /** Keeps (or clears) the payments taken so far for this exact cart. */
   function saveDraft(tenders: LocalTender[]) {
     if (!db) return;
@@ -494,10 +583,27 @@ export function Register({ orgId }: { orgId: string }) {
       void db.meta.put({ key: "tenderDraft", value: { cartKey: JSON.stringify(cart), tenders } });
   }
 
-  async function openTender() {
+  async function openTender(exchange = exchangeDraft) {
     const saved = (await db?.meta.get("tenderDraft"))?.value as
       { cartKey: string; tenders: LocalTender[] } | undefined;
-    setDraft(saved && saved.cartKey === JSON.stringify(cart) ? saved.tenders : []);
+    const base = saved && saved.cartKey === JSON.stringify(cart) ? saved.tenders : [];
+    // The exchange credit is the first payment on the sale, and cannot be removed.
+    const withCredit: LocalTender[] =
+      exchange && !base.some((x) => x.method === "exchange")
+        ? [
+            {
+              id: uuidv7(),
+              typeId: null,
+              method: "exchange",
+              amountCents: exchange.creditCents,
+              tipCents: 0,
+              refundId: exchange.refundId,
+              label: t("refund.credit"),
+            },
+            ...base,
+          ]
+        : base;
+    setDraft(withCredit);
     setDialog({ kind: "tender" });
   }
 
@@ -520,24 +626,45 @@ export function Register({ orgId }: { orgId: string }) {
     }
     if (!cashier) return;
     let sale: LocalSale;
+    let exchangeRefund: LocalRefund | undefined;
+    const saleInput = {
+      registerId: till.id,
+      cashierUserId: cashier.userId,
+      approvalId: needsApproval ? approval?.approvalId : undefined,
+      id: exchangeDraft?.saleId,
+      exchangeRefundId: exchangeDraft?.refundId,
+      cart,
+      tenders,
+      roundCash,
+      expectedDueCents: settleTenders(
+        priced.basket.total,
+        tenders.map((x) => ({ method: x.method, amount: x.amountCents, tip: x.tipCents })),
+        { roundCash },
+      ).amountDue,
+      expectedVatCents: priced.basket.vatTotal,
+    };
     try {
-      sale = await completeSale(db, {
-        registerId: till.id,
-        cashierUserId: cashier.userId,
-        approvalId: needsApproval ? approval?.approvalId : undefined,
-        cart,
-        tenders,
-        roundCash,
-        expectedDueCents: settleTenders(
-          priced.basket.total,
-          tenders.map((x) => ({ method: x.method, amount: x.amountCents, tip: x.tipCents })),
-          { roundCash },
-        ).amountDue,
-        expectedVatCents: priced.basket.vatTotal,
-      });
+      if (exchangeDraft) {
+        // The refund of the returned goods and the sale that spends its credit are saved together.
+        const both = await completeExchange(db, {
+          refund: { ...exchangeDraft.input, registerId: till.id, cashierUserId: cashier.userId },
+          sale: saleInput,
+        });
+        sale = both.sale;
+        exchangeRefund = both.refund;
+      } else {
+        sale = await completeSale(db, saleInput);
+      }
     } catch {
       say(t("register.saveFailed"));
       return;
+    }
+    if (exchangeDraft) setExchangeDraft(null); // spent: completeSale cleared it from IndexedDB
+    if (exchangeRefund) {
+      await printRefund(
+        exchangeRefund,
+        exchangeRefund.legs.some((l) => l.method === "cash"),
+      );
     }
     // The drawer opens with the receipt only when cash was taken.
     const status = `${t("register.saved")} ${await print(sale, { kick: tenders.some((x) => x.method === "cash") })}`;
@@ -713,6 +840,55 @@ export function Register({ orgId }: { orgId: string }) {
                 close();
                 await openDrawer({ userId, approvalId });
               }
+            }}
+          />
+        );
+      case "refund":
+        if (!db || !till || !data?.org || !cashier) return null;
+        return (
+          <RefundDialog
+            db={db}
+            orgId={orgId}
+            tillId={till.id}
+            tillName={tillName}
+            org={data.org}
+            rates={data.taxRates}
+            register={preset!.register}
+            role={cashier.role}
+            cashierId={cashier.userId}
+            cartTotalCents={exchangeDraft ? 0 : (priced?.basket.total ?? 0)}
+            staff={data.staff}
+            offline={!online}
+            tenderOptions={tenderOptions}
+            roundCash={roundCash}
+            refundLimitCents={refundLimitOf(data.org)}
+            verify={(member, pin, bind) =>
+              checkPin(db, member, pin, "override", { approvalFor: "refund", bind })
+            }
+            initialCode={dialog.code}
+            onClose={close}
+            onDone={(refund) => void refunded(refund)}
+            onExchange={(e) => void exchanged(e)}
+          />
+        );
+      case "refundDone":
+        return (
+          <RefundDoneDialog
+            refund={dialog.refund}
+            status={dialog.status}
+            onPrint={async () =>
+              setDialog({
+                ...dialog,
+                status: await printRefund(
+                  dialog.refund,
+                  dialog.refund.legs.some((l) => l.method === "cash"),
+                ),
+              })
+            }
+            onNewSale={() => {
+              // Back to the till as it was: a sale in progress is not cleared by a refund.
+              close();
+              focusCart();
             }}
           />
         );
@@ -894,6 +1070,14 @@ export function Register({ orgId }: { orgId: string }) {
             >
               <ArchiveIcon aria-hidden /> {t("register.openDrawer")}
             </Button>
+            <Button
+              size="touch"
+              variant="outline"
+              disabled={!till || !data?.org || !preset}
+              onClick={() => setDialog({ kind: "refund" })}
+            >
+              <RotateCcwIcon aria-hidden /> {t("register.refund")}
+            </Button>
             <Button size="touch" variant="outline" onClick={() => setDialog({ kind: "printer" })}>
               <PrinterIcon aria-hidden /> {t("register.printer")}:{" "}
               {t(`register.printer.${printer.type}`)}
@@ -910,6 +1094,20 @@ export function Register({ orgId }: { orgId: string }) {
                   <TriangleAlertIcon aria-hidden className="size-5 shrink-0" />
                   {t("register.staleWarning", { count: outbox.waiting, hours: outbox.staleHours })}
                 </p>
+              )}
+              {exchangeDraft && (
+                <div className="border-solid-border bg-paper flex flex-wrap items-center gap-2 rounded-lg border-2 p-3 text-sm font-semibold">
+                  <RotateCcwIcon aria-hidden className="size-5 shrink-0" />
+                  <span className="flex-1">
+                    {t("refund.exchangeDone", { amount: formatCents(exchangeDraft.creditCents) })}
+                    {priced && priced.basket.total < exchangeDraft.creditCents && (
+                      <span className="block">{t("refund.exchangeTooSmall")}</span>
+                    )}
+                  </span>
+                  <Button size="touch" variant="outline" onClick={() => void cancelExchange()}>
+                    {t("refund.exchangeCancel")}
+                  </Button>
+                </div>
               )}
               {outbox.signedOut && (
                 <p className="border-solid-border bg-paper flex items-center gap-2 rounded-lg border-2 p-3 text-sm font-semibold">

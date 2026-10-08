@@ -98,4 +98,4 @@ manager sees it in the sales review list.
 - Vouchers have no number validation or balance. No tip-sharing report yet (Tips and Gratuities
   Act report later).
 - Tender types cannot be reordered in the back office yet (they sort by creation order).
-- Refunds of split payments (which tender to refund to) belong to step 2.2.
+- Refunds of split payments are done in step 2.2 (`docs/specs/refunds.md`): the cashier chooses the legs, each method up to what it took, and exchange credit is a fifth kind of payment (`exchange`) on the new sale.

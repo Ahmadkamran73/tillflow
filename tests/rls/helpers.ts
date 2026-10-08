@@ -86,12 +86,19 @@ function makeCtx(tx: TransactionSql, world: World) {
     /** The statement must be refused (privilege, RLS check, trigger or FK). Uses a savepoint so the tx survives. */
     async denied(fn: () => PromiseLike<unknown>, codes = ["42501", "23503"]) {
       let error: unknown;
-      try {
-        await tx.savepoint(async () => {
-          await fn();
-        });
-      } catch (e) {
-        error = e;
+      // A deadlock (another test file holds locks on tables this statement also locks, e.g. a
+      // TRUNCATE ... CASCADE) says nothing about the rule being tested: try again.
+      for (let attempt = 0; attempt < 8; attempt++) {
+        error = undefined;
+        try {
+          await tx.savepoint(async () => {
+            await fn();
+          });
+        } catch (e) {
+          error = e;
+        }
+        if ((error as { code?: string } | undefined)?.code !== "40P01") break;
+        await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
       }
       expect(error, "expected the statement to be refused").toBeDefined();
       expect(codes).toContain((error as { code?: string }).code);

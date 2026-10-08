@@ -60,15 +60,20 @@ export function useSync(
   useEffect(() => {
     if (!db) return;
     const sub = liveQuery(async (): Promise<Counts> => {
-      const [pending, rejected, contact] = await Promise.all([
+      const [pending, rejected, contact, pendingRefunds, rejectedRefunds] = await Promise.all([
         db.sales.where("syncState").equals("pending").sortBy("id"),
         db.sales.where("syncState").equals("rejected").count(),
         db.meta.get("lastContactAt"),
+        db.refunds.where("syncState").equals("pending").sortBy("id"),
+        db.refunds.where("syncState").equals("rejected").count(),
       ]);
-      const oldest = pending[0] ? new Date(pending[0].completedAt).getTime() : null;
+      const oldestTimes = [pending[0], pendingRefunds[0]]
+        .filter((x) => !!x)
+        .map((x) => new Date(x.completedAt).getTime());
+      const oldest = oldestTimes.length ? Math.min(...oldestTimes) : null;
       return {
-        waiting: pending.length,
-        rejected,
+        waiting: pending.length + pendingRefunds.length,
+        rejected: rejected + rejectedRefunds,
         oldest,
         lastContact: typeof contact?.value === "number" ? contact.value : null,
       };

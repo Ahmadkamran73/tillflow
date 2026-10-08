@@ -8,6 +8,7 @@ import { createSupabaseServerClient, requireRole } from "@/lib/auth";
 import { hashPin, pinSchema } from "@/lib/auth/pin";
 import { getLocation } from "@/lib/catalog";
 import { logger } from "@/lib/logger";
+import { parseCents } from "@/lib/money";
 import { parseDiscountLimit } from "./discount-limit";
 import { formatPairingCode, generatePairingCode, hashPairingCode } from "./token";
 
@@ -253,6 +254,29 @@ export async function removeTillStaffAction(formData: FormData): Promise<void> {
   }
   revalidatePath(page);
   redirect(`${page}?result=removed&n=${n}`);
+}
+
+/** The refund approval limit (euro, from the form) in cents: a cashier's refund above it needs a manager. */
+export async function setRefundLimitAction(formData: FormData): Promise<void> {
+  const orgId = uuid.safeParse(str(formData, "orgId"));
+  if (!orgId.success) redirect("/o");
+  await requireRole("owner", orgId.data);
+  const page = `/o/${orgId.data}/settings/refund-limit`;
+
+  const cents = parseCents(str(formData, "euro").replace(",", "."));
+  if (cents === null || cents > 1_000_000) redirect(`${page}?result=invalid`);
+
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase.rpc("set_refund_override", {
+    p_org: orgId.data,
+    p_cents: cents,
+    p_audit_id: uuidv7(),
+  });
+  if (error) {
+    logger.error({ code: error.code }, "set_refund_override failed");
+    redirect(`${page}?result=error`);
+  }
+  redirect(`${page}?result=saved`);
 }
 
 export async function setDiscountLimitAction(formData: FormData): Promise<void> {

@@ -15,6 +15,9 @@ const body = z.strictObject({
   purpose: z.enum(["unlock", "override"]),
   /** What an override is for; the approval the server issues is good for this and nothing else. */
   approvalFor: z.enum(["discount", "no_sale", "refund"]).optional(),
+  /** A refund approval names the sale it is for and the most it may be spent on (cents). */
+  saleId: z.uuid().optional(),
+  maxCents: z.int().min(0).max(100_000_000).optional(),
 });
 const NO_STORE = { "Cache-Control": "no-store" };
 
@@ -56,8 +59,13 @@ export async function POST(request: NextRequest) {
   const parsed = body.safeParse(json);
   if (!parsed.success)
     return Response.json({ error: "bad request" }, { status: 400, headers: NO_STORE });
-  const { userId, pin, purpose, approvalFor } = parsed.data;
-  if (purpose === "override" && !approvalFor) {
+  const { userId, pin, purpose, approvalFor, saleId, maxCents } = parsed.data;
+  const bound = saleId !== undefined && maxCents !== undefined;
+  if (
+    (purpose === "override" && !approvalFor) ||
+    (approvalFor === "refund") !== bound ||
+    (approvalFor !== "refund" && (saleId !== undefined || maxCents !== undefined))
+  ) {
     return Response.json({ error: "bad request" }, { status: 400, headers: NO_STORE });
   }
 
@@ -90,7 +98,12 @@ export async function POST(request: NextRequest) {
     if (purpose === "override" && approvalFor) {
       // The server saw this manager's PIN: give the till a single-use proof to attach to ONE sale or
       // event. Without it (offline approvals) the server treats the approval as an unverified claim.
-      const approvalId = await issueApproval(device.tokenHash, userId, approvalFor);
+      const approvalId = await issueApproval(
+        device.tokenHash,
+        userId,
+        approvalFor,
+        bound ? { saleId, maxCents } : undefined,
+      );
       return Response.json(
         { result: "ok", userId, role: attempt.role, approvalId },
         { headers: NO_STORE },

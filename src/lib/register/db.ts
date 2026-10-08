@@ -2,7 +2,13 @@ import Dexie, { type Table } from "dexie";
 import type { Feed } from "./feed";
 import { localDate, type RateRow } from "@/lib/money";
 import { priceCart, type Cart } from "./cart";
+import type { RefundInput } from "./refund";
 import type { TenderInput } from "./tender-input";
+import type {
+  RefundKind,
+  RefundLegInput,
+  RefundReasonCode,
+} from "@/lib/sync/refund-protocol";
 
 export type ParkedSale = { id: string; savedAt: number; cart: Cart };
 /** A payment on a sale: what travels (`TenderInput`) plus the type's label, for receipts. */
@@ -41,12 +47,82 @@ export type LocalSale = {
   /** Why the server refused it (a manager sees it under Needs attention). */
   rejectReason?: string;
   invoice?: { name: string; address: string; vatNumber: string };
+  /**
+   * An exchange sale paid for with credit from returned goods: the exchange refund that gave the
+   * credit. The refund must reach the server first, so the outbox holds this sale until it has.
+   */
+  exchangeRefundId?: string;
 };
 /** The part of a sale a receipt is built from (also what an emailed receipt is rebuilt from). */
 export type ReceiptSale = Pick<
   LocalSale,
   "id" | "registerId" | "receiptSeq" | "completedAt" | "cart" | "tenders" | "invoice" | "roundCash"
 >;
+/** One returned line of a refund, with the amounts worked out from the original sale's stored line. */
+export type LocalRefundLine = {
+  /** The line's position on the original sale (its line_no on the server). */
+  lineNo: number;
+  qty: number;
+  restock: boolean;
+  kind: "item" | "deposit";
+  name: string;
+  serial: string | null;
+  /** The ORIGINAL line's VAT rate (null for a deposit, which is outside VAT). */
+  rateBp: number | null;
+  grossCents: number;
+  vatCents: number;
+  netCents: number;
+};
+/** How money goes back: what travels plus the type's label, for the receipt. */
+export type LocalRefundLeg = RefundLegInput & { label: string };
+
+/**
+ * A refund, void or exchange return in the device's outbox (docs/specs/refunds.md). Written before
+ * any network call, like a sale; the original sale is never edited. Amounts are positive: the money
+ * going back. The server recomputes everything from the original sale's stored lines.
+ */
+export type LocalRefund = {
+  /** UUIDv7; also the idempotency key. */
+  id: string;
+  registerId: string;
+  cashierUserId: string;
+  /** A manager's server-issued PIN proof (online), or the manager the till names (offline). */
+  approvalId?: string;
+  claimedApprover?: string;
+  originalSaleId: string;
+  /** The original receipt number as printed ("Till 1 · 000042"), for the refund receipt. */
+  originalReceiptNo: string;
+  kind: RefundKind;
+  reasonCode: RefundReasonCode;
+  reasonNote?: string;
+  /** This till's refund series (printed R000003). */
+  receiptSeq: number;
+  completedAt: string;
+  lines: LocalRefundLine[];
+  legs: LocalRefundLeg[];
+  /** Exchange only: credit applied to the new sale, and that sale. */
+  creditCents: number;
+  exchangeSaleId?: string;
+  roundCash: boolean;
+  /** 5c rounding on the cash leg. */
+  roundingCents: number;
+  /** What leaves the shop: refund total less credit plus rounding. The server recomputes it. */
+  expectedAmountCents: number;
+  syncState: SyncState;
+  attempts: number;
+  syncedAt?: number;
+  rejectReason?: string;
+};
+/**
+ * An exchange in progress on the till (meta key `exchangeDraft`). The refund is NOT written yet: it
+ * is saved together with the sale that spends its credit, so cancelling leaves nothing behind.
+ */
+export type ExchangeDraft = {
+  refundId: string;
+  saleId: string;
+  creditCents: number;
+  input: RefundInput;
+};
 export type Meta = { key: string; value: unknown };
 
 /**
@@ -87,6 +163,7 @@ export class RegisterDb extends Dexie {
   sales!: Table<LocalSale, string>;
   events!: Table<RegisterEvent, string>;
   pinAttempts!: Table<PinAttempts, string>;
+  refunds!: Table<LocalRefund, string>;
 
   constructor(orgId: string) {
     super(`tillflow-${orgId}`);
@@ -161,6 +238,8 @@ export class RegisterDb extends Dexie {
             delete sale.tenderedCents;
           });
       });
+    // v6 (step 2.2): refunds, voids and exchange returns wait in their own outbox.
+    this.version(6).stores({ refunds: "id, syncState, originalSaleId" });
   }
 }
 

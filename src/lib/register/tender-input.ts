@@ -24,6 +24,8 @@ export const tenderReference = z
   .refine((s) => !looksLikeCardNumber(s), "that looks like a card number");
 
 export const tenderMethod = z.enum(["cash", "card", "voucher"]);
+/** What a sale can be paid with: the location's tender types, or exchange credit from returned goods. */
+export const saleTenderMethod = z.enum(["cash", "card", "voucher", "exchange"]);
 
 const cents = z.int().min(0).max(100_000_000);
 
@@ -33,12 +35,22 @@ export const tenderInput = z
     id: z.uuid(),
     /** The location's tender type (its label is snapshotted on the payment); null for sales queued before tender types. */
     typeId: z.uuid().nullable(),
-    method: tenderMethod,
+    method: saleTenderMethod,
     /** Cash: the amount handed over. Card and voucher: the amount they settle. */
     amountCents: cents,
     /** Card tips only, outside the sale total. */
     tipCents: cents.default(0),
     reference: tenderReference.optional(),
+    /** Exchange credit only: the exchange refund whose returned goods pay for this sale. */
+    refundId: z.uuid().optional(),
+  })
+  .refine((t) => (t.method === "exchange") === (t.refundId !== undefined), {
+    message: "exchange credit names its refund, and nothing else does",
+    path: ["refundId"],
+  })
+  .refine((t) => t.method !== "exchange" || t.typeId === null, {
+    message: "exchange credit has no payment type",
+    path: ["typeId"],
   })
   .refine((t) => t.tipCents === 0 || t.method === "card", {
     message: "tips are only taken on card",
@@ -53,6 +65,9 @@ export const tendersInput = z
   .max(10)
   .refine((ts) => ts.filter((t) => t.method === "cash").length <= 1, {
     message: "only one cash payment",
+  })
+  .refine((ts) => ts.filter((t) => t.method === "exchange").length <= 1, {
+    message: "only one exchange credit",
   });
 
 /** Takes a reference out of any payload that may be stored or logged (a rejected sale keeps its inputs). */
@@ -76,4 +91,5 @@ export const toWireTender = (t: TenderInput & { label?: string }): TenderInput =
   amountCents: t.amountCents,
   tipCents: t.tipCents,
   ...(t.reference ? { reference: t.reference } : {}),
+  ...(t.refundId ? { refundId: t.refundId } : {}),
 });

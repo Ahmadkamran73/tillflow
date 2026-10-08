@@ -13,8 +13,11 @@ type Purpose = "discount" | "no_sale" | "refund";
 
 /** What the unlock route does after a manager's PIN was verified: the server issues the proof. */
 const issue = async (ctx: Ctx, shop: Shop, who: Actor, purpose: Purpose) =>
-  (await ctx.sql`select ops.issue_approval(${shop.tokenHash}, ${who.userId}, ${purpose}) as id`)[0]!
-    .id as string;
+  (
+    await ctx.sql`select ops.issue_approval(${shop.tokenHash}, ${who.userId}, ${purpose},
+                    ${purpose === "refund" ? randomUUID() : null}::uuid,
+                    ${purpose === "refund" ? 100 : null}::integer) as id`
+  )[0]!.id as string;
 
 const event = (shop: Shop, over: Record<string, unknown> = {}) => ({
   id: randomUUID(),

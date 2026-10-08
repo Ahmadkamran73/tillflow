@@ -75,6 +75,12 @@ export const SYNC_REASONS = [
   "discount_needs_approval",
   "tender_mismatch",
   "unknown_tender",
+  "refund_exceeds",
+  "refund_mismatch",
+  "refund_needs_approval",
+  "void_not_allowed",
+  "original_not_found",
+  "refund_unverified",
 ] as const;
 export type SyncReason = (typeof SYNC_REASONS)[number];
 
@@ -103,4 +109,11 @@ export const reasonText: Record<SyncReason, string> = {
     "The discount was above the shop's limit and no manager approved it on the till.",
   tender_mismatch: "The payments on this sale do not add up to its total.",
   unknown_tender: "A payment type on this sale is not set up for this till's shop.",
+  refund_exceeds: "The refund took more units, or more money by one method, than the sale allows.",
+  refund_mismatch: "The refund's amounts do not add up to what the server calculated.",
+  refund_needs_approval: "The refund needed a manager's approval and none was valid.",
+  void_not_allowed: "Only a whole sale from the same till and the same day can be voided.",
+  original_not_found: "The sale being refunded never reached the server.",
+  refund_unverified:
+    "A refund that needed a manager was recorded without a PIN the server could check. Check it with the cashier and manager, then mark it resolved.",
 };

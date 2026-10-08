@@ -214,6 +214,8 @@ export function TenderDialog({
                   </span>
                 )}
               </span>
+              {/* Exchange credit belongs to a refund already saved: it cannot be taken off here. */}
+              {x.method !== "exchange" && (
               <Button
                 type="button"
                 size="touch"
@@ -226,6 +228,7 @@ export function TenderDialog({
               >
                 <Trash2Icon aria-hidden /> {t("tender.removeShort")}
               </Button>
+              )}
             </li>
           ))}
         </ul>

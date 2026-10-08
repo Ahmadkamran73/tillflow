@@ -8,6 +8,9 @@ import "server-only";
 export {
   deviceFeedMeta,
   deviceFeedTable,
+  deviceFindSale,
+  deviceRefundMeta,
+  deviceRefundsKnown,
   deviceSaleCatalogAsOf,
   deviceSalesKnown,
   deviceSyncMeta,
