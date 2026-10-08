@@ -71,7 +71,12 @@ as credit towards a new sale). Money is integer cents; every amount goes through
   stays the single-use `register_approvals` row below (server-issued, bound to a sale and a value).
   The token is also tied to the till's current pairing (pairing again ends every token), is dropped
   from the device once the server has judged the refund it travelled with, and is never kept in a
-  rejection. **Residual:** it is a bearer credential for up to an hour (a day more for a refund made
+  rejection. **Accepted, reviewed trade-off (owner decision, 2026-10-08):** a manager serving at the
+  till does NOT need a second PIN or an approval row for an over-limit refund. The token stays
+  scoped to one person, one shop and one till (never usable across tills) and to its validity
+  period; every such refund is auditable: the refund row records the proven manager as approver, and
+  the audit row records the serving manager, the till, the till's time and the server's time, and
+  the verification status. **Residual:** it is a bearer credential for up to an hour (a day more for a refund made
   offline): someone who copies a manager's live token from the paired device could, within that
   window and on that till only, record over-limit refunds as `verified`. Per-method caps, the void
   rules and the audit log still apply; making each over-limit refund need its own approval row would

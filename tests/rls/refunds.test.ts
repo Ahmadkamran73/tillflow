@@ -775,7 +775,16 @@ describe("server-signed serving tokens", () => {
       expect(await stateOf(ctx, p.refund.id)).toBe("verified");
       expect(await attentionOf(ctx, a.orgId)).toEqual([]);
       const [audit] = await ctx.sql`select after from audit_log where entity_id = ${p.refund.id}`;
-      expect(audit!.after).toMatchObject({ approval: "verified", serving_verified: true });
+      expect(audit!.after).toMatchObject({
+        approval: "verified",
+        serving_verified: true,
+        serving_user_id: a.manager.userId,
+        register_id: a.registerId,
+      });
+      expect(audit!.after).toHaveProperty("completed_at");
+      expect(audit!.after).toHaveProperty("received_at");
+      const [row] = await ctx.sql`select approved_by, cashier_user_id from refunds where id = ${p.refund.id}`;
+      expect(row).toEqual({ approved_by: a.manager.userId, cashier_user_id: a.manager.userId });
     }));
 
   it("a valid token for a CASHIER still needs a manager's approval", () =>
@@ -932,6 +941,9 @@ describe("server-signed serving tokens", () => {
       // 1. the cashier's till says a manager is serving
       const asManager = await attempt(ctx, a, a.manager.userId, null);
       expect(await stateOf(ctx, asManager.p.refund.id)).toBe("self");
+      // not proven: no serving identity is recorded as proof
+      const [unproven] = await ctx.sql`select after from audit_log where entity_id = ${asManager.p.refund.id}`;
+      expect(unproven!.after).toMatchObject({ approval: "self", serving_verified: false, serving_user_id: null });
       // 2. the cashier's till names a manager as approver
       const named = await attempt(ctx, a, a.cashier.userId, null, { claimed_approver: a.manager.userId });
       expect(await stateOf(ctx, named.p.refund.id)).toBe("unverified");

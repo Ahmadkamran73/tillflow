@@ -393,6 +393,10 @@ begin
     -- A manager or owner whose PIN the server checked when they unlocked (signed token) is proven.
     -- Otherwise it is only the till's word.
     v_state := case when v_serving is not null then 'verified' else 'self' end;
+    -- the proven manager is recorded as the approver on the refund itself
+    if v_serving is not null then
+      v_approver := v_serving;
+    end if;
   end if;
   if v_approver is not null and not app.is_manager(v_approver, v_org) then
     raise exception 'approver is not a manager' using errcode = '42501';
@@ -460,7 +464,10 @@ begin
           jsonb_build_object('kind', v_kind, 'original_sale_id', v_sale_id, 'register_id', v_reg,
                              'reason', r ->> 'reason_code', 'amount_cents', v_amount,
                              'credit_cents', v_credit, 'approved_by', v_approver,
-                             'approval', v_state, 'serving_verified', v_serving is not null));
+                             'approval', v_state, 'serving_verified', v_serving is not null,
+                             -- who the server proved was serving (null: not proven), on which till, when
+                             'serving_user_id', v_serving, 'completed_at', v_completed,
+                             'received_at', now()));
 
   update public.registers set last_seen_at = now() where id = v_reg and org_id = v_org;
   return 'created';
