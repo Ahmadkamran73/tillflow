@@ -325,3 +325,24 @@ export async function recordRegisterEvents(tokenHash: string, events: unknown): 
     select ops.record_register_events(${tokenHash}, ${db().json(events as postgres.JSONValue)}) as id`;
   return rows.map((r) => r.id);
 }
+
+// ---------------------------------------------------------------- shifts (step 2.3)
+
+export type ShiftEventResult = "recorded" | "duplicate";
+
+/** One open / cash in-out / close event from a paired till's shift outbox (idempotent by id). */
+export async function recordShiftEvent(
+  tokenHash: string,
+  event: unknown,
+): Promise<ShiftEventResult> {
+  const [row] = await db()<{ r: ShiftEventResult }[]>`
+    select ops.record_shift_event(${tokenHash}, ${db().json(event as postgres.JSONValue)}) as r`;
+  if (!row) throw new Error("record_shift_event returned no row");
+  return row.r;
+}
+
+/** What the Z email needs: the stored report, shop and till names, and the owners' addresses. */
+export async function shiftZEmailData(shiftId: string): Promise<unknown> {
+  const [row] = await db()<{ d: unknown }[]>`select ops.shift_z_email_data(${shiftId}) as d`;
+  return row?.d ?? null;
+}

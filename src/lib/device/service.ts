@@ -21,5 +21,6 @@ export {
   pinAttemptBegin,
   pinAttemptFinish,
   recordRegisterEvents,
+  recordShiftEvent,
   type FeedTable,
 } from "@/lib/ops/db";

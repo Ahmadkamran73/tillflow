@@ -3,6 +3,7 @@
 import {
   BarChart3Icon,
   BoxesIcon,
+  ClockIcon,
   ChevronsUpDownIcon,
   LayoutDashboardIcon,
   MenuIcon,
@@ -34,6 +35,7 @@ import { t, type MessageKey } from "@/lib/i18n";
 const items: { slug: string; label: MessageKey; Icon: typeof LayoutDashboardIcon }[] = [
   { slug: "dashboard", label: "nav.dashboard", Icon: LayoutDashboardIcon },
   { slug: "sales", label: "nav.sales", Icon: ReceiptIcon },
+  { slug: "shifts", label: "nav.shifts", Icon: ClockIcon },
   { slug: "products", label: "nav.products", Icon: PackageIcon },
   { slug: "inventory", label: "nav.inventory", Icon: BoxesIcon },
   { slug: "customers", label: "nav.customers", Icon: UserRoundIcon },

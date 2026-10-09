@@ -3,6 +3,7 @@ import { deviceEnIE } from "./device-en-IE";
 import { refundsEnIE } from "./refunds-en-IE";
 import { registerEnIE } from "./register-en-IE";
 import { salesEnIE } from "./sales-en-IE";
+import { shiftsEnIE } from "./shifts-en-IE";
 import { tendersEnIE } from "./tenders-en-IE";
 
 /** Source language. Add a key here first; other locales may be partial and fall back to this. */
@@ -173,6 +174,7 @@ export const enIE = {
   ...registerEnIE,
   ...deviceEnIE,
   ...salesEnIE,
+  ...shiftsEnIE,
   ...tendersEnIE,
   ...refundsEnIE,
 } as const;

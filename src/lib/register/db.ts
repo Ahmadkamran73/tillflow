@@ -4,11 +4,7 @@ import { localDate, type RateRow } from "@/lib/money";
 import { priceCart, type Cart } from "./cart";
 import type { RefundInput } from "./refund";
 import type { TenderInput } from "./tender-input";
-import type {
-  RefundKind,
-  RefundLegInput,
-  RefundReasonCode,
-} from "@/lib/sync/refund-protocol";
+import type { RefundKind, RefundLegInput, RefundReasonCode } from "@/lib/sync/refund-protocol";
 
 export type ParkedSale = { id: string; savedAt: number; cart: Cart };
 /** A payment on a sale: what travels (`TenderInput`) plus the type's label, for receipts. */
@@ -27,6 +23,8 @@ export type LocalSale = {
   cashierUserId?: string;
   /** The server's proof of a manager PIN for a discount above the shop's limit (online approvals only). */
   approvalId?: string;
+  /** The shift this sale was rung in (the till's open shift at the time). */
+  shiftId?: string;
   receiptSeq: number;
   completedAt: string;
   /** Inputs only: totals are always re-derived with `priceCart`. */
@@ -91,6 +89,8 @@ export type LocalRefund = {
   claimedApprover?: string;
   /** The server's signed proof of who was serving (online unlock); verified again by the server. */
   servingToken?: string;
+  /** The shift this refund was rung in. */
+  shiftId?: string;
   originalSaleId: string;
   /** The original receipt number as printed ("Till 1 · 000042"), for the refund receipt. */
   originalReceiptNo: string;
@@ -124,6 +124,39 @@ export type ExchangeDraft = {
   saleId: string;
   creditCents: number;
   input: RefundInput;
+};
+/** The shift open on this till (meta key `currentShift`); selling needs one. */
+export type CurrentShift = {
+  id: string;
+  registerId: string;
+  openedAt: string;
+  floatCents: number;
+  cashierUserId: string;
+};
+/**
+ * Something about a shift waiting to go to /api/v1/sync/shifts (docs/specs/shifts.md). Sales and
+ * refunds name their shift on their own record.
+ */
+export type LocalShiftEvent = {
+  /** UUIDv7; also the idempotency key. Sorts by time, so events go oldest first. */
+  id: string;
+  kind: "open" | "cash" | "close";
+  /** The shift: for `open` its own id (equal to `id`). */
+  shiftId: string;
+  registerId: string;
+  at: string;
+  cashierUserId: string;
+  floatCents?: number;
+  movement?: "in" | "out";
+  amountCents?: number;
+  note?: string;
+  /** Close: counted cash, the expected cash the till worked out and the documents it counted. */
+  countedCents?: number;
+  expectedCents?: number;
+  saleCount?: number;
+  refundCount?: number;
+  rejectedCount?: number;
+  syncState: SyncState;
 };
 export type Meta = { key: string; value: unknown };
 
@@ -166,6 +199,7 @@ export class RegisterDb extends Dexie {
   events!: Table<RegisterEvent, string>;
   pinAttempts!: Table<PinAttempts, string>;
   refunds!: Table<LocalRefund, string>;
+  shiftEvents!: Table<LocalShiftEvent, string>;
 
   constructor(orgId: string) {
     super(`tillflow-${orgId}`);
@@ -242,6 +276,8 @@ export class RegisterDb extends Dexie {
       });
     // v6 (step 2.2): refunds, voids and exchange returns wait in their own outbox.
     this.version(6).stores({ refunds: "id, syncState, originalSaleId" });
+    // v7 (step 2.3): shifts wait in their own outbox; sales and refunds carry a shiftId.
+    this.version(7).stores({ shiftEvents: "id, syncState, shiftId" });
   }
 }
 

@@ -53,6 +53,8 @@ export const syncRefund = z
     completedAt: z.iso.datetime(),
     /** Whoever's PIN unlocked the till. The server checks they are staff of this shop. */
     cashierUserId: z.uuid(),
+    /** The shift this refund was rung in (absent before shifts); must be a shift of this till. */
+    shiftId: z.uuid().optional(),
     /** Server-issued proof of a manager PIN (see register_approvals, purpose 'refund'). */
     approvalId: z.uuid().optional(),
     /** Offline only: the manager whose cached PIN hash the till checked. Recorded as unverified. */

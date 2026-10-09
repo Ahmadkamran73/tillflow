@@ -270,6 +270,21 @@ html {
   .print-only * {
     visibility: visible;
   }
+  /* A back-office report (X/Z): shown on its own, full width. */
+  .print-report,
+  .print-report * {
+    visibility: visible;
+  }
+  .print-report {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    max-width: none;
+    padding: 12mm;
+    background: #fff;
+    color: #000;
+  }
   .print-only {
     display: block;
     position: absolute;
