@@ -4175,7 +4175,7 @@
       "checkConstraints": {
         "tender_types_method": {
           "name": "tender_types_method",
-          "value": "\"tender_types\".\"method\" in ('cash', 'card')"
+          "value": "\"tender_types\".\"method\" in ('cash', 'card') or (\"tender_types\".\"method\" = 'voucher' and \"tender_types\".\"archived_at\" is not null)"
         },
         "tender_types_label": {
           "name": "tender_types_label",

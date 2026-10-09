@@ -21,7 +21,14 @@ begin
   return new;
 end
 $$;
+-- 0029 made the method check strict ('cash', 'card'), which also rejects the UPDATE below (an
+-- UPDATE re-checks the row even for a NOT VALID constraint). Only a RETIRED voucher type may
+-- remain, so allow exactly that, retire them, then validate the constraint against all rows.
+alter table public.tender_types drop constraint tender_types_method;
+alter table public.tender_types add constraint tender_types_method
+  check (method in ('cash', 'card') or (method = 'voucher' and archived_at is not null)) not valid;
 update public.tender_types set archived_at = now() where method = 'voucher' and archived_at is null;
+alter table public.tender_types validate constraint tender_types_method;
 
 -- ---------------------------------------------------------------- RLS and grants
 alter table public.refunds enable row level security;
