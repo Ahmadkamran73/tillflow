@@ -48,7 +48,11 @@ export const tenderTypes = pgTable(
     uniqueIndex("tender_types_one_cash_key")
       .on(t.locationId)
       .where(sql`${t.method} = 'cash'`),
-    check("tender_types_method", sql`${t.method} in ('cash', 'card')`),
+    // Vouchers are gone: only a RETIRED Voucher type may remain (payments point at it).
+    check(
+      "tender_types_method",
+      sql`${t.method} in ('cash', 'card') or (${t.method} = 'voucher' and ${t.archivedAt} is not null)`,
+    ),
     check("tender_types_label", sql`char_length(btrim(${t.label})) between 1 and 40`),
   ],
 );
