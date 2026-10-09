@@ -38,6 +38,8 @@ export const products = pgTable(
     taxCategory: text("tax_category").notNull(),
     takeawayTaxCategory: text("takeaway_tax_category"),
     trackStock: boolean("track_stock").notNull().default(true),
+    /** Alert when the product's total on hand (all variants) falls to this or below. Null = no alert. */
+    lowStockThreshold: integer("low_stock_threshold"),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
     createdAt: createdAtCol(),
     updatedAt: updatedAtCol(),
@@ -52,6 +54,10 @@ export const products = pgTable(
     index("products_org_name_idx").on(t.orgId, t.name),
     index("products_org_category_idx").on(t.orgId, t.categoryId),
     check("products_name_len", sql`char_length(${t.name}) between 1 and 120`),
+    check(
+      "products_low_stock_threshold",
+      sql`${t.lowStockThreshold} is null or ${t.lowStockThreshold} between 0 and 1000000`,
+    ),
     check("products_tax_category", sql`${t.taxCategory} in ${TAX_CATEGORY_SQL}`),
     check(
       "products_takeaway_tax_category",
@@ -126,7 +132,17 @@ export const variantCosts = pgTable(
   ],
 );
 
-export const stockReasons = ["opening", "adjustment", "sale", "refund"] as const;
+export const stockReasons = [
+  "opening",
+  "adjustment",
+  "sale",
+  "refund",
+  "damage",
+  "count",
+  "received",
+] as const;
+/** The reasons a manager may record by hand (the rest come from sales and refunds). */
+export const manualStockReasons = ["adjustment", "damage", "count", "received"] as const;
 
 /** Cached total per variant and location. Written only by the stock_movements trigger. */
 export const stockLevels = pgTable(
@@ -166,6 +182,7 @@ export const stockMovements = pgTable(
     reason: text("reason").notNull(),
     refId: uuid("ref_id"),
     actorUserId: uuid("actor_user_id"),
+    note: text("note"),
     createdAt: createdAtCol(),
   },
   (t) => [
@@ -184,7 +201,11 @@ export const stockMovements = pgTable(
       "stock_movements_qty",
       sql`${t.qtyDelta} <> 0 and ${t.qtyDelta} between -1000000 and 1000000`,
     ),
-    check("stock_movements_reason", sql`${t.reason} in ('opening','adjustment','sale','refund')`),
+    check(
+      "stock_movements_reason",
+      sql`${t.reason} in ('opening','adjustment','sale','refund','damage','count','received')`,
+    ),
+    check("stock_movements_note_len", sql`${t.note} is null or char_length(${t.note}) <= 200`),
   ],
 );
 
