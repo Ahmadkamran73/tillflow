@@ -1,5 +1,6 @@
 import { catalogEnIE } from "./catalog-en-IE";
 import { deviceEnIE } from "./device-en-IE";
+import { inventoryEnIE } from "./inventory-en-IE";
 import { refundsEnIE } from "./refunds-en-IE";
 import { registerEnIE } from "./register-en-IE";
 import { salesEnIE } from "./sales-en-IE";
@@ -175,6 +176,7 @@ export const enIE = {
   ...deviceEnIE,
   ...salesEnIE,
   ...shiftsEnIE,
+  ...inventoryEnIE,
   ...tendersEnIE,
   ...refundsEnIE,
 } as const;

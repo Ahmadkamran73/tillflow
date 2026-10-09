@@ -4,7 +4,9 @@ import { notFound } from "next/navigation";
 import { buttonVariants } from "@/components/ui/button";
 import { presets } from "@/config/business-type-presets";
 import { requireRole } from "@/lib/auth";
+import { getLocation } from "@/lib/catalog";
 import { t } from "@/lib/i18n";
+import { listStock } from "@/lib/inventory";
 import { getOrganisation, listCategories } from "@/lib/org";
 import { getAttention } from "@/lib/sync/attention";
 
@@ -16,6 +18,9 @@ export default async function DashboardPage({ params }: { params: Promise<{ orgI
   const [org, categories] = await Promise.all([getOrganisation(orgId), listCategories(orgId)]);
   if (!org) notFound();
   const attention = await getAttention(orgId);
+  const location = await getLocation(orgId);
+  const stock = location ? await listStock(orgId, location.id, { filter: "all", page: 1 }) : null;
+  const lowProducts = stock?.lowProducts ?? 0;
   const tiles = presets[org.businessType].dashboardTiles;
 
   return (
@@ -38,7 +43,10 @@ export default async function DashboardPage({ params }: { params: Promise<{ orgI
         ))}
       </dl>
 
-      {(attention.open > 0 || attention.toReview > 0 || attention.staleTills.length > 0) && (
+      {(attention.open > 0 ||
+        attention.toReview > 0 ||
+        attention.staleTills.length > 0 ||
+        lowProducts > 0) && (
         <section aria-labelledby="attention" className="surface-panel flex flex-col gap-2 p-5">
           <h2 id="attention" className="text-heading font-semibold">
             {t("tile.attention")}
@@ -57,6 +65,16 @@ export default async function DashboardPage({ params }: { params: Promise<{ orgI
                 className="inline-flex min-h-12 items-center font-medium underline"
               >
                 {t("sales.reviewLink", { count: attention.toReview })}
+              </Link>
+            </p>
+          )}
+          {lowProducts > 0 && (
+            <p>
+              <Link
+                href={`/o/${orgId}/inventory?filter=low`}
+                className="inline-flex min-h-12 items-center font-medium underline"
+              >
+                {t("inventory.attentionLow", { count: lowProducts })}
               </Link>
             </p>
           )}

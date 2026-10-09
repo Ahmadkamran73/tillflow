@@ -155,6 +155,13 @@
       "when": 1791547993971,
       "tag": "0032_shifts",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1791556281609,
+      "tag": "0034_inventory",
+      "breakpoints": true
     }
   ]
 }
