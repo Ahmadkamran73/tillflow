@@ -52,7 +52,7 @@ export const feedSchema = z.object({
     .array(
       z.object({
         id: z.string(),
-        method: z.enum(["cash", "card", "voucher"]),
+        method: z.enum(["cash", "card"]),
         label: z.string(),
         sort: z.int(),
       }),

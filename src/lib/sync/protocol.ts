@@ -27,7 +27,7 @@ const syncSaleShape = z.strictObject({
   mode: z.enum(["eat_in", "take_away"]).default("eat_in"),
   lines: z.array(saleLine).min(1).max(100),
   basketDiscount: discount.optional(),
-  /** 1-10 payments (cash handed over, card/voucher amounts, card tips); the server re-checks they add up. */
+  /** 1-10 payments (cash handed over, card amounts, card tips); the server re-checks they add up. */
   tenders: tendersInput,
   /**
    * Whether this sale rounded cash to 5c: the shop's setting when it was rung up. The server prices

@@ -5,6 +5,24 @@
 -- Clients get SELECT and nothing else. Amounts are recomputed here from the stored sale-line
 -- snapshot, so VAT is always reversed at the ORIGINAL rate (src/lib/money/refund.ts is the twin).
 
+-- ---------------------------------------------------------------- vouchers are gone
+-- A shop takes cash and card (plus exchange credit, which is not a tender type). New locations get
+-- Cash and Card only, and any Voucher type a location already has is archived (never deleted:
+-- payments point at it). Voucher payments already recorded stay readable (a voucher payment cannot be
+-- refunded: there is nothing to give it back as); the new method checks are NOT VALID, so they bind
+-- new rows, not history.
+create or replace function app.seed_tender_types() returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  insert into public.tender_types (id, org_id, location_id, method, label, sort)
+  values (gen_random_uuid(), new.org_id, new.id, 'cash', 'Cash', 0),
+         (gen_random_uuid(), new.org_id, new.id, 'card', 'Card', 10);
+  return new;
+end
+$$;
+update public.tender_types set archived_at = now() where method = 'voucher' and archived_at is null;
+
 -- ---------------------------------------------------------------- RLS and grants
 alter table public.refunds enable row level security;
 alter table public.refund_lines enable row level security;
@@ -227,7 +245,6 @@ begin
       'refunded', (select jsonb_build_object(
             'cash', coalesce(sum(rp.amount_cents) filter (where rp.method = 'cash'), 0),
             'card', coalesce(sum(rp.amount_cents) filter (where rp.method = 'card'), 0),
-            'voucher', coalesce(sum(rp.amount_cents) filter (where rp.method = 'voucher'), 0),
             -- what earlier refunds are worth (items + deposits), for the approval limit
             'value', coalesce((select sum(r2.items_total_cents + r2.non_vat_cents)
                                  from public.refunds r2
@@ -426,11 +443,11 @@ begin
     end if;
   end if;
 
-  -- The legs. Card and voucher are exact; cash is the cash share plus rounding (a multiple of 5
+  -- The legs. Card is exact; cash is the cash share plus rounding (a multiple of 5
   -- when rounded); the exchange leg is the credit. Tips go back only on a void.
   if exists (select 1 from jsonb_array_elements(v_pays) x
               where jsonb_typeof(x) <> 'object'
-                 or coalesce(x ->> 'method', '') not in ('cash', 'card', 'voucher', 'exchange')
+                 or coalesce(x ->> 'method', '') not in ('cash', 'card', 'exchange')
                  or (x ->> 'amount') is null
                  or (x ->> 'amount')::bigint <= 0
                  or coalesce((x ->> 'tip')::bigint, 0) < 0
@@ -473,15 +490,13 @@ begin
   end if;
 
   -- Each method pays back no more than it took. A card sale can never be refunded in cash, and
-  -- exchange credit that paid for the sale goes back as a voucher (never cash: it may stand for a
-  -- card payment on an earlier sale). Cash may stray 2c per refund, for 5c rounding.
+  -- exchange credit that paid for the sale is not money (it may stand for a card payment on an
+  -- earlier sale): it can only be exchanged again, never paid out. Cash may stray 2c per refund, for 5c rounding.
   select coalesce(sum(p.amount_cents) filter (where p.method = 'cash'), 0) as cash,
-         coalesce(sum(p.amount_cents) filter (where p.method = 'card'), 0) as card,
-         coalesce(sum(p.amount_cents) filter (where p.method in ('voucher', 'exchange')), 0) as voucher
+         coalesce(sum(p.amount_cents) filter (where p.method = 'card'), 0) as card
     into v_paid from public.payments p where p.org_id = v_org and p.sale_id = v_sale_id;
   select coalesce(sum(rp.amount_cents) filter (where rp.method = 'cash'), 0) as cash,
-         coalesce(sum(rp.amount_cents) filter (where rp.method = 'card'), 0) as card,
-         coalesce(sum(rp.amount_cents) filter (where rp.method = 'voucher'), 0) as voucher
+         coalesce(sum(rp.amount_cents) filter (where rp.method = 'card'), 0) as card
     into v_back from public.refund_payments rp
     join public.refunds rf on rf.org_id = rp.org_id and rf.id = rp.refund_id
    where rf.org_id = v_org and rf.original_sale_id = v_sale_id;
@@ -492,8 +507,7 @@ begin
   if exists (select 1 from jsonb_array_elements(v_pays) x
              where (x ->> 'method' = 'cash'
                     and (x ->> 'amount')::bigint > v_paid.cash - v_back.cash + case when v_paid.cash > 0 then 2 * (1 + v_cash_refunds) else 0 end)
-                or (x ->> 'method' = 'card' and (x ->> 'amount')::bigint > v_paid.card - v_back.card)
-                or (x ->> 'method' = 'voucher' and (x ->> 'amount')::bigint > v_paid.voucher - v_back.voucher)) then
+                or (x ->> 'method' = 'card' and (x ->> 'amount')::bigint > v_paid.card - v_back.card)) then
     raise exception 'refund exceeds what was paid by that method' using errcode = '22023';
   end if;
 
@@ -701,11 +715,11 @@ begin
     into v_sum_gross, v_sum_vat, v_sum_deposit, v_bad_lines
     from jsonb_array_elements(p -> 'lines') l;
   -- The payments, shaped before they are summed. Cash settles its share plus rounding (what was
-  -- handed over less the change); card and voucher settle exactly their amount, with no change.
+  -- handed over less the change); card settles exactly its amount, with no change.
   if jsonb_typeof(v_pays) <> 'array' or jsonb_array_length(v_pays) not between 1 and 10
      or exists (select 1 from jsonb_array_elements(v_pays) x
                 where jsonb_typeof(x) <> 'object'
-                   or coalesce(x ->> 'method', '') not in ('cash', 'card', 'voucher', 'exchange')
+                   or coalesce(x ->> 'method', '') not in ('cash', 'card', 'exchange')
                    or num_nulls(x ->> 'amount', x ->> 'tendered') > 0) then
     raise exception 'payments are not valid' using errcode = '22023';
   end if;

@@ -7,7 +7,7 @@ Every completed sale is written to the device's Dexie outbox first (UUIDv7 id = 
 ## Out of scope
 
 - Device tokens, pairing and PINs (step 1.7). Until then the endpoint authenticates the signed-in member's session plus a register id that belongs to the org, all behind `authenticateRegister()` so 1.7 swaps in the token.
-- Card, split and voucher tenders (2.1), refunds (2.2), shifts (2.3), customers (2.5).
+- Card and split tenders (2.1), refunds (2.2), shifts (2.3), customers (2.5).
 - Syncing a VAT invoice issued after the sale has synced (stays device-only; a later `sale_invoices` table).
 - Realtime nudges for catalogue changes (existing 60 s pull stays).
 

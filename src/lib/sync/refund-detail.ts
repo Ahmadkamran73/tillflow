@@ -27,7 +27,7 @@ const detailLine = z.object({
 });
 
 const detailPayment = z.object({
-  method: z.enum(["cash", "card", "voucher", "exchange"]),
+  method: z.enum(["cash", "card", "exchange"]),
   type_id: z.uuid().nullable(),
   label: z.string().nullable(),
   amount: int,
@@ -53,7 +53,6 @@ export const saleDetail = z.object({
   refunded: z.object({
     cash: int,
     card: int,
-    voucher: int,
     /** What earlier refunds are worth (items + deposits): the approval limit counts it. */
     value: int.default(0),
     /** Earlier refunds that paid cash out: each rounded on its own, so each can drift 2c. */
@@ -71,11 +70,11 @@ export const saleDetails = z.array(saleDetail);
  * rounding is already inside the payment amounts.
  */
 export function availableOf(d: SaleDetail): RefundAvailable {
-  const paid = { cash: 0, card: 0, voucher: 0 };
-  for (const p of d.payments) paid[p.method === "exchange" ? "voucher" : p.method] += p.amount;
+  const paid = { cash: 0, card: 0 };
+  // Exchange credit that paid for the sale is not money: it can only be exchanged again, never paid out.
+  for (const p of d.payments) if (p.method !== "exchange") paid[p.method] += p.amount;
   return {
     cash: Math.max(paid.cash - d.refunded.cash, 0),
     card: Math.max(paid.card - d.refunded.card, 0),
-    voucher: Math.max(paid.voucher - d.refunded.voucher, 0),
   };
 }

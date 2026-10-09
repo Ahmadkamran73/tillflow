@@ -43,14 +43,14 @@ export type Receipt = {
   totalCents: number;
   roundingCents: number;
   dueCents: number;
-  /** One per payment: cash shows what was handed over; card and voucher what they settled. */
+  /** One per payment: cash shows what was handed over; card what it settled. */
   payments: {
     label: string;
-    method: "cash" | "card" | "voucher" | "exchange";
+    method: "cash" | "card" | "exchange";
     cents: number;
     /** Card tip, outside the total. */
     tipCents: number;
-    /** Terminal receipt or voucher number the cashier typed; never a card number. */
+    /** Terminal receipt reference the cashier typed; never a card number. */
     reference?: string;
   }[];
   changeCents: number;

@@ -100,15 +100,15 @@ export function detailOfLocalSale(
       amount: t.method === "cash" ? settlement.cashShare + settlement.rounding : t.amountCents,
       tip: t.tipCents,
     })),
-    refunded: { cash: 0, card: 0, voucher: 0, value: 0, cash_refunds: 0 },
+    refunded: { cash: 0, card: 0, value: 0, cash_refunds: 0 },
   };
 }
 
 /** How much each method has sent back in these refunds (exchange credit is not money out). */
 export function refundedByMethod(
   refunds: readonly Pick<LocalRefund, "legs">[],
-): Record<"cash" | "card" | "voucher", number> {
-  const out = { cash: 0, card: 0, voucher: 0 };
+): Record<"cash" | "card", number> {
+  const out = { cash: 0, card: 0 };
   for (const r of refunds) for (const l of r.legs) out[l.method] += l.amountCents;
   return out;
 }
@@ -135,7 +135,6 @@ export function applyLocalRefunds(detail: SaleDetail, refunds: readonly LocalRef
     refunded: {
       cash: detail.refunded.cash + back.cash,
       card: detail.refunded.card + back.card,
-      voucher: detail.refunded.voucher + back.voucher,
       value:
         detail.refunded.value +
         mine.reduce((n, r) => n + r.lines.reduce((m, l) => m + l.grossCents, 0), 0),

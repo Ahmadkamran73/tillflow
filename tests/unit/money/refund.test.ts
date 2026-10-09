@@ -11,7 +11,7 @@ import {
   type RefundLeg,
 } from "@/lib/money";
 
-const avail = (cash = 0, card = 0, voucher = 0): RefundAvailable => ({ cash, card, voucher });
+const avail = (cash = 0, card = 0): RefundAvailable => ({ cash, card });
 const leg = (method: RefundLeg["method"], amount: number, tip?: number): RefundLeg => ({
   method,
   amount,
@@ -184,7 +184,6 @@ describe("settleRefund", () => {
   it("refuses a method above what it paid (card sale cannot be paid back in cash)", () => {
     expect(settleRefund(1000, [leg("cash", 1000)], avail(0, 1000)).error).toBe("over_method");
     expect(settleRefund(1000, [leg("card", 1000)], avail(0, 900)).error).toBe("over_method");
-    expect(settleRefund(1000, [leg("voucher", 1000)], avail(1000)).error).toBe("over_method");
   });
 
   it("allows the cash leg 2c of rounding slack only when cash was paid", () => {
@@ -270,14 +269,13 @@ describe("settleRefund", () => {
 });
 
 describe("suggestRefundLegs", () => {
-  it("fills card first, then voucher, cash last", () => {
-    const legs = suggestRefundLegs(2000, avail(1000, 800, 300));
+  it("fills card first, cash last", () => {
+    const legs = suggestRefundLegs(2000, avail(1000, 800));
     expect(legs).toEqual([
       { method: "card", amount: 800 },
-      { method: "voucher", amount: 300 },
-      { method: "cash", amount: 900 },
+      { method: "cash", amount: 1200 },
     ]);
-    expect(settleRefund(2000, legs, avail(1000, 800, 300)).ok).toBe(true);
+    expect(settleRefund(2000, legs, avail(1200, 800)).ok).toBe(true);
   });
 
   it("rounds the cash leg and skips empty ones", () => {

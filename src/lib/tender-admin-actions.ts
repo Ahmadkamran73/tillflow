@@ -7,7 +7,7 @@ import { createSupabaseServerClient, requireRole } from "@/lib/auth";
 import { getLocation } from "@/lib/catalog";
 import { logger } from "@/lib/logger";
 
-// Settings > Payment types. A manager adds, renames and archives the location's card and voucher
+// Settings > Payment types. A manager adds, renames and archives the location's card
 // types. Cash is built in. Role checked here, input validated with Zod, and the database checks
 // again (RLS: managers only; a trigger refuses archiving cash). Never deleted: payments point at them.
 
@@ -25,7 +25,7 @@ export async function addTenderTypeAction(formData: FormData): Promise<void> {
   if (!orgId.success) redirect("/o");
   await requireRole(["owner", "manager"], orgId.data);
   const name = label.safeParse(str(formData, "label"));
-  const method = z.enum(["card", "voucher"]).safeParse(str(formData, "method"));
+  const method = z.enum(["card"]).safeParse(str(formData, "method"));
   if (!name.success || !method.success) redirect(`${page(orgId.data)}?result=invalid`);
   const location = await getLocation(orgId.data);
   if (!location) redirect(`${page(orgId.data)}?result=error`);

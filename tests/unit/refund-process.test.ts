@@ -75,7 +75,7 @@ function detail(
       { method: "card", type_id: CARD_TYPE, label: "Card", amount: 400, tip: 50 },
       { method: "cash", type_id: CASH_TYPE, label: "Cash", amount: 300, tip: 0 },
     ],
-    refunded: { cash: 0, card: 0, voucher: 0, value: 0, cash_refunds: 0 },
+    refunded: { cash: 0, card: 0, value: 0, cash_refunds: 0 },
   };
 }
 
@@ -245,7 +245,7 @@ describe("processRefunds", () => {
 
   it("counts refunds already made when it works out what each method can still give back", async () => {
     const after = detail();
-    after.refunded = { cash: 0, card: 350, voucher: 0, value: 350, cash_refunds: 0 };
+    after.refunded = { cash: 0, card: 350, value: 350, cash_refunds: 0 };
     after.lines[0]!.refunded_qty = 1;
     // the second unit: 50c is left on the card, the rest must be cash
     const wrong = await run(
@@ -413,7 +413,7 @@ describe("processRefunds", () => {
     );
   });
 
-  it("refuses a tip bigger than the tip the sale took, and counts exchange credit as voucher not cash", async () => {
+  it("refuses a tip bigger than the tip the sale took, and never pays exchange credit out", async () => {
     const tipVoid = refund({
       kind: "void",
       reasonCode: "void_mistake",
@@ -429,7 +429,7 @@ describe("processRefunds", () => {
     taken.payments[0] = { ...taken.payments[0]!, tip: 100 }; // the sale took a 1.00 tip
     expect((await run(tipVoid, undefined, taken)).result.status).toBe("created");
 
-    // a sale paid by exchange credit: the credit can go back as a voucher, not as cash
+    // a sale paid by exchange credit: the credit is not money, so it cannot be paid out at all
     const credit = detail();
     credit.payments = [{ method: "exchange", type_id: null, label: "Exchange credit", amount: 700, tip: 0 }];
     const asCash = refund({
@@ -438,12 +438,22 @@ describe("processRefunds", () => {
       expectedAmountCents: 700,
     });
     expect((await run(asCash, undefined, credit)).result).toMatchObject({ reason: "refund_exceeds" });
-    const asVoucher = refund({
+    const asCard = refund({
       lines: [{ lineNo: 1, qty: 2, restock: true }],
-      legs: [{ id: "00000000-0000-7000-a000-0000000000a4", typeId: null, method: "voucher", amountCents: 700, tipCents: 0 }],
+      legs: [{ id: "00000000-0000-7000-a000-0000000000a4", typeId: CARD_TYPE, method: "card", amountCents: 700, tipCents: 0 }],
       expectedAmountCents: 700,
     });
-    expect((await run(asVoucher, undefined, credit)).result.status).toBe("created");
+    expect((await run(asCard, undefined, credit)).result).toMatchObject({ reason: "refund_exceeds" });
+    // it can only be exchanged again, the whole value as new credit
+    const again = refund({
+      kind: "exchange",
+      exchangeSaleId: "00000000-0000-7000-8000-0000000000ee",
+      creditCents: 700,
+      lines: [{ lineNo: 1, qty: 2, restock: true }],
+      legs: [],
+      expectedAmountCents: 0,
+    });
+    expect((await run(again, undefined, credit)).result.status).toBe("created");
   });
 
   it("rejects a payment type that is not this till's shop, and a bad or old clock", async () => {

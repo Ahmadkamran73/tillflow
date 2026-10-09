@@ -39,7 +39,9 @@ export function parseSyncMeta(raw: unknown) {
 
 const tenderTypeRow = z.object({
   id: z.string(),
-  method: z.enum(["cash", "card", "voucher"]),
+  // A string, not an enum: a location may still hold an archived type from before vouchers were
+  // removed; parseTenderMeta drops anything that is not cash or card.
+  method: z.string(),
   label: z.string(),
   sort: z.int(),
   archived: z.boolean(),
@@ -53,7 +55,10 @@ const tenderMeta = z.object({
 /** The location's payment types and the business type (ops.device_tender_types). */
 export function parseTenderMeta(raw: unknown) {
   const m = tenderMeta.parse(raw);
-  return { businessType: m.business_type, types: m.types };
+  const types = m.types.flatMap((t) =>
+    t.method === "cash" || t.method === "card" ? [{ ...t, method: t.method }] : [],
+  );
+  return { businessType: m.business_type, types };
 }
 
 const feedMeta = z.object({

@@ -190,7 +190,7 @@ describe("detailOfLocalSale", () => {
       fakeRefund(sale.id, [{ lineNo: 1, qty: 1 }], [{ method: "card", amountCents: 100 }]),
     ]);
     expect(after.lines[0]!.refunded_qty).toBe(1);
-    expect(after.refunded).toEqual({ cash: 0, card: 100, voucher: 0, value: 0, cash_refunds: 0 });
+    expect(after.refunded).toEqual({ cash: 0, card: 100, value: 0, cash_refunds: 0 });
     const rest = priceRefundLines(after, [{ lineNo: 1, qty: 2, restock: true }]);
     if (!first.ok || !rest.ok) throw new Error("pricing failed");
     expect(first.lines[0]!.gross + rest.lines[0]!.gross).toBe(detail.lines[0]!.gross);
@@ -207,7 +207,7 @@ describe("detailOfLocalSale", () => {
 function fakeRefund(
   saleId: string,
   lines: { lineNo: number; qty: number }[],
-  legs: { method: "cash" | "card" | "voucher"; amountCents: number }[],
+  legs: { method: "cash" | "card"; amountCents: number }[],
 ): LocalRefund {
   return {
     id: crypto.randomUUID(),
@@ -274,7 +274,7 @@ describe("finding sales on the device", () => {
     const detail = detailOfLocalSale(sale, priced, "Till 1");
     const r = refundable(detail);
     expect(r.unitsLeft).toBe(4);
-    expect(r.available).toEqual({ cash: 0, card: total, voucher: 0 });
+    expect(r.available).toEqual({ cash: 0, card: total });
   });
 });
 

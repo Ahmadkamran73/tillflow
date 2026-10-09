@@ -1,4 +1,9 @@
-# Tenders: cash, card on the shop's own terminal, voucher, split payment, tips
+# Tenders: cash, card on the shop's own terminal, split payment, tips
+
+> **Vouchers were removed** (2026-10-09): a shop takes cash and card, plus exchange credit from a
+> clothing exchange (step 2.2, not a tender type). Old voucher payments stay readable; the database
+> checks that drop `voucher` are `NOT VALID`, so they bind new rows only, and existing Voucher
+> tender types are archived.
 
 Phase 2 · Step 2.1. Builds on the cash flow of step 1.5 and the outbox of step 1.6.
 v1 has **no integrated card reader and no Stripe**: the shop takes the card on its own terminal and
@@ -7,17 +12,17 @@ Tillflow only records the tender. No card data ever reaches Tillflow.
 ## Rules
 
 - **Tender types** are per location: `Cash` (built in, one per location, cannot be archived), plus
-  any number of `Card` and `Voucher` types the manager names (for example "Card - AIB terminal",
-  "Card - SumUp"). Each location is seeded with Cash, Card and Voucher. Types are archived, never
+  any number of `Card` types the manager names (for example "Card - AIB terminal",
+  "Card - SumUp"). Each location is seeded with Cash and Card. Types are archived, never
   deleted, because payments point at them. Settings > Payment types.
-- **Balance.** The sale total `T` is the VAT-inclusive basket total before cash rounding. Card and
-  voucher amounts are exact, each above zero, and together at most `T`: change is only ever given
+- **Balance.** The sale total `T` is the VAT-inclusive basket total before cash rounding. Card
+  amounts are exact, each above zero, and together at most `T`: change is only ever given
   from cash. At most one cash tender per sale.
 - **5c rounding applies to the cash share only, and only in shops whose preset says so**
   (`register.cashRounding5c`: general store and café yes; restaurant, electronics, clothing no). When
   it is off the cash share is taken to the cent. The flag is stored on the sale (`roundCash`) so a
   reprint or emailed receipt never changes. `settleTenders(total, tenders, { roundCash })`.
-  Otherwise: `cashShare = T - card - voucher`;
+  Otherwise: `cashShare = T - card`;
   `rounding = cashRound(cashShare)`; `amountDue = T + rounding`; the cash taken must be at least
   `cashShare + rounding`; `change = cash - (cashShare + rounding)`. This does not depend on the
   order tenders were taken (so the server can recompute it), a card-only sale is never rounded, and
@@ -27,10 +32,8 @@ Tillflow only records the tender. No card data ever reaches Tillflow.
   the shop's terminal approves, the cashier taps "Approved on terminal". Optional reference (the
   terminal receipt or approval code), at most 40 characters, letters, digits, space, `-` and `/`.
   **Rejected if, with spaces, dashes and slashes removed, it holds 13 or more digits in a row**
-  (a card number has 13-19 digits). The same rule applies to a voucher number. It is enforced on
+  (a card number has 13-19 digits). It is enforced on
   the till (`tenderReference`), on the server (Zod), and in the database (`payments_provider_ref`).
-- **Voucher.** A paper voucher, no balance tracking (gift cards are v2). Any value above what is
-  left is not refunded.
 - **Tips.** Only on card tenders, only in business types whose preset has `register.tips` (café,
   restaurant). Entered by the cashier, stored in `payments.tip_cents`, between 0 and the card
   amount. A tip is never part of the sale total, VAT or `amountDue`.
@@ -66,8 +69,8 @@ Tillflow only records the tender. No card data ever reaches Tillflow.
 ## Wire format and sync
 
 `syncSale.tenders`: 1-10 of `{ id, typeId | null, method, amountCents, tipCents, reference? }`,
-at most one cash. Cash `amountCents` is what was handed over; card and voucher are what they
-settle. A sale queued before this step (`tenderedCents`) is read as one cash tender, so old outbox
+at most one cash. Cash `amountCents` is what was handed over; card is what it
+settles. A sale queued before this step (`tenderedCents`) is read as one cash tender, so old outbox
 rows and held rejections still work. The till's `label` stays on the device.
 
 The server (`src/lib/sync/process.ts`) prices the basket, runs `settleTenders` (`src/lib/money`),
@@ -95,7 +98,7 @@ manager sees it in the sales review list.
 
 - The card amount is what the cashier types; the control is the owner comparing the card total
   with the terminal's report. A card voided on the till must also be voided on the terminal.
-- Vouchers have no number validation or balance. No tip-sharing report yet (Tips and Gratuities
+- No tip-sharing report yet (Tips and Gratuities
   Act report later).
 - Tender types cannot be reordered in the back office yet (they sort by creation order).
 - Refunds of split payments are done in step 2.2 (`docs/specs/refunds.md`): the cashier chooses the legs, each method up to what it took, and exchange credit is a fifth kind of payment (`exchange`) on the new sale.

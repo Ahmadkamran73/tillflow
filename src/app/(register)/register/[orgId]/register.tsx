@@ -694,7 +694,6 @@ export function Register({ orgId }: { orgId: string }) {
     : [
         { id: null, method: "cash", label: t("tender.cashLabel") },
         { id: null, method: "card", label: t("tender.cardLabel") },
-        { id: null, method: "voucher", label: t("tender.voucherLabel") },
       ];
 
   const itemCount = cart.lines.reduce((n, l) => n + l.qty, 0);

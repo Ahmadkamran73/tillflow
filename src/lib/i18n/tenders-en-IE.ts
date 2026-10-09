@@ -6,7 +6,6 @@ export const tendersEnIE = {
   "tenders.cashNote": "Cash is built in and cannot be changed or removed.",
   "tenders.method": "Type",
   "tenders.method.card": "Card (your own terminal)",
-  "tenders.method.voucher": "Voucher",
   "tenders.method.cash": "Cash",
   "tenders.label": "Name on the till",
   "tenders.add": "Add payment type",

@@ -1,3 +1,5 @@
+-- The two method checks that drop 'voucher' are NOT VALID: they bind new rows; voucher payments
+-- already recorded (sales are append-only) stay as they are.
 -- Moved to the top: the refund_lines foreign key below needs this unique key to exist first.
 ALTER TABLE "sale_lines" ADD CONSTRAINT "sale_lines_org_id_id_key" UNIQUE("org_id","id");--> statement-breakpoint
 CREATE TABLE "refund_lines" (
@@ -37,7 +39,7 @@ CREATE TABLE "refund_payments" (
 	"tip_cents" integer DEFAULT 0 NOT NULL,
 	"provider_ref" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "refund_payments_method" CHECK ("refund_payments"."method" in ('cash', 'card', 'voucher', 'exchange')),
+	CONSTRAINT "refund_payments_method" CHECK ("refund_payments"."method" in ('cash', 'card', 'exchange')),
 	CONSTRAINT "refund_payments_amount" CHECK ("refund_payments"."amount_cents" >= 0),
 	CONSTRAINT "refund_payments_tip" CHECK ("refund_payments"."tip_cents" = 0 or ("refund_payments"."method" = 'card' and "refund_payments"."tip_cents" <= "refund_payments"."amount_cents")),
 	CONSTRAINT "refund_payments_provider_ref" CHECK ("refund_payments"."provider_ref" is null or (char_length("refund_payments"."provider_ref") <= 40 and "refund_payments"."provider_ref" ~ '^[A-Za-z0-9 /-]*$' and char_length(regexp_replace("refund_payments"."provider_ref", '[^0-9]', '', 'g')) < 13))
@@ -86,6 +88,7 @@ CREATE TABLE "refunds" (
 );
 --> statement-breakpoint
 ALTER TABLE "payments" DROP CONSTRAINT "payments_method";--> statement-breakpoint
+ALTER TABLE "tender_types" DROP CONSTRAINT "tender_types_method";--> statement-breakpoint
 ALTER TABLE "payments" ADD COLUMN "exchange_refund_id" uuid;--> statement-breakpoint
 ALTER TABLE "organisations" ADD COLUMN "refund_override_cents" integer DEFAULT 2000 NOT NULL;--> statement-breakpoint
 ALTER TABLE "register_approvals" ADD COLUMN "sale_id" uuid;--> statement-breakpoint
@@ -107,6 +110,7 @@ CREATE INDEX "refund_payments_org_created_idx" ON "refund_payments" USING btree 
 CREATE INDEX "refunds_org_created_idx" ON "refunds" USING btree ("org_id","created_at");--> statement-breakpoint
 CREATE INDEX "refunds_org_sale_idx" ON "refunds" USING btree ("org_id","original_sale_id");--> statement-breakpoint
 ALTER TABLE "payments" ADD CONSTRAINT "payments_org_exchange_refund_fk" FOREIGN KEY ("org_id","exchange_refund_id") REFERENCES "public"."refunds"("org_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "payments" ADD CONSTRAINT "payments_method" CHECK ("payments"."method" in ('cash', 'card', 'voucher', 'exchange'));--> statement-breakpoint
+ALTER TABLE "payments" ADD CONSTRAINT "payments_method" CHECK ("payments"."method" in ('cash', 'card', 'exchange')) NOT VALID;--> statement-breakpoint
 ALTER TABLE "organisations" ADD CONSTRAINT "organisations_refund_override_cents" CHECK ("organisations"."refund_override_cents" between 0 and 1000000);--> statement-breakpoint
-ALTER TABLE "register_approvals" ADD CONSTRAINT "register_approvals_max_cents" CHECK ("register_approvals"."max_cents" is null or "register_approvals"."max_cents" >= 0);
+ALTER TABLE "register_approvals" ADD CONSTRAINT "register_approvals_max_cents" CHECK ("register_approvals"."max_cents" is null or "register_approvals"."max_cents" >= 0);--> statement-breakpoint
+ALTER TABLE "tender_types" ADD CONSTRAINT "tender_types_method" CHECK ("tender_types"."method" in ('cash', 'card')) NOT VALID;

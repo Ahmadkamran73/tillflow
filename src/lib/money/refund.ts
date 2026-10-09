@@ -97,7 +97,7 @@ export function refundTotals(
   };
 }
 
-export type RefundMethod = "cash" | "card" | "voucher";
+export type RefundMethod = "cash" | "card";
 
 /** One leg of the money going back. `amount` is what leaves the shop by that method. */
 export interface RefundLeg {
@@ -114,8 +114,8 @@ export type RefundError =
   | "bad_amount" // a non-positive leg or negative tip
   | "two_cash" // more than one cash leg
   | "over_method" // a leg above what that method paid
-  | "tip_not_card" // a tip on cash or voucher
-  | "over" // card + voucher legs above what is to be paid out
+  | "tip_not_card" // a tip on cash
+  | "over" // the card leg above what is to be paid out
   | "short"; // legs do not cover what is to be paid out
 
 export interface RefundSettlement {
@@ -142,7 +142,7 @@ const CASH_SLACK = 2;
 /**
  * Checks the legs a cashier chose for a refund. `total` is the refund (items + non-VAT) before
  * rounding; `credit` is exchange credit applied to the new sale, so only `total - credit` goes
- * back. Card and voucher legs are exact; the cash share (`payout - card - voucher`) alone is
+ * back. The card leg is exact; the cash share (`payout - card`) alone is
  * rounded to 5c when `roundCash`, and the cash leg must equal it. Each method is capped at what
  * it paid (`available`), so a card sale can never be refunded in cash.
  */
@@ -165,7 +165,7 @@ export function settleRefund(
   let cashCount = 0;
   let tips = 0;
   let error: RefundError | undefined;
-  const used: RefundAvailable = { cash: 0, card: 0, voucher: 0 };
+  const used: RefundAvailable = { cash: 0, card: 0 };
   for (const l of legs) {
     assertInt(l.amount, "amount");
     const tip = l.tip ?? 0;
@@ -180,7 +180,7 @@ export function settleRefund(
     } else nonCash += l.amount;
   }
   if (cashCount > 1) error ??= "two_cash";
-  for (const m of ["cash", "card", "voucher"] as const) {
+  for (const m of ["cash", "card"] as const) {
     const cap = available[m] + (m === "cash" && available.cash > 0 ? cashSlack : 0);
     if (used[m] > cap) error ??= "over_method";
   }
@@ -208,7 +208,7 @@ export function settleRefund(
 }
 
 /**
- * The default allocation offered to the cashier: card first, then voucher, cash last (rounded when
+ * The default allocation offered to the cashier: card first, cash last (rounded when
  * `roundCash`). The cashier may change it; `settleRefund` is what decides if it is valid.
  */
 export function suggestRefundLegs(
@@ -220,7 +220,7 @@ export function suggestRefundLegs(
   assertInt(credit, "credit");
   let left = Math.max(total - credit, 0);
   const legs: RefundLeg[] = [];
-  for (const m of ["card", "voucher"] as const) {
+  for (const m of ["card"] as const) {
     const amount = Math.min(left, Math.max(available[m], 0));
     if (amount > 0) {
       legs.push({ method: m, amount });

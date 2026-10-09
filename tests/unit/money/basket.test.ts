@@ -251,7 +251,6 @@ describe("calculateBasket", () => {
     ["cash", 1003, 2, 1005],
     ["cash", 1008, 2, 1010],
     ["card", 1003, 0, 1003],
-    ["voucher", 1003, 0, 1003],
   ] as const)("%s tender on %i rounds by %i to %i", (tender, price, cashRounding, amountDue) =>
     expect(basket([item(price)], { tender })).toMatchObject({
       total: price,

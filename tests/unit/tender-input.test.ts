@@ -46,9 +46,9 @@ describe("tender input", () => {
       tenderInput.safeParse({ ...base, reference: "AUTH 123456", tipCents: 100 }).success,
     ).toBe(true);
   });
-  it("refuses a tip on cash or voucher, and unknown keys", () => {
+  it("refuses a tip on cash, a voucher method, and unknown keys", () => {
     expect(tenderInput.safeParse({ ...base, method: "cash", tipCents: 5 }).success).toBe(false);
-    expect(tenderInput.safeParse({ ...base, method: "voucher", tipCents: 5 }).success).toBe(false);
+    expect(tenderInput.safeParse({ ...base, method: "voucher" }).success).toBe(false); // vouchers are gone
     expect(tenderInput.safeParse({ ...base, pan: "4111" }).success).toBe(false);
   });
   it("needs 1 to 10 tenders and at most one cash", () => {

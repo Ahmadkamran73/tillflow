@@ -262,7 +262,7 @@ describe("ops.record_refund", () => {
           refund(ctx, a, refundPayload(a, s, { qty: 2, legs: [{ method: "card", amount: 700 }] })),
         WRONG,
       );
-      // the legs must equal the amount; voucher was never used on this sale
+      // vouchers are gone: any other method is refused
       await ctx.denied(
         () => refund(ctx, a, refundPayload(a, s, { legs: [{ method: "voucher", amount: 350 }] })),
         WRONG,
@@ -1290,7 +1290,7 @@ describe("exchanges", () => {
       expect(await record(salePayload)).toBe("duplicate");
     }));
 
-  it("exchange credit that paid for a sale goes back as a voucher, never as cash", () =>
+  it("exchange credit that paid for a sale is not money: it cannot be paid out in any way", () =>
     inWorld(async (ctx) => {
       const { sql, world } = ctx;
       const a = world.a;
@@ -1301,10 +1301,9 @@ describe("exchanges", () => {
       const record = async (p: unknown) =>
         (await sql`select ops.record_sale(${json(ctx, p)}) as r`)[0]!.r as string;
       expect(await record(exchangeSalePayload(a, s, exSale, ex.refund.id))).toBe("created");
-      // refund the exchange sale: its 3.50 of credit cannot come back as cash...
+      // refund the exchange sale (one 5.00 line, 3.50 of it paid by credit, 1.50 in cash)
       const refundOfSale = (legs: { method: string; amount: number; type_id?: string }[]) => {
         const p = refundPayload(a, { ...s, saleId: exSale }, { legs, seq: 7, user: a.manager.userId });
-        // the exchange sale is one 5.00 line of qty 1
         p.refund.items_total = 500;
         p.refund.vat = 93;
         p.refund.amount = legs.reduce((n, l) => n + l.amount, 0);
@@ -1312,21 +1311,20 @@ describe("exchanges", () => {
         p.lines = [{ line_no: 1, qty: 1, restock: true, gross_cents: 500, vat_cents: 93, net_cents: 407 }];
         return p;
       };
+      // all of it in cash or on a card: the credit part is not money
       await ctx.denied(
         () => refund(ctx, a, refundOfSale([{ method: "cash", amount: 500, type_id: s.cash }])),
         WRONG,
       );
-      // ...it can go back as a voucher, with the 1.50 of real cash as cash
-      expect(
-        await refund(
-          ctx,
-          a,
-          refundOfSale([
-            { method: "voucher", amount: 350 },
-            { method: "cash", amount: 150, type_id: s.cash },
-          ]),
-        ),
-      ).toBe("created");
+      await ctx.denied(
+        () => refund(ctx, a, refundOfSale([{ method: "card", amount: 500, type_id: s.card }])),
+        WRONG,
+      );
+      // and the 1.50 of real cash alone does not cover the refund either
+      await ctx.denied(
+        () => refund(ctx, a, refundOfSale([{ method: "cash", amount: 150, type_id: s.cash }])),
+        WRONG,
+      );
     }));
 
   it("an exchange needs credit and a sale, and a plain refund must carry neither", () =>

@@ -26,7 +26,7 @@ export type TenderOption = { id: string | null; method: TenderMethod; label: str
 const toLine = (x: LocalTender) => ({ method: x.method, amount: x.amountCents, tip: x.tipCents });
 
 /**
- * Split tender. Card and voucher amounts are added first (the shop's own terminal takes the card;
+ * Split tender. Card amounts are added first (the shop's own terminal takes the card;
  * Tillflow only records it), cash comes last and completes the sale, because change can only ever
  * come from cash. Everything shown comes from `settleTenders` in the money library; the server
  * re-checks the same sums.
@@ -73,7 +73,7 @@ export function TenderDialog({
   const invalid = (field: "amount" | "reference" | "tip") => error !== "" && errorField === field;
 
   const settlement = settleTenders(total, tenders.map(toLine), { roundCash });
-  const left = defaultNonCashAmount(total, tenders.map(toLine)); // what card/voucher/cash still have to settle
+  const left = defaultNonCashAmount(total, tenders.map(toLine)); // what card/cash still have to settle
   const hasCash = tenders.some((x) => x.method === "cash");
 
   useEffect(() => {
@@ -319,9 +319,9 @@ export function TenderDialog({
             }}
           >
             <label className="flex flex-col gap-1 text-sm font-medium">
-              {panel.method === "card" ? t("tender.cardAmount") : t("tender.voucherAmount")}
+              {t("tender.cardAmount")}
               <span className="text-muted-foreground text-xs font-normal">
-                {panel.method === "card" ? t("tender.cardHint") : t("tender.voucherHint")}
+                {t("tender.cardHint")}
               </span>
               <Input
                 inputMode="decimal"
@@ -338,7 +338,7 @@ export function TenderDialog({
               />
             </label>
             <label className="flex flex-col gap-1 text-sm font-medium">
-              {panel.method === "card" ? t("tender.reference") : t("tender.voucherNumber")}
+              {t("tender.reference")}
               <span className="text-muted-foreground text-xs font-normal">
                 {t("tender.referenceHint")}
               </span>
@@ -378,7 +378,7 @@ export function TenderDialog({
               </label>
             )}
             <Button type="submit" size="touch">
-              {panel.method === "card" ? t("tender.approved") : t("tender.addVoucher")}
+              {t("tender.approved")}
             </Button>
           </form>
         </div>

@@ -102,19 +102,16 @@ export function RefundDoneDialog({
 type Step = "find" | "lines" | "pay" | "approve";
 type Role = StaffMember["role"];
 
-/** What the cashier chose to give back by card and voucher; cash is always the remainder. */
+/** What the cashier chose to give back by card; cash is always the remainder. */
 type Pay = {
   card: string;
-  voucher: string;
   cardType: string | null;
-  voucherType: string | null;
   cashType: string | null;
   cardRef: string;
-  voucherRef: string;
   tip: string;
 };
 
-const methodOptions = (options: TenderOption[], method: "cash" | "card" | "voucher") =>
+const methodOptions = (options: TenderOption[], method: "cash" | "card") =>
   options.filter((o) => o.method === method);
 
 /**
@@ -381,25 +378,21 @@ export function RefundDialog({
   }
 
   // ------------------------------------------------------------------ paying back
-  const available = detail ? availableOf(detail) : { cash: 0, card: 0, voucher: 0 };
+  const available = detail ? availableOf(detail) : { cash: 0, card: 0 };
   const cardOptions = methodOptions(tenderOptions, "card");
-  const voucherOptions = methodOptions(tenderOptions, "voucher");
   const cashOptions = methodOptions(tenderOptions, "cash");
 
   function startPay() {
     if (!detail || !priced?.ok) return;
     const legs = suggestRefundLegs(priced.totals.total, available, { roundCash, credit });
-    const amount = (m: "card" | "voucher") =>
+    const amount = (m: "card") =>
       centsToInput(legs.find((l) => l.method === m)?.amount ?? 0);
     const originalTip = detail.payments.reduce((n, p) => n + (p.method === "card" ? p.tip : 0), 0);
     setPay({
       card: amount("card") === "0.00" ? "" : amount("card"),
-      voucher: amount("voucher") === "0.00" ? "" : amount("voucher"),
       cardType: cardOptions[0]?.id ?? null,
-      voucherType: voucherOptions[0]?.id ?? null,
       cashType: cashOptions[0]?.id ?? null,
       cardRef: "",
-      voucherRef: "",
       tip: kind === "void" && originalTip > 0 ? centsToInput(originalTip) : "",
     });
     setPayError("");
@@ -407,14 +400,12 @@ export function RefundDialog({
   }
 
   const cardCents = pay ? (parseCents(pay.card) ?? 0) : 0;
-  const voucherCents = pay ? (parseCents(pay.voucher) ?? 0) : 0;
   const tipCents = pay && kind === "void" && register.tips ? (parseCents(pay.tip) ?? 0) : 0;
-  const cashShare = Math.max(total - credit - cardCents - voucherCents, 0);
+  const cashShare = Math.max(total - credit - cardCents, 0);
   const cashCents = cashDueOf(cashShare, roundCash);
 
   const legs: RefundLeg[] = [];
   if (cardCents > 0) legs.push({ method: "card", amount: cardCents, tip: tipCents });
-  if (voucherCents > 0) legs.push({ method: "voucher", amount: voucherCents });
   if (cashCents > 0) legs.push({ method: "cash", amount: cashCents });
   const settlement = pay && priced?.ok ? settleRefund(total, legs, available, {
           roundCash,
@@ -435,18 +426,14 @@ export function RefundDialog({
     const out: LocalRefundLeg[] = [];
     for (const l of legs) {
       const isCard = l.method === "card";
-      const refText = isCard ? pay.cardRef : l.method === "voucher" ? pay.voucherRef : "";
+      const refText = isCard ? pay.cardRef : "";
       const ref = refText.trim() ? tenderReference.safeParse(refText) : null;
       if (ref && !ref.success) {
         setPayError(t("refund.error.invalid"));
         return null;
       }
-      const typeId = isCard
-        ? pay.cardType
-        : l.method === "voucher"
-          ? pay.voucherType
-          : pay.cashType;
-      const options = isCard ? cardOptions : l.method === "voucher" ? voucherOptions : cashOptions;
+      const typeId = isCard ? pay.cardType : pay.cashType;
+      const options = isCard ? cardOptions : cashOptions;
       out.push({
         id: uuidv7(),
         typeId,
@@ -897,37 +884,6 @@ export function RefundDialog({
                 className="h-12 font-mono text-base tabular-nums"
               />
             </label>
-          )}
-        </fieldset>
-      )}
-
-      {available.voucher > 0 && (
-        <fieldset className="flex flex-col gap-2 rounded-lg border-2 p-2">
-          <legend className="px-1 text-sm font-semibold">
-            {t("refund.method.voucher")} ·{" "}
-            {t("refund.available", { amount: formatCents(available.voucher) })}
-          </legend>
-          <label className="flex flex-col gap-1 text-sm font-medium">
-            {t("refund.amountFor", { label: t("refund.method.voucher") })}
-            <Input
-              inputMode="decimal"
-              value={pay.voucher}
-              onChange={(e) => set({ voucher: e.target.value })}
-              className="h-12 font-mono text-base tabular-nums"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm font-medium">
-            {t("refund.reference")}
-            <Input
-              autoComplete="off"
-              maxLength={40}
-              value={pay.voucherRef}
-              onChange={(e) => set({ voucherRef: e.target.value })}
-              className="h-12 text-base"
-            />
-          </label>
-          {voucherCents > 0 && (
-            <p className="text-muted-foreground text-xs">{t("refund.voucherNote")}</p>
           )}
         </fieldset>
       )}

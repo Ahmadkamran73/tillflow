@@ -26,12 +26,12 @@ export const refundLegInput = z
     id: z.uuid(),
     /** The location's tender type to record the payment-back against; null when unknown. */
     typeId: z.uuid().nullable(),
-    method: z.enum(["cash", "card", "voucher"]),
+    method: z.enum(["cash", "card"]),
     /** What leaves the shop by this method (cash: the rounded cash share). */
     amountCents: z.int().min(1).max(100_000_000),
     /** A card tip handed back; voids only. */
     tipCents: cents.default(0),
-    /** The terminal's refund reference or the new voucher's number; never a card number. */
+    /** The terminal's refund reference; never a card number. */
     reference: tenderReference.optional(),
   })
   .refine((l) => l.tipCents === 0 || l.method === "card", {

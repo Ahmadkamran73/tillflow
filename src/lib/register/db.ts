@@ -31,7 +31,7 @@ export type LocalSale = {
   completedAt: string;
   /** Inputs only: totals are always re-derived with `priceCart`. */
   cart: Cart;
-  /** Cash handed over, card and voucher amounts, card tips; the server re-checks they add up. */
+  /** Cash handed over, card amounts, card tips; the server re-checks they add up. */
   tenders: LocalTender[];
   /** Whether the shop rounded cash to 5c when this sale was made (its preset then); missing = yes. */
   roundCash?: boolean;

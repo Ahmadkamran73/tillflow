@@ -152,7 +152,7 @@ export const payments = pgTable(
     tenderedCents: integer("tendered_cents").notNull(),
     changeCents: integer("change_cents").notNull(),
     tipCents: integer("tip_cents").notNull().default(0),
-    /** Terminal receipt reference for a card tender, or a voucher number; never a card number. */
+    /** Terminal receipt reference for a card tender; never a card number. */
     providerRef: text("provider_ref"),
     /** For an exchange-credit payment: the exchange refund whose returned goods paid for this sale. */
     exchangeRefundId: uuid("exchange_refund_id"),
@@ -176,7 +176,7 @@ export const payments = pgTable(
     }),
     index("payments_org_sale_idx").on(t.orgId, t.saleId),
     index("payments_org_created_idx").on(t.orgId, t.createdAt),
-    check("payments_method", sql`${t.method} in ('cash', 'card', 'voucher', 'exchange')`),
+    check("payments_method", sql`${t.method} in ('cash', 'card', 'exchange')`),
     // A cash remainder of 1-2c rounds to a zero amount, so zero is allowed; never negative.
     check("payments_amount", sql`${t.amountCents} >= 0`),
     check("payments_change_cash_only", sql`${t.method} = 'cash' or ${t.changeCents} = 0`),
@@ -359,7 +359,7 @@ export const refundPayments = pgTable(
     amountCents: integer("amount_cents").notNull(),
     /** A card tip handed back; only on a void, and outside `amount_cents`. */
     tipCents: integer("tip_cents").notNull().default(0),
-    /** Terminal receipt reference or voucher number; never a card number. */
+    /** Terminal receipt reference; never a card number. */
     providerRef: text("provider_ref"),
     createdAt: createdAtCol(),
   },
@@ -376,7 +376,7 @@ export const refundPayments = pgTable(
     }),
     index("refund_payments_org_refund_idx").on(t.orgId, t.refundId),
     index("refund_payments_org_created_idx").on(t.orgId, t.createdAt),
-    check("refund_payments_method", sql`${t.method} in ('cash', 'card', 'voucher', 'exchange')`),
+    check("refund_payments_method", sql`${t.method} in ('cash', 'card', 'exchange')`),
     check("refund_payments_amount", sql`${t.amountCents} >= 0`),
     check(
       "refund_payments_tip",

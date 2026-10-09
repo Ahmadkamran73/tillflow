@@ -28,17 +28,17 @@ as credit towards a new sale). Money is integer cents; every amount goes through
   13.5% in June is still 13.5% when refunded in August. No rate is ever looked up again
   (`refundLine` in `src/lib/money/refund.ts`; `ops.record_refund` repeats the rule in SQL).
 - **Pay-back (the cashier chooses).** Each method may give back at most what it took on the
-  sale, less earlier refunds by it (`availableOf`): a card sale can never be paid out in cash. Card
-  and voucher amounts are exact; **only the cash leg is rounded to 5c** (shops whose preset
-  rounds), and cash is always the remainder. The till pre-fills card first, then voucher, cash last.
+  sale, less earlier refunds by it (`availableOf`): a card sale can never be paid out in cash. The
+  card amount is exact; **only the cash leg is rounded to 5c** (shops whose preset
+  rounds), and cash is always the remainder. The till pre-fills card first, cash last.
   Cash may stray 2c above what the cash took, for rounding, **per refund so far** (each refund
   rounds its own cash share, so the drift adds up and the last refund is never stuck). Exchange
-  credit that paid for the sale goes back as a **voucher, never as cash**: it may stand for a card
-  payment on an earlier sale, and cash back would turn that card sale into a cash payout.
+  credit that paid for the sale is **not money and is never paid out** (it may stand for a card
+  payment on an earlier sale, and cash back would turn that card sale into a cash payout): that part
+  can only be exchanged again.
 - **Card refunds** are done on the shop's own terminal first; Tillflow records a card refund
   against the card type with an optional reference (never a card number: 13+ digits are refused on
-  the till, in Zod, and in a database check, as for sales). A voucher refund means a new paper
-  voucher is handed over.
+  the till, in Zod, and in a database check, as for sales).
 - **Tips** are not refunded, except on a **void**, which returns the card tip too (cafés and
   restaurants), and never more than the sale took.
 - **Manager approval.** A refund needs a manager when it is a void, or when its value
@@ -118,7 +118,7 @@ total)`; if the returned value is more, the rest is paid back by the legs above.
 - `refunds` (id = idempotency key, original sale, kind, reason, per-till `receipt_seq`, totals,
   `credit_cents`, `cash_rounding_cents`, `amount_cents`, `approval_state`, approver, approval id,
   `exchange_sale_id`), `refund_lines` (the original line's rate copied across, net/VAT/gross, qty,
-  restock), `refund_payments` (method cash/card/voucher/exchange, type, label snapshot, amount,
+  restock), `refund_payments` (method cash/card/exchange, type, label snapshot, amount,
   tip, reference). All with `org_id`, RLS (managers read all; a cashier reads their own refunds),
   composite foreign keys, check constraints on the sums.
 - `payments.method` also allows `exchange`; `payments.exchange_refund_id` (unique).
@@ -159,7 +159,7 @@ New rejection reasons: `refund_exceeds`, `refund_mismatch`, `refund_needs_approv
   server, but VAT that was flagged `vat_differs` would make the refund amount differ by a cent.
 - The card amount is what the cashier types; the Z-report comparison is the control. A card
   refunded on the till must also be refunded on the terminal.
-- Tips are not refunded except on a void. Vouchers have no balance. Browser-print receipts show the
+- Tips are not refunded except on a void. Browser-print receipts show the
   sale code as text, not a barcode: scanning needs an ESC/POS printer (USB or network); everything
   else can be found by receipt number or the recent list.
 - Rounding the cash leg per refund can leave the cash given back a few cents different from the

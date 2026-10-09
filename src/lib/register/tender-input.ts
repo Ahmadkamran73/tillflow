@@ -13,7 +13,7 @@ export const looksLikeCardNumber = (text: string): boolean =>
   (text.match(/[0-9]/g)?.length ?? 0) >= 13;
 
 /**
- * The terminal's receipt or approval reference (or a voucher number), typed by the cashier.
+ * The terminal's receipt or approval reference, typed by the cashier.
  * Letters, digits, space, dash and slash only; never anything that looks like a card number.
  */
 export const tenderReference = z
@@ -23,9 +23,9 @@ export const tenderReference = z
   .regex(/^[A-Za-z0-9 /-]*$/, "letters, numbers, spaces, - and / only")
   .refine((s) => !looksLikeCardNumber(s), "that looks like a card number");
 
-export const tenderMethod = z.enum(["cash", "card", "voucher"]);
+export const tenderMethod = z.enum(["cash", "card"]);
 /** What a sale can be paid with: the location's tender types, or exchange credit from returned goods. */
-export const saleTenderMethod = z.enum(["cash", "card", "voucher", "exchange"]);
+export const saleTenderMethod = z.enum(["cash", "card", "exchange"]);
 
 const cents = z.int().min(0).max(100_000_000);
 
@@ -36,7 +36,7 @@ export const tenderInput = z
     /** The location's tender type (its label is snapshotted on the payment); null for sales queued before tender types. */
     typeId: z.uuid().nullable(),
     method: saleTenderMethod,
-    /** Cash: the amount handed over. Card and voucher: the amount they settle. */
+    /** Cash: the amount handed over. Card: the amount it settles. */
     amountCents: cents,
     /** Card tips only, outside the sale total. */
     tipCents: cents.default(0),

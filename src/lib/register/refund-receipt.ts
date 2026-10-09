@@ -31,7 +31,7 @@ export type RefundReceipt = {
   payoutCents: number;
   legs: {
     label: string;
-    method: "cash" | "card" | "voucher";
+    method: "cash" | "card";
     cents: number;
     tipCents: number;
     reference?: string;

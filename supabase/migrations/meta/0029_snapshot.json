@@ -1,5 +1,5 @@
 {
-  "id": "0bffe459-ad82-469d-a0f4-6b35193af87e",
+  "id": "96378020-3bfe-4af8-81fa-7ce551617d32",
   "prevId": "c35f5f11-2a36-46e3-ba83-9e1e7e1c3763",
   "version": "7",
   "dialect": "postgresql",
@@ -1656,7 +1656,7 @@
       "checkConstraints": {
         "payments_method": {
           "name": "payments_method",
-          "value": "\"payments\".\"method\" in ('cash', 'card', 'voucher', 'exchange')"
+          "value": "\"payments\".\"method\" in ('cash', 'card', 'exchange')"
         },
         "payments_amount": {
           "name": "payments_amount",
@@ -2070,7 +2070,7 @@
       "checkConstraints": {
         "refund_payments_method": {
           "name": "refund_payments_method",
-          "value": "\"refund_payments\".\"method\" in ('cash', 'card', 'voucher', 'exchange')"
+          "value": "\"refund_payments\".\"method\" in ('cash', 'card', 'exchange')"
         },
         "refund_payments_amount": {
           "name": "refund_payments_amount",
@@ -4175,7 +4175,7 @@
       "checkConstraints": {
         "tender_types_method": {
           "name": "tender_types_method",
-          "value": "\"tender_types\".\"method\" in ('cash', 'card', 'voucher')"
+          "value": "\"tender_types\".\"method\" in ('cash', 'card')"
         },
         "tender_types_label": {
           "name": "tender_types_label",

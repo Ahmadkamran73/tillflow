@@ -9,14 +9,21 @@ const typesOf = (ctx: Ctx, loc: string) =>
   ctx.sql`select id, method, label, archived_at from tender_types where location_id = ${loc} order by sort`;
 
 describe("tender_types", () => {
-  it("every location is seeded with Cash, Card and Voucher", () =>
+  it("every location is seeded with Cash and Card only (vouchers are gone)", () =>
     inWorld(async (ctx) => {
       const rows = await typesOf(ctx, ctx.world.a.locationId);
-      expect(rows.map((r) => r.method)).toEqual(["cash", "card", "voucher"]);
+      expect(rows.map((r) => r.method)).toEqual(["cash", "card"]);
       // A location added later is seeded too.
       const loc = randomUUID();
       await ctx.sql`insert into locations (id, org_id, name) values (${loc}, ${ctx.world.a.orgId}, 'Second')`;
-      expect((await typesOf(ctx, loc)).length).toBe(3);
+      expect((await typesOf(ctx, loc)).length).toBe(2);
+      // a voucher type can no longer be made
+      await ctx.denied(
+        () =>
+          ctx.sql`insert into tender_types (id, org_id, location_id, method, label, sort)
+                  values (${randomUUID()}, ${ctx.world.a.orgId}, ${loc}, 'voucher', 'Voucher', 20)`,
+        ["23514"],
+      );
     }));
 
   it("members read their own shop's types, never another shop's; anon reads nothing", () =>
@@ -24,7 +31,7 @@ describe("tender_types", () => {
       const { a, b } = ctx.world;
       for (const who of [a.owner, a.manager, a.cashier]) {
         const own = await ctx.as(who, () => typesOf(ctx, a.locationId));
-        expect(own.length).toBe(3);
+        expect(own.length).toBe(2);
         expect(await ctx.as(who, () => typesOf(ctx, b.locationId))).toHaveLength(0);
       }
       await ctx.denied(() => ctx.as(null, () => typesOf(ctx, a.locationId)));
