@@ -7,7 +7,8 @@ import { t } from "@/lib/i18n";
 import type { PinResult, Role, StaffMember } from "@/lib/register/staff";
 import { PinEntry } from "./pin-entry";
 
-export type Cashier = { userId: string; name: string; role: Role };
+/** `servingToken`: the server's signed proof of who is serving (absent when the PIN was checked offline). */
+export type Cashier = { userId: string; name: string; role: Role; servingToken?: string };
 
 /**
  * Shown instead of the till whenever nobody is signed in to it: first load, the Lock button, and
@@ -53,7 +54,9 @@ export function LockScreen({
             submitLabel={t("lock.unlock")}
             verify={(pin) => verify(picked, pin)}
             onBack={() => setPicked(null)}
-            onOk={({ userId, role }) => onUnlock({ userId, role, name: picked.displayName })}
+            onOk={({ userId, role, servingToken }) =>
+              onUnlock({ userId, role, name: picked.displayName, servingToken })
+            }
           />
         ) : !ready ? (
           <p role="status">{t("register.loading")}</p>

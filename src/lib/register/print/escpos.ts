@@ -20,6 +20,13 @@ const byteOf = (ch: string) => {
   return ch === "·" ? 0x2e : 0x3f; // middle dot → ".", anything else → "?"
 };
 
+/**
+ * A receipt line that starts with this is not text but a barcode of the rest of the line (Code 128),
+ * so a later scan can find the sale again. Printers without ESC/POS (browser printing) show the
+ * code as plain text instead.
+ */
+export const BARCODE_MARK = "";
+
 /** Drawer-kick pulse on pin 2 (the usual RJ11 wiring). */
 export const DRAWER_KICK = [0x1b, 0x70, 0x00, 0x19, 0xfa];
 
@@ -29,6 +36,17 @@ export function encodeEscpos(
 ): Uint8Array {
   const out: number[] = [0x1b, 0x40, 0x1b, 0x74, 19]; // init, select code page 858
   for (const line of lines) {
+    if (line.startsWith(BARCODE_MARK)) {
+      // Centred Code 128 (set B), 56 dots high, text printed under it.
+      const code = line.slice(BARCODE_MARK.length).replace(/[^0-9A-Za-z]/g, "");
+      if (code.length > 0 && code.length <= 60) {
+        out.push(0x1b, 0x61, 0x01, 0x1d, 0x68, 56, 0x1d, 0x77, 2, 0x1d, 0x48, 2);
+        out.push(0x1d, 0x6b, 0x49, code.length + 2, 0x7b, 0x42);
+        for (const ch of code) out.push(ch.charCodeAt(0));
+        out.push(0x0a, 0x1b, 0x61, 0x00);
+      }
+      continue;
+    }
     for (const ch of line) out.push(byteOf(ch));
     out.push(0x0a);
   }

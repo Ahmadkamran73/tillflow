@@ -1,14 +1,15 @@
 import { assertInt, cashRound } from "./vat";
 
-export type TenderMethod = "cash" | "card" | "voucher";
+export type TenderMethod = "cash" | "card";
 
 /**
  * One payment on a sale. `amount` is what it settles (cash: the amount handed over, which may
- * exceed the share it settles; card and voucher: exactly what they settle). `tip` is a card tip,
+ * exceed the share it settles; card: exactly what it settles). `tip` is a card tip,
  * kept apart from the sale total.
  */
 export interface TenderLine {
-  method: TenderMethod;
+  /** `exchange` is credit from goods returned in an exchange: exact, like a card. */
+  method: TenderMethod | "exchange";
   amount: number;
   tip?: number;
 }
@@ -16,13 +17,13 @@ export interface TenderLine {
 export type TenderError =
   | "bad_amount" // a non-positive amount, or a tip that is negative
   | "two_cash" // more than one cash tender
-  | "tip_not_card" // a tip on cash or voucher
+  | "tip_not_card" // a tip on cash or exchange credit
   | "tip_too_big" // a tip above the card amount
-  | "non_cash_over" // card + voucher above the total (no change from them)
+  | "non_cash_over" // card + exchange credit above the total (no change from them)
   | "short"; // not enough to cover the amount due
 
 export interface Settlement {
-  /** Card + voucher amounts. */
+  /** Card + exchange credit amounts. */
   nonCash: number;
   /** The part of the total cash has to settle (total - nonCash, floored at 0). */
   cashShare: number;
@@ -43,10 +44,10 @@ export interface Settlement {
 /**
  * Settles a sale total (VAT-inclusive, before cash rounding) against its tenders.
  *
- * - Card and voucher tenders settle their exact amount; their sum may not exceed the total, so
+ * - Card and exchange-credit tenders settle their exact amount; their sum may not exceed the total, so
  *   change can only ever come from cash. At most one cash tender; tips only on card, up to the
  *   card amount, and never part of the total.
- * - The 5c rounding (switched by `roundCash`, which follows the shop's preset) applies to the cash share only (`total - card - voucher`), so it does not
+ * - The 5c rounding (switched by `roundCash`, which follows the shop's preset) applies to the cash share only (`total - card - credit`), so it does not
  *   depend on the order tenders were taken, and an all-card sale is never rounded.
  * - `ok` is true when every rule holds and the tenders cover `amountDue`. While a split is still
  *   being built, `balance` says how much remains (the cash share plus rounding, less what has
@@ -88,7 +89,7 @@ export function settleTenders(
       : 0;
   const amountDue = total + rounding;
   const cashDue = cashShare + rounding;
-  // A cash tender when card/voucher already cover the total is a mistake, not change to give.
+  // A cash tender when card/credit already cover the total is a mistake, not change to give.
   if (cashCount > 0 && cashShare === 0) error ??= "bad_amount";
   // What is still short of the (rounded) cash due; without cash that is the whole remainder.
   const short = cashCount > 0 ? Math.max(cashDue - cashTendered, 0) : cashDue;
@@ -115,7 +116,7 @@ export function cashDueOf(cashShare: number, roundCash = true): number {
   return roundCash ? cashShare + cashRound(cashShare).adjustment : cashShare;
 }
 
-/** What a card or voucher tender should default to: the exact amount still to be settled. */
+/** What a card tender should default to: the exact amount still to be settled. */
 export function defaultNonCashAmount(total: number, tenders: readonly TenderLine[]): number {
   assertInt(total, "total");
   const taken = tenders.reduce(

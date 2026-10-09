@@ -115,7 +115,7 @@ export async function heartbeatAgeSeconds(): Promise<number | null> {
 // The sync route has authenticated the user and re-priced the sale; these functions re-check
 // membership and register ownership themselves and write in one transaction.
 
-export type RecordSaleResult = "created" | "duplicate" | "receipt_clash";
+export type RecordSaleResult = "created" | "duplicate" | "receipt_clash" | "exchange_pending";
 
 /**
  * `tokenHash`: the till's device token hash; the database then refuses a sale for any other shop or
@@ -129,6 +129,40 @@ export async function recordSale(
     select ops.record_sale(${db().json(payload as postgres.JSONValue)}, ${tokenHash}) as r`;
   if (!row) throw new Error("record_sale returned no row");
   return row.r;
+}
+
+// ---------------------------------------------------------------- refunds (step 2.2)
+
+export type RecordRefundResult = "created" | "duplicate" | "receipt_clash" | "original_missing";
+
+/** Writes a refund, void or exchange return in one transaction (the original sale is never touched). */
+export async function recordRefund(
+  payload: unknown,
+  tokenHash: string,
+): Promise<RecordRefundResult> {
+  const [row] = await db()<{ r: RecordRefundResult }[]>`
+    select ops.record_refund(${db().json(payload as postgres.JSONValue)}, ${tokenHash}) as r`;
+  if (!row) throw new Error("record_refund returned no row");
+  return row.r;
+}
+
+/** Sales of the till's own shop to refund (by id, till + receipt number, or serial). null: not paired. */
+export async function deviceFindSale(tokenHash: string, query: unknown): Promise<unknown> {
+  const [row] = await db()<{ s: unknown }[]>`
+    select ops.device_find_sale(${tokenHash}, ${db().json(query as postgres.JSONValue)}) as s`;
+  return row?.s ?? null;
+}
+
+export async function deviceRefundsKnown(tokenHash: string, ids: string[]): Promise<string[]> {
+  const rows = await db()<{ id: string }[]>`
+    select ops.device_refunds_known(${tokenHash}, ${ids}::uuid[]) as id`;
+  return rows.map((r) => r.id);
+}
+
+/** The shop's refund approval limit and this till's last refund number (ops.device_refund_meta). */
+export async function deviceRefundMeta(tokenHash: string): Promise<unknown> {
+  const [row] = await db()<{ m: unknown }[]>`select ops.device_refund_meta(${tokenHash}) as m`;
+  return row?.m ?? null;
 }
 
 export async function recordSyncRejection(payload: unknown): Promise<void> {
@@ -264,11 +298,26 @@ export async function issueApproval(
   tokenHash: string,
   userId: string,
   purpose: ApprovalPurpose,
+  /** A refund approval is for one sale and up to a value in cents; other purposes carry neither. */
+  bind?: { saleId: string; maxCents: number },
 ): Promise<string> {
   const [row] = await db()<{ id: string }[]>`
-    select ops.issue_approval(${tokenHash}, ${userId}, ${purpose}) as id`;
+    select ops.issue_approval(${tokenHash}, ${userId}, ${purpose},
+                              ${bind?.saleId ?? null}::uuid, ${bind?.maxCents ?? null}::integer) as id`;
   if (!row) throw new Error("issue_approval returned no row");
   return row.id;
+}
+
+/**
+ * A short-lived, server-signed "serving as" token for someone whose PIN the unlock route has just
+ * verified: it names the person, the shop and the till. record_refund and the sale lookup verify it
+ * in the database, so who is serving never rests on what the till says.
+ */
+export async function issueServingToken(tokenHash: string, userId: string): Promise<string> {
+  const [row] = await db()<{ t: string }[]>`
+    select ops.issue_serving_token(${tokenHash}, ${userId}) as t`;
+  if (!row) throw new Error("issue_serving_token returned no row");
+  return row.t;
 }
 
 export async function recordRegisterEvents(tokenHash: string, events: unknown): Promise<string[]> {

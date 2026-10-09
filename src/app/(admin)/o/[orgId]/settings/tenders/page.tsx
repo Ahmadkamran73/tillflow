@@ -21,7 +21,7 @@ const messages: Record<string, { key: MessageKey; ok: boolean }> = {
 
 type Row = {
   id: string;
-  method: "cash" | "card" | "voucher";
+  method: "cash" | "card";
   label: string;
   archived_at: string | null;
 };
@@ -134,7 +134,6 @@ export default async function TenderTypesPage({
             defaultValue="card"
           >
             <option value="card">{t("tenders.method.card")}</option>
-            <option value="voucher">{t("tenders.method.voucher")}</option>
           </select>
         </label>
         <label className="flex flex-col gap-1 text-sm font-medium">

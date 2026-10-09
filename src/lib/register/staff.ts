@@ -11,8 +11,11 @@ export type PinPurpose = "unlock" | "override";
 export type ApprovalFor = "discount" | "no_sale" | "refund";
 
 export type PinResult =
-  /** `approvalId`: the server's single-use proof of a manager PIN (online overrides only). */
-  | { status: "ok"; userId: string; role: Role; approvalId?: string }
+  /**
+   * `approvalId`: the server's single-use proof of a manager PIN (online overrides only).
+   * `servingToken`: the server-signed "serving as" proof (online unlocks only).
+   */
+  | { status: "ok"; userId: string; role: Role; approvalId?: string; servingToken?: string }
   | { status: "invalid" }
   | { status: "locked"; lockedUntil: number }
   /** The PIN was right but belongs to someone who may not approve (a cashier asked to override). */
@@ -28,7 +31,15 @@ export const LOCK_MS = 15 * 60_000;
 
 export const canApprove = (role: Role) => role === "owner" || role === "manager";
 
-type Deps = { fetchFn?: typeof fetch; now?: () => number; approvalFor?: ApprovalFor };
+/** What a refund approval is for: one sale, and up to this value (cents). */
+export type RefundBind = { saleId: string; maxCents: number };
+
+type Deps = {
+  fetchFn?: typeof fetch;
+  now?: () => number;
+  approvalFor?: ApprovalFor;
+  bind?: RefundBind;
+};
 
 const unlockResponse = (raw: unknown): PinResult | null => {
   const r = raw as {
@@ -37,11 +48,18 @@ const unlockResponse = (raw: unknown): PinResult | null => {
     role?: Role;
     lockedUntil?: string;
     approvalId?: string;
+    servingToken?: string;
   } | null;
   switch (r?.result) {
     case "ok":
       return r.userId && r.role
-        ? { status: "ok", userId: r.userId, role: r.role, approvalId: r.approvalId }
+        ? {
+            status: "ok",
+            userId: r.userId,
+            role: r.role,
+            approvalId: r.approvalId,
+            servingToken: r.servingToken,
+          }
         : null;
     case "invalid":
       return { status: "invalid" };
@@ -63,6 +81,7 @@ async function checkOnline(
   purpose: PinPurpose,
   fetchFn: typeof fetch,
   approvalFor?: ApprovalFor,
+  bind?: RefundBind,
 ): Promise<PinResult | null> {
   let res: Response;
   try {
@@ -76,6 +95,7 @@ async function checkOnline(
         pin,
         purpose,
         approvalFor: purpose === "override" ? approvalFor : undefined,
+        ...(purpose === "override" && approvalFor === "refund" && bind ? bind : {}),
       }),
     });
   } catch {
@@ -102,7 +122,7 @@ export async function checkPin(
   member: StaffMember,
   pin: string,
   purpose: PinPurpose,
-  { fetchFn = fetch, now = Date.now, approvalFor }: Deps = {},
+  { fetchFn = fetch, now = Date.now, approvalFor, bind }: Deps = {},
 ): Promise<PinResult> {
   const lockOf = async () => {
     const a = await db.pinAttempts.get(member.userId);
@@ -120,7 +140,7 @@ export async function checkPin(
   const held = await lockOf();
   if (held) return { status: "locked", lockedUntil: held };
 
-  const online = await checkOnline(member.userId, pin, purpose, fetchFn, approvalFor);
+  const online = await checkOnline(member.userId, pin, purpose, fetchFn, approvalFor, bind);
   if (online) {
     if (online.status === "ok" || online.status === "not_allowed") {
       await db.pinAttempts.delete(member.userId);

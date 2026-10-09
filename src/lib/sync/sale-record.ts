@@ -91,7 +91,7 @@ export function buildSaleRecord(args: {
     },
     lines,
     // Cash settles its share plus rounding (the rest of what was handed over is change); card and
-    // voucher settle exactly their amount. Tips ride on the card payment, outside the sale total.
+    // settles exactly its amount. Tips ride on the card payment, outside the sale total.
     payments: sale.tenders.map((t) =>
       t.method === "cash"
         ? {
@@ -109,6 +109,8 @@ export function buildSaleRecord(args: {
             change: 0,
             tip: t.tipCents,
             reference: t.reference ?? null,
+            // Exchange credit names the refund whose returned goods paid for it.
+            ...(t.refundId ? { refund_id: t.refundId } : {}),
           },
     ),
   };

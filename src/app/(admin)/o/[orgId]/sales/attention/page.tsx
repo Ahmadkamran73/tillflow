@@ -128,6 +128,8 @@ export default async function AttentionPage({
               {rows.map((r, i) => {
                 const sale = sales[i];
                 const detail = r.detail as Detail;
+                // A refund, void or exchange return from the till: a manager resolves it by hand.
+                const isRefund = (r.detail as { kind?: unknown }).kind === "refund";
                 const reason = (SYNC_REASONS as readonly string[]).includes(r.reason)
                   ? reasonText[r.reason as SyncReason]
                   : reasonText.invalid;
@@ -162,7 +164,13 @@ export default async function AttentionPage({
                       )}
                     </TableCell>
                     <TableCell className="max-w-56 text-sm">
-                      {sale?.success
+                      {isRefund
+                        ? t(
+                            (r.detail as { recorded?: unknown }).recorded === true
+                              ? "attention.refundRecorded"
+                              : "attention.refundRow",
+                          )
+                        : sale?.success
                         ? sale.data.lines
                             .map((l) => `${l.qty} × ${names.get(l.variantId) ?? "?"}`)
                             .join(", ")
@@ -174,13 +182,15 @@ export default async function AttentionPage({
                         aria-label={t("attention.rowFor", { time: when, till })}
                         className="flex flex-col gap-2"
                       >
-                        <form action={retryRejectedSaleAction}>
-                          <input type="hidden" name="orgId" value={orgId} />
-                          <input type="hidden" name="id" value={r.id} />
-                          <Button type="submit" variant="outline" className="h-12 w-full px-4">
-                            {t("attention.retry")}
-                          </Button>
-                        </form>
+                        {!isRefund && (
+                          <form action={retryRejectedSaleAction}>
+                            <input type="hidden" name="orgId" value={orgId} />
+                            <input type="hidden" name="id" value={r.id} />
+                            <Button type="submit" variant="outline" className="h-12 w-full px-4">
+                              {t("attention.retry")}
+                            </Button>
+                          </form>
+                        )}
                         <form action={resolveRejectedSaleAction} className="flex flex-col gap-2">
                           <input type="hidden" name="orgId" value={orgId} />
                           <input type="hidden" name="id" value={r.id} />

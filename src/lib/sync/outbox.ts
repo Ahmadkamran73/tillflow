@@ -1,5 +1,6 @@
 import { z } from "zod";
-import type { LocalSale, RegisterDb } from "@/lib/register/db";
+import type { LocalRefund, LocalSale, RegisterDb } from "@/lib/register/db";
+import { refundResponse, type SyncRefund } from "./refund-protocol";
 import { toWireTender } from "@/lib/register/tender-input";
 import { MAX_BATCH, syncResponse, type SyncSale } from "./protocol";
 
@@ -40,6 +41,79 @@ async function withLock<T>(name: string, fn: () => Promise<T>, busy: T): Promise
 /** Pending sales, oldest first (UUIDv7 ids sort by time). */
 export const pendingSales = (db: RegisterDb) =>
   db.sales.where("syncState").equals("pending").sortBy("id");
+
+/**
+ * Pending sales that can go now: an exchange sale waits until the refund that pays for it has
+ * reached the server (the server would otherwise have no credit to take).
+ */
+export async function sendableSales(db: RegisterDb): Promise<LocalSale[]> {
+  const pending = await pendingSales(db);
+  if (!pending.some((s) => s.exchangeRefundId)) return pending;
+  const waiting = new Set(
+    (await db.refunds.where("syncState").equals("pending").primaryKeys()) as string[],
+  );
+  return pending.filter((s) => !s.exchangeRefundId || !waiting.has(s.exchangeRefundId));
+}
+
+/**
+ * Pending refunds that can go now: a refund waits while the sale it refunds is still in this
+ * device's outbox (the server cannot refund a sale it has not got).
+ */
+export async function sendableRefunds(db: RegisterDb): Promise<LocalRefund[]> {
+  const pending = await db.refunds.where("syncState").equals("pending").sortBy("id");
+  if (pending.length === 0) return pending;
+  const waiting = new Set(
+    (await db.sales.where("syncState").equals("pending").primaryKeys()) as string[],
+  );
+  return pending.filter((r) => !waiting.has(r.originalSaleId));
+}
+
+/**
+ * An exchange sale whose refund the server refused cannot be sent: the server would wait for a
+ * refund that will never come and hold up everything behind it. Mark it rejected on the device so
+ * the cashier's notice shows it; the refund's own rejection is already in Needs attention.
+ */
+async function failOrphanedExchangeSales(db: RegisterDb) {
+  const waiting = await db.sales
+    .where("syncState")
+    .equals("pending")
+    .filter((s) => !!s.exchangeRefundId)
+    .toArray();
+  for (const s of waiting) {
+    const refund = await db.refunds.get(s.exchangeRefundId!);
+    if (refund?.syncState === "rejected") {
+      await db.sales.update(s.id, { syncState: "rejected", rejectReason: "exchange_refund_rejected" });
+    }
+  }
+}
+
+const toWireRefund = (r: LocalRefund): SyncRefund => ({
+  id: r.id,
+  originalSaleId: r.originalSaleId,
+  kind: r.kind,
+  reasonCode: r.reasonCode,
+  reasonNote: r.reasonNote,
+  receiptSeq: r.receiptSeq,
+  completedAt: r.completedAt,
+  cashierUserId: r.cashierUserId,
+  approvalId: r.approvalId,
+  claimedApprover: r.claimedApprover,
+  servingToken: r.servingToken,
+  lines: r.lines.map((l) => ({ lineNo: l.lineNo, qty: l.qty, restock: l.restock })),
+  // The till's label stays on the device (it is for the receipt).
+  legs: r.legs.map((l) => ({
+    id: l.id,
+    typeId: l.typeId,
+    method: l.method,
+    amountCents: l.amountCents,
+    tipCents: l.tipCents,
+    ...(l.reference ? { reference: l.reference } : {}),
+  })),
+  exchangeSaleId: r.exchangeSaleId,
+  creditCents: r.creditCents,
+  roundCash: r.roundCash,
+  expectedAmountCents: r.expectedAmountCents,
+});
 
 /**
  * Stands in for the cashier of a sale queued before step 1.7 (nobody's PIN unlocked the till). The
@@ -107,8 +181,17 @@ export function drainOutbox(
         if (backoff && backoff.nextAt > now() && !options.force) return { state: "backoff", sent };
         options = { ...options, force: false };
 
-        const pending = await pendingSales(db);
+        await failOrphanedExchangeSales(db);
+        const pending = await sendableSales(db);
         if (pending.length === 0) {
+          // Sales first, then the refunds of them (an exchange sale waits for its refund above).
+          const due = await sendableRefunds(db);
+          if (due.length > 0) {
+            const r = await sendRefunds(db, orgId, fetchFn, due.slice(0, MAX_BATCH), { now, random });
+            if (r.state !== "ok") return { state: r.state, sent };
+            sent += r.sent;
+            continue;
+          }
           // Approvals the manager gave outside a sale (drawer opens) go after the sales.
           const events = await drainEvents(db, fetchFn, { now, random });
           if (events !== "ok") return { state: events, sent };
@@ -180,6 +263,75 @@ export function drainOutbox(
     },
     { state: "locked", sent: 0 },
   );
+}
+
+/**
+ * Sends a batch of pending refunds, one till at a time. The server answers per refund: created or
+ * duplicate = synced; rejected = kept and flagged to a manager; retry = the sale it refunds has not
+ * reached the server yet, so the refund stays queued and the drain backs off.
+ */
+async function sendRefunds(
+  db: RegisterDb,
+  orgId: string,
+  fetchFn: typeof fetch,
+  batch: LocalRefund[],
+  opts: Required<Pick<DrainOptions, "now" | "random">>,
+): Promise<{ state: "ok"; sent: number } | { state: "backoff" | "signed-out"; sent: number }> {
+  const registerId = batch[0]!.registerId;
+  const group = batch.filter((r) => r.registerId === registerId);
+  let res: Response;
+  try {
+    res = await fetchFn(`/api/v1/sync/refunds?orgId=${encodeURIComponent(orgId)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      cache: "no-store",
+      body: JSON.stringify({ registerId, refunds: group.map(toWireRefund) }),
+    });
+  } catch {
+    await fail(db, opts);
+    return { state: "backoff", sent: 0 };
+  }
+  if (res.status === 401 || res.status === 403) return { state: "signed-out", sent: 0 };
+  let results;
+  try {
+    if (!res.ok) throw new Error(String(res.status));
+    results = refundResponse.parse(await res.json()).results;
+  } catch {
+    await fail(db, opts);
+    return { state: "backoff", sent: 0 };
+  }
+  const byId = new Map(results.map((r) => [r.id, r]));
+  let unresolved = 0;
+  await db.transaction("rw", db.refunds, async () => {
+    for (const refund of group) {
+      const r = byId.get(refund.id);
+      if (!r || r.status === "retry") {
+        unresolved++;
+        await db.refunds.update(refund.id, { attempts: refund.attempts + 1 });
+      } else if (r.status === "rejected") {
+        await db.refunds.update(refund.id, {
+          syncState: "rejected",
+          rejectReason: r.reason,
+          servingToken: undefined,
+        });
+      } else {
+        // The signed token is a credential: it does not stay on the device once the server has judged the refund.
+        await db.refunds.update(refund.id, {
+          syncState: "synced",
+          syncedAt: opts.now(),
+          servingToken: undefined,
+        });
+      }
+    }
+  });
+  const sent = group.length - unresolved;
+  if (unresolved > 0) {
+    await fail(db, opts);
+    return { state: "backoff", sent };
+  }
+  await succeed(db, opts.now());
+  return { state: "ok", sent };
 }
 
 const eventResponse = z.object({
@@ -278,4 +430,10 @@ async function prune(db: RegisterDb, now: number) {
     .filter((s) => (s.syncedAt ?? now) < now - KEEP_SYNCED_MS)
     .primaryKeys();
   if (old.length) await db.sales.bulkDelete(old);
+  const oldRefunds = await db.refunds
+    .where("syncState")
+    .equals("synced")
+    .filter((r) => (r.syncedAt ?? now) < now - KEEP_SYNCED_MS)
+    .primaryKeys();
+  if (oldRefunds.length) await db.refunds.bulkDelete(oldRefunds);
 }

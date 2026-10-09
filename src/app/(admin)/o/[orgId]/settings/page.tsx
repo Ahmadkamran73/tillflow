@@ -21,6 +21,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ orgId
           { href: "business-type", label: "settings.businessType" },
           { href: "vat", label: "settings.vat" },
           { href: "discount-limit", label: "discountLimit.title" },
+          { href: "refund-limit", label: "refunds.limitTitle" },
         ] as const)
       : []),
   ];

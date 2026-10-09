@@ -13,7 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { locations, organisations } from "./tenancy";
 
-export const tenderMethods = ["cash", "card", "voucher"] as const;
+export const tenderMethods = ["cash", "card"] as const;
 
 /**
  * The ways a location takes payment, e.g. "Cash", "Card – AIB terminal", "Card – SumUp". A card
@@ -48,7 +48,7 @@ export const tenderTypes = pgTable(
     uniqueIndex("tender_types_one_cash_key")
       .on(t.locationId)
       .where(sql`${t.method} = 'cash'`),
-    check("tender_types_method", sql`${t.method} in ('cash', 'card', 'voucher')`),
+    check("tender_types_method", sql`${t.method} in ('cash', 'card')`),
     check("tender_types_label", sql`char_length(btrim(${t.label})) between 1 and 40`),
   ],
 );

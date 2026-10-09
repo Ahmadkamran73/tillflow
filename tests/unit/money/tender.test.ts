@@ -9,7 +9,22 @@ import {
 
 const cash = (amount: number): TenderLine => ({ method: "cash", amount });
 const card = (amount: number, tip?: number): TenderLine => ({ method: "card", amount, tip });
-const voucher = (amount: number): TenderLine => ({ method: "voucher", amount });
+const credit = (amount: number): TenderLine => ({ method: "exchange", amount });
+
+describe("settleTenders with exchange credit", () => {
+  it("settles exchange credit exactly, like a card, and only cash is rounded", () => {
+    const s = settleTenders(1633, [{ method: "exchange", amount: 1000 }, cash(635)]);
+    expect(s).toMatchObject({ nonCash: 1000, cashShare: 633, rounding: 2, change: 0, ok: true });
+    expect(settleTenders(1000, [{ method: "exchange", amount: 1000 }])).toMatchObject({
+      ok: true,
+      rounding: 0,
+    });
+    expect(settleTenders(1000, [{ method: "exchange", amount: 1100 }]).error).toBe("non_cash_over");
+    expect(settleTenders(1000, [{ method: "exchange", amount: 500, tip: 5 }]).error).toBe(
+      "tip_not_card",
+    );
+  });
+});
 
 describe("settleTenders", () => {
   it("cash only matches the single-cash behaviour (5c rounding, change)", () => {
@@ -34,8 +49,8 @@ describe("settleTenders", () => {
   });
 
   it("does not depend on the order tenders were taken", () => {
-    const a = settleTenders(2003, [card(500), voucher(500), cash(1005)]);
-    const b = settleTenders(2003, [cash(1005), voucher(500), card(500)]);
+    const a = settleTenders(2003, [card(500), credit(500), cash(1005)]);
+    const b = settleTenders(2003, [cash(1005), credit(500), card(500)]);
     expect(a).toEqual(b);
     expect(a.ok).toBe(true);
   });
@@ -108,9 +123,9 @@ describe("settleTenders", () => {
     expect(s).toMatchObject({ ok: false, error: "short", change: 0, balance: 1 });
   });
 
-  it("refuses card or voucher above the total (no change from them)", () => {
+  it("refuses card or exchange credit above the total (no change from them)", () => {
     expect(settleTenders(1000, [card(1001)])).toMatchObject({ error: "non_cash_over", balance: 0 });
-    expect(settleTenders(1000, [card(600), voucher(500)]).error).toBe("non_cash_over");
+    expect(settleTenders(1000, [card(600), credit(500)]).error).toBe("non_cash_over");
   });
 
   it("refuses a cash tender that is not needed", () => {
@@ -135,7 +150,7 @@ describe("settleTenders", () => {
     expect(settleTenders(1000, [{ method: "cash", amount: 1000, tip: 50 }]).error).toBe(
       "tip_not_card",
     );
-    expect(settleTenders(1000, [{ method: "voucher", amount: 1000, tip: 50 }]).error).toBe(
+    expect(settleTenders(1000, [{ method: "exchange", amount: 1000, tip: 50 }]).error).toBe(
       "tip_not_card",
     );
   });
@@ -163,7 +178,7 @@ describe("settleTenders", () => {
       const rest = total - c - v;
       const lines: TenderLine[] = [];
       if (c > 0) lines.push(card(c, rnd(c + 1)));
-      if (v > 0) lines.push(voucher(v));
+      if (v > 0) lines.push(credit(v));
       if (rest > 0) {
         const due = rest + cashRound(rest).adjustment;
         lines.push(cash(Math.max(due, 1) + rnd(3) * 500)); // a 1-2c remainder rounds to 0 due
@@ -214,9 +229,9 @@ describe("a shop that does not round cash (roundCash: false)", () => {
 });
 
 describe("defaultNonCashAmount", () => {
-  it("is the exact amount left after card and voucher, ignoring cash", () => {
+  it("is the exact amount left after card and credit, ignoring cash", () => {
     expect(defaultNonCashAmount(2000, [])).toBe(2000);
-    expect(defaultNonCashAmount(2000, [card(500), voucher(300), cash(100)])).toBe(1200);
+    expect(defaultNonCashAmount(2000, [card(500), credit(300), cash(100)])).toBe(1200);
     expect(defaultNonCashAmount(2000, [card(2500 - 500)])).toBe(0);
   });
   it("never goes below zero and rejects non-integers", () => {

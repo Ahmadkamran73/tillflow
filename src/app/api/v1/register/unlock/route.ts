@@ -3,7 +3,12 @@ import { z } from "zod";
 import { verifyPin } from "@/lib/auth/pin";
 import { authenticateDevice } from "@/lib/device/auth";
 import { reportError } from "@/lib/errors";
-import { issueApproval, pinAttemptBegin, pinAttemptFinish } from "@/lib/device/service";
+import {
+  issueApproval,
+  issueServingToken,
+  pinAttemptBegin,
+  pinAttemptFinish,
+} from "@/lib/device/service";
 import { RATE_LIMIT_UNAVAILABLE_MESSAGE, rateLimit, rateLimitedMessage } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
@@ -15,6 +20,9 @@ const body = z.strictObject({
   purpose: z.enum(["unlock", "override"]),
   /** What an override is for; the approval the server issues is good for this and nothing else. */
   approvalFor: z.enum(["discount", "no_sale", "refund"]).optional(),
+  /** A refund approval names the sale it is for and the most it may be spent on (cents). */
+  saleId: z.uuid().optional(),
+  maxCents: z.int().min(0).max(100_000_000).optional(),
 });
 const NO_STORE = { "Cache-Control": "no-store" };
 
@@ -56,8 +64,13 @@ export async function POST(request: NextRequest) {
   const parsed = body.safeParse(json);
   if (!parsed.success)
     return Response.json({ error: "bad request" }, { status: 400, headers: NO_STORE });
-  const { userId, pin, purpose, approvalFor } = parsed.data;
-  if (purpose === "override" && !approvalFor) {
+  const { userId, pin, purpose, approvalFor, saleId, maxCents } = parsed.data;
+  const bound = saleId !== undefined && maxCents !== undefined;
+  if (
+    (purpose === "override" && !approvalFor) ||
+    (approvalFor === "refund") !== bound ||
+    (approvalFor !== "refund" && (saleId !== undefined || maxCents !== undefined))
+  ) {
     return Response.json({ error: "bad request" }, { status: 400, headers: NO_STORE });
   }
 
@@ -90,13 +103,25 @@ export async function POST(request: NextRequest) {
     if (purpose === "override" && approvalFor) {
       // The server saw this manager's PIN: give the till a single-use proof to attach to ONE sale or
       // event. Without it (offline approvals) the server treats the approval as an unverified claim.
-      const approvalId = await issueApproval(device.tokenHash, userId, approvalFor);
+      const approvalId = await issueApproval(
+        device.tokenHash,
+        userId,
+        approvalFor,
+        bound ? { saleId, maxCents } : undefined,
+      );
       return Response.json(
         { result: "ok", userId, role: attempt.role, approvalId },
         { headers: NO_STORE },
       );
     }
-    return Response.json({ result: "ok", userId, role: attempt.role }, { headers: NO_STORE });
+    // The PIN was just verified: sign who is serving on this till, for the next hour. Refunds and the
+    // sale lookup verify it in the database instead of trusting a user id from the till.
+    const servingToken =
+      purpose === "unlock" ? await issueServingToken(device.tokenHash, userId) : undefined;
+    return Response.json(
+      { result: "ok", userId, role: attempt.role, servingToken },
+      { headers: NO_STORE },
+    );
   } catch (e) {
     await reportError(e, { source: "server", route: "/api/v1/register/unlock" });
     return Response.json({ error: "try again" }, { status: 503, headers: NO_STORE });

@@ -29,7 +29,7 @@ export type BasketLine =
   | { kind: "deposit"; unitPrice: number; qty: number }
   | { kind: "levy"; unitPrice: number; qty: number };
 
-export type Tender = "cash" | "card" | "voucher";
+export type Tender = "cash" | "card";
 
 export interface BasketInput {
   country: string;

@@ -3,10 +3,13 @@ import { createSupabaseServerClient } from "@/lib/auth";
 import { getLocation, getTaxRates } from "@/lib/catalog";
 import { parseSyncMeta, parseTenderMeta } from "@/lib/device/meta";
 import {
+  deviceFindSale,
+  deviceRefundsKnown,
   deviceSaleCatalogAsOf,
   deviceSalesKnown,
   deviceSyncMeta,
   deviceTenderTypes,
+  recordRefund,
   recordSale,
   recordSyncRejection,
 } from "@/lib/ops/db";
@@ -17,6 +20,9 @@ import type { RateRow } from "@/lib/money";
 import { rowsFromAsOf } from "./as-of";
 import { processBatch, type SyncCtx, type SyncDeps } from "./process";
 import type { SyncResult, SyncSale } from "./protocol";
+import { saleDetails } from "./refund-detail";
+import { processRefunds } from "./refund-process";
+import type { RefundResult } from "./refund-protocol";
 
 type Shop = { timezone: string; taxRates: RateRow[] };
 
@@ -136,6 +142,48 @@ export async function syncSalesFromSession(
         return new Set((data ?? []) as string[]);
       },
       rowsAsOf: (sale, at) => loadRowsAsOf(ctx.orgId, sale, at),
+    },
+  );
+}
+
+/**
+ * Refunds, voids and exchanges from a paired till. Same trust model as sales: the shop and till come
+ * from the device token, the original sale is read through `ops.device_find_sale` (this shop only),
+ * and every amount is recomputed from its stored lines.
+ */
+export async function syncRefundsFromDevice(
+  rawRefunds: unknown[],
+  device: { tokenHash: string; orgId: string; registerId: string },
+): Promise<RefundResult[]> {
+  if (rawRefunds.length === 0) return [];
+  const raw = await deviceSyncMeta(device.tokenHash);
+  if (!raw) throw new Error("Device is not paired");
+  const meta = parseSyncMeta(raw);
+  const rawTypes = await deviceTenderTypes(device.tokenHash);
+  if (!rawTypes) throw new Error("Device is not paired");
+  const tenderMeta = parseTenderMeta(rawTypes);
+
+  return processRefunds(
+    rawRefunds,
+    {
+      orgId: device.orgId,
+      registerId: device.registerId,
+      timezone: meta.timezone,
+      tenderTypes: tenderMeta.types,
+    },
+    {
+      now: () => new Date(),
+      async existingIds(ids) {
+        return new Set(await deviceRefundsKnown(device.tokenHash, ids));
+      },
+      async findSale(id) {
+        // `internal`: the server's own sync check reads the sale it is judging, whoever is serving.
+        const found = await deviceFindSale(device.tokenHash, { by: "id", id, internal: true });
+        if (found === null) throw new Error("Device is not paired");
+        return saleDetails.parse(found)[0] ?? null;
+      },
+      recordRefund: (payload) => recordRefund(payload, device.tokenHash),
+      recordRejection: recordSyncRejection,
     },
   );
 }

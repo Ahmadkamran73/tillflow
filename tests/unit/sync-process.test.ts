@@ -11,10 +11,9 @@ const V1 = "00000000-0000-4000-8000-000000000001";
 const P1 = "00000000-0000-4000-8000-0000000000a1";
 const CASH_TYPE = "00000000-0000-4000-8000-0000000000c1";
 const CARD_TYPE = "00000000-0000-4000-8000-0000000000c2";
-const VOUCHER_TYPE = "00000000-0000-4000-8000-0000000000c3";
-const TYPE = { cash: CASH_TYPE, card: CARD_TYPE, voucher: VOUCHER_TYPE };
+const TYPE = { cash: CASH_TYPE, card: CARD_TYPE };
 let tn = 0;
-const tender = (method: "cash" | "card" | "voucher", amountCents: number, extra = {}) => ({
+const tender = (method: "cash" | "card", amountCents: number, extra = {}) => ({
   id: `00000000-0000-7000-9000-${String(++tn).padStart(12, "0")}`,
   typeId: TYPE[method],
   method,
@@ -29,7 +28,6 @@ const ctx = {
   tenderTypes: [
     { id: CASH_TYPE, method: "cash" },
     { id: CARD_TYPE, method: "card" },
-    { id: VOUCHER_TYPE, method: "voucher" },
   ],
   tipsAllowed: false,
   shopRoundCash: true,
@@ -426,7 +424,7 @@ describe("manager override and cashier attribution (step 1.7)", () => {
 });
 
 describe("tenders (step 2.1)", () => {
-  // The item is 12.34. Card and voucher are exact; the 5c rounding is on the cash share only.
+  // The item is 12.34. Card is exact; the 5c rounding is on the cash share only.
   const split = (tenders: ReturnType<typeof tender>[], due: number) =>
     sale({ tenders, expectedDueCents: due });
 
@@ -491,13 +489,18 @@ describe("tenders (step 2.1)", () => {
     });
   });
 
-  it("accepts voucher + card + cash in any order", async () => {
+  it("accepts card + cash in either order", async () => {
     const { d } = deps(() => 1234);
-    const s = split([tender("cash", 600), tender("voucher", 300), tender("card", 400)], 1235);
-    expect((await processBatch([s], ctx, d))[0]!.status).toBe("created");
+    // 12.34: card 7.00, the cash share is 5.34 and rounds to 5.35
+    for (const order of [
+      [tender("cash", 600), tender("card", 700)],
+      [tender("card", 700), tender("cash", 600)],
+    ]) {
+      expect((await processBatch([split(order, 1235)], ctx, d))[0]!.status).toBe("created");
+    }
   });
 
-  it("rejects card or voucher above the total", async () => {
+  it("rejects a card amount above the total", async () => {
     const { d, recorded } = deps(() => 1234);
     const r = await processBatch([split([tender("card", 1300)], 1234)], ctx, d);
     expect(r[0]).toMatchObject({ status: "rejected", reason: "tender_mismatch" });

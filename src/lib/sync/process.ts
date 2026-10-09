@@ -13,7 +13,9 @@ export type SyncDeps = {
   existingIds: (ids: string[]) => Promise<Set<string>>;
   /** Prices the sale from the catalogue as it stood at `at`; throws SaleError if it cannot. */
   priceAt: (sale: SyncSale, at: Date) => Promise<{ cart: Cart; priced: PricedCart }>;
-  recordSale: (payload: unknown) => Promise<"created" | "duplicate" | "receipt_clash">;
+  recordSale: (
+    payload: unknown,
+  ) => Promise<"created" | "duplicate" | "receipt_clash" | "exchange_pending">;
   recordRejection: (payload: unknown) => Promise<void>;
 };
 
@@ -324,6 +326,9 @@ async function processOne(raw: unknown, ctx: SyncCtx, deps: SyncDeps): Promise<S
   if (outcome === "receipt_clash") {
     return reject({ reason: "receipt_number_used", detail: { receiptSeq: sale.receiptSeq } });
   }
+  // The exchange refund that pays for this sale has not arrived yet: retry the batch (the till sends
+  // refunds before the sale that depends on them, so this is only a race between two requests).
+  if (outcome === "exchange_pending") throw new Error("exchange refund is not on the server yet");
   return { id: sale.id, status: outcome };
 }
 

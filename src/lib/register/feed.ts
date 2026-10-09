@@ -24,6 +24,8 @@ export const feedSchema = z.object({
     receiptFooter: z.string().nullable(),
     /** A discount above this share (basis points) of a line or the sale needs a manager's PIN. */
     discountOverrideBp: z.int().min(0).max(10_000),
+    /** A cashier's refund above this many cents needs a manager's PIN (organisations.refund_override_cents). */
+    refundOverrideCents: z.int().min(0).max(1_000_000).default(2000),
   }),
   /** Who can unlock the till: staff of this shop who have set a PIN. The Argon2 hashes let a till check a PIN offline. */
   staff: z.array(
@@ -41,6 +43,8 @@ export const feedSchema = z.object({
       name: z.string(),
       /** Highest receipt number the server holds for this till (0 = none), so numbering carries on after it. */
       lastSeq: z.int().min(0).default(0),
+      /** Highest refund number the server holds for this till, so refund numbering carries on after it. */
+      lastRefundSeq: z.int().min(0).default(0),
     }),
   ),
   /** The ways this till's location takes payment (archived ones are not sent). */
@@ -48,7 +52,7 @@ export const feedSchema = z.object({
     .array(
       z.object({
         id: z.string(),
-        method: z.enum(["cash", "card", "voucher"]),
+        method: z.enum(["cash", "card"]),
         label: z.string(),
         sort: z.int(),
       }),
@@ -125,5 +129,16 @@ export const discountLimitOf = (org: { discountOverrideBp?: number } | undefined
   org.discountOverrideBp <= 10_000
     ? org.discountOverrideBp
     : DEFAULT_DISCOUNT_LIMIT_BP;
+/** The shop default (organisations.refund_override_cents): a cashier's refund above EUR 20.00 needs a manager. */
+export const DEFAULT_REFUND_LIMIT_CENTS = 2000;
+
+/** The refund limit from the till's saved copy of the shop; a copy from before refunds has none. */
+export const refundLimitOf = (org: { refundOverrideCents?: number } | undefined): number =>
+  typeof org?.refundOverrideCents === "number" &&
+  Number.isInteger(org.refundOverrideCents) &&
+  org.refundOverrideCents >= 0 &&
+  org.refundOverrideCents <= 1_000_000
+    ? org.refundOverrideCents
+    : DEFAULT_REFUND_LIMIT_CENTS;
 export type FeedProduct = Feed["products"][number];
 export type FeedVariant = Feed["variants"][number];

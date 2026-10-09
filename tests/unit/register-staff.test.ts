@@ -28,6 +28,45 @@ const offline = (async () => {
 const serverSays = (status: number, body: unknown = {}) =>
   vi.fn(async () => Response.json(body, { status })) as unknown as typeof fetch;
 
+describe("the server-signed serving token", () => {
+  it("comes back with an online unlock, and is simply absent offline", async () => {
+    const online = (async () =>
+      Response.json({ result: "ok", userId: CSH, role: "cashier", servingToken: "payload.sig" })) as unknown as typeof fetch;
+    expect(await checkPin(db, cashier, "7391", "unlock", { fetchFn: online })).toMatchObject({
+      status: "ok",
+      servingToken: "payload.sig",
+    });
+    const result = await checkPin(db, cashier, "7391", "unlock", { fetchFn: offline });
+    expect(result).toMatchObject({ status: "ok" });
+    expect(result).not.toHaveProperty("servingToken");
+  });
+});
+
+describe("a refund approval names its sale and value", () => {
+  it("sends the sale and the most it may be spent on with the PIN, only for refunds", async () => {
+    const SALE = "00000000-0000-7000-8000-0000000000aa";
+    const bodies: Record<string, unknown>[] = [];
+    const fetchFn = (async (_url: string, init: RequestInit) => {
+      bodies.push(JSON.parse(init.body as string));
+      return Response.json({ result: "ok", userId: MGR, role: "manager", approvalId: "ap1" });
+    }) as unknown as typeof fetch;
+    await checkPin(db, manager, "2580", "override", {
+      fetchFn,
+      approvalFor: "refund",
+      bind: { saleId: SALE, maxCents: 2500 },
+    });
+    expect(bodies[0]).toMatchObject({ approvalFor: "refund", saleId: SALE, maxCents: 2500 });
+    // a discount approval never carries a sale
+    await checkPin(db, manager, "2580", "override", {
+      fetchFn,
+      approvalFor: "discount",
+      bind: { saleId: SALE, maxCents: 2500 },
+    });
+    expect(bodies[1]).not.toHaveProperty("saleId");
+    expect(bodies[1]).not.toHaveProperty("maxCents");
+  });
+});
+
 describe("checkPin offline (cached Argon2 hash)", () => {
   it("accepts the right PIN and clears the failure count", async () => {
     await db.pinAttempts.put({ userId: CSH, failed: 3 });

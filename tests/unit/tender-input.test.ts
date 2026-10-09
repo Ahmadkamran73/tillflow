@@ -46,9 +46,9 @@ describe("tender input", () => {
       tenderInput.safeParse({ ...base, reference: "AUTH 123456", tipCents: 100 }).success,
     ).toBe(true);
   });
-  it("refuses a tip on cash or voucher, and unknown keys", () => {
+  it("refuses a tip on cash, a voucher method, and unknown keys", () => {
     expect(tenderInput.safeParse({ ...base, method: "cash", tipCents: 5 }).success).toBe(false);
-    expect(tenderInput.safeParse({ ...base, method: "voucher", tipCents: 5 }).success).toBe(false);
+    expect(tenderInput.safeParse({ ...base, method: "voucher" }).success).toBe(false); // vouchers are gone
     expect(tenderInput.safeParse({ ...base, pan: "4111" }).success).toBe(false);
   });
   it("needs 1 to 10 tenders and at most one cash", () => {
@@ -57,6 +57,19 @@ describe("tender input", () => {
     const cash = { ...base, method: "cash" as const };
     expect(tendersInput.safeParse([cash, cash]).success).toBe(false);
     expect(tendersInput.safeParse([cash, base]).success).toBe(true);
+  });
+});
+
+describe("exchange credit as a tender", () => {
+  const credit = { ...base, method: "exchange" as const, refundId: id };
+  it("names the refund that gave the credit, has no payment type, and at most one", () => {
+    expect(tenderInput.safeParse(credit).success).toBe(true);
+    expect(tenderInput.safeParse({ ...credit, refundId: undefined }).success).toBe(false);
+    expect(tenderInput.safeParse({ ...base, refundId: id }).success).toBe(false); // card with a refund id
+    expect(tenderInput.safeParse({ ...credit, typeId: id }).success).toBe(false);
+    expect(tenderInput.safeParse({ ...credit, tipCents: 5 }).success).toBe(false);
+    expect(tendersInput.safeParse([credit, credit]).success).toBe(false);
+    expect(tendersInput.safeParse([credit, { ...base, method: "cash" as const }]).success).toBe(true);
   });
 });
 

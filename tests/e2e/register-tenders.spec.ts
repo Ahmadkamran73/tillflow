@@ -118,15 +118,12 @@ test("split card + cash: rounding only on the cash share, change only from cash"
   expect(rows[0]).toMatchObject({ amount_due_cents: 1235, cash_rounding_cents: 1 });
 });
 
-test("voucher + card: more than is left on a card is refused (no change from card)", async ({
-  page,
-}) => {
-  const orgId = await setup(page, "voucher");
+test("card above what is left is refused (no change from card)", async ({ page }) => {
+  const orgId = await setup(page, "cardover");
   await startPayment(page);
-  await choose(page, "Voucher");
-  await page.getByLabel("Voucher amount").fill("4");
-  await page.getByLabel(/Voucher number/).fill("V-0042");
-  await page.getByRole("button", { name: "Add voucher" }).click();
+  await choose(page, "Card");
+  await page.getByLabel("Card amount").fill("4");
+  await page.getByRole("button", { name: "Approved on terminal" }).click();
   await choose(page, "Card");
   await page.getByLabel("Card amount").fill("9");
   await page.getByRole("button", { name: "Approved on terminal" }).click();
@@ -138,9 +135,9 @@ test("voucher + card: more than is left on a card is refused (no change from car
 
   await waitForSales(orgId, 1);
   const rows = await payments(orgId);
-  expect(rows.map((r) => [r.method, r.amount_cents, r.provider_ref])).toEqual([
-    ["card", 834, null],
-    ["voucher", 400, "V-0042"],
+  expect(rows.map((r) => [r.method, r.amount_cents]).sort((x, y) => Number(x[1]) - Number(y[1]))).toEqual([
+    ["card", 400],
+    ["card", 834],
   ]);
 });
 
