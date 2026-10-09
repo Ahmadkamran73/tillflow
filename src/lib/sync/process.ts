@@ -295,8 +295,9 @@ async function processOne(raw: unknown, ctx: SyncCtx, deps: SyncDeps): Promise<S
 
   let outcome;
   try {
-    outcome = await deps.recordSale(
-      buildSaleRecord({
+    outcome = await deps.recordSale({
+      shift_id: sale.shiftId ?? null,
+      ...buildSaleRecord({
         orgId: ctx.orgId,
         registerId: ctx.registerId,
         userId: sale.cashierUserId,
@@ -309,7 +310,7 @@ async function processOne(raw: unknown, ctx: SyncCtx, deps: SyncDeps): Promise<S
         pricedAsOf: match.at,
         reviewFlags,
       }),
-    );
+    });
   } catch (e) {
     if (!isDeterministic(e) && !(e instanceof Error && e.message.startsWith("item line must")))
       throw e;

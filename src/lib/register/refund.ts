@@ -139,7 +139,8 @@ export function applyLocalRefunds(detail: SaleDetail, refunds: readonly LocalRef
         detail.refunded.value +
         mine.reduce((n, r) => n + r.lines.reduce((m, l) => m + l.grossCents, 0), 0),
       cash_refunds:
-        detail.refunded.cash_refunds + mine.filter((r) => r.legs.some((l) => l.method === "cash")).length,
+        detail.refunded.cash_refunds +
+        mine.filter((r) => r.legs.some((l) => l.method === "cash")).length,
     },
   };
 }
@@ -285,6 +286,7 @@ const toLocalLine = (l: PricedRefundLine): LocalRefundLine => ({
  */
 export async function completeRefund(db: RegisterDb, input: RefundInput): Promise<LocalRefund> {
   return db.transaction("rw", db.meta, db.refunds, async () => {
+    const shift = (await db.meta.get("currentShift"))?.value as { id: string } | undefined;
     const key = `refundSeq:${input.registerId}`;
     const local = ((await db.meta.get(key))?.value as number | undefined) ?? 0;
     const registers = (await db.meta.get("registers"))?.value as Feed["registers"] | undefined;
@@ -294,6 +296,7 @@ export async function completeRefund(db: RegisterDb, input: RefundInput): Promis
       id: input.id ?? uuidv7(),
       registerId: input.registerId,
       cashierUserId: input.cashierUserId,
+      shiftId: shift?.id,
       approvalId: input.approvalId,
       claimedApprover: input.approvalId ? undefined : input.claimedApprover,
       servingToken: input.servingToken,
@@ -319,7 +322,6 @@ export async function completeRefund(db: RegisterDb, input: RefundInput): Promis
     return refund;
   });
 }
-
 
 /**
  * Saves an exchange: the refund of the returned goods and the sale that spends its credit, in ONE

@@ -34,6 +34,7 @@ export async function completeSale(
   },
 ): Promise<LocalSale> {
   return db.transaction("rw", db.meta, db.sales, async () => {
+    const shift = (await db.meta.get("currentShift"))?.value as { id: string } | undefined;
     const key = `receiptSeq:${input.registerId}`;
     const local = ((await db.meta.get(key))?.value as number | undefined) ?? 0;
     const registers = (await db.meta.get("registers"))?.value as Feed["registers"] | undefined;
@@ -45,6 +46,7 @@ export async function completeSale(
       registerId: input.registerId,
       cashierUserId: input.cashierUserId,
       approvalId: input.approvalId,
+      shiftId: shift?.id,
       receiptSeq: seq,
       completedAt: new Date().toISOString(),
       cart: input.cart,

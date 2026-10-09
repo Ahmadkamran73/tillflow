@@ -190,6 +190,20 @@ export async function unlockTill(page: Page, name = TILL_NAME, pin = TILL_PIN) {
   await page.getByLabel(`PIN for ${name}`).fill(pin);
   await page.getByRole("button", { name: "Unlock" }).click();
   await expect(page.getByRole("button", { name: /^Lock till/ })).toBeVisible();
+  await openShiftIfAsked(page);
+}
+
+/** Selling is blocked until a shift is open: opens one with a 100.00 float when the till asks. */
+export async function openShiftIfAsked(page: Page, float = "100") {
+  const dialog = page.getByRole("dialog", { name: "Open the shift" });
+  const asked = await dialog.waitFor({ state: "visible", timeout: 2500 }).then(
+    () => true,
+    () => false,
+  );
+  if (!asked) return;
+  await dialog.getByLabel(/Float in the drawer/).fill(float);
+  await dialog.getByRole("button", { name: "Open shift" }).click();
+  await expect(dialog).toBeHidden();
 }
 
 /**

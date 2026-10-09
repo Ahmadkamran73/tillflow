@@ -4,12 +4,13 @@ import { reportError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import { createBoss, registerHandler, type JobHandler } from "./boss";
 import { OPS_HANDLERS } from "./handlers/ops";
+import { SHIFT_HANDLERS } from "./handlers/shifts";
 
 /**
  * Background jobs. Later steps add their handlers (import, reports, exports, billing) here.
  * The worker is started once per Node.js process from src/instrumentation.ts.
  */
-const HANDLERS: JobHandler[] = [...OPS_HANDLERS];
+const HANDLERS: JobHandler[] = [...OPS_HANDLERS, ...SHIFT_HANDLERS];
 
 const RETRY_MS = 60_000;
 

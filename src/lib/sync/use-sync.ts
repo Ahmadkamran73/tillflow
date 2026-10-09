@@ -26,6 +26,8 @@ export type SyncView = {
 };
 
 type Counts = {
+  /** Shift events (open, cash in/out, close) waiting to be sent. */
+  shiftWaiting: number;
   waiting: number;
   rejected: number;
   oldest: number | null;
@@ -45,6 +47,7 @@ export function useSync(
 ): SyncView {
   const [counts, setCounts] = useState<Counts>({
     waiting: 0,
+    shiftWaiting: 0,
     rejected: 0,
     oldest: null,
     lastContact: null,
@@ -60,26 +63,29 @@ export function useSync(
   useEffect(() => {
     if (!db) return;
     const sub = liveQuery(async (): Promise<Counts> => {
-      const [pending, rejected, contact, pendingRefunds, rejectedRefunds] = await Promise.all([
-        db.sales.where("syncState").equals("pending").sortBy("id"),
-        db.sales.where("syncState").equals("rejected").count(),
-        db.meta.get("lastContactAt"),
-        db.refunds.where("syncState").equals("pending").sortBy("id"),
-        db.refunds.where("syncState").equals("rejected").count(),
-      ]);
+      const [pending, rejected, contact, pendingRefunds, rejectedRefunds, pendingShifts] =
+        await Promise.all([
+          db.sales.where("syncState").equals("pending").sortBy("id"),
+          db.sales.where("syncState").equals("rejected").count(),
+          db.meta.get("lastContactAt"),
+          db.refunds.where("syncState").equals("pending").sortBy("id"),
+          db.refunds.where("syncState").equals("rejected").count(),
+          db.shiftEvents.where("syncState").equals("pending").count(),
+        ]);
       const oldestTimes = [pending[0], pendingRefunds[0]]
         .filter((x) => !!x)
         .map((x) => new Date(x.completedAt).getTime());
       const oldest = oldestTimes.length ? Math.min(...oldestTimes) : null;
       return {
         waiting: pending.length + pendingRefunds.length,
+        shiftWaiting: pendingShifts,
         rejected: rejected + rejectedRefunds,
         oldest,
         lastContact: typeof contact?.value === "number" ? contact.value : null,
       };
     }).subscribe({
       next: (c) => {
-        waitingRef.current = c.waiting;
+        waitingRef.current = c.waiting + c.shiftWaiting;
         setCounts(c);
       },
       error: () => {},

@@ -164,9 +164,7 @@ async function processOne(raw: unknown, ctx: RefundCtx, deps: RefundDeps): Promi
       detail: { ...r.detail, kind: "refund" },
       // Inputs only; the reference is for the payment row, never kept in a rejection.
       // Neither a reference nor the signed token is kept in a rejection.
-      payload: storable(
-        stripReferences({ ...refund, servingToken: undefined, kind_of: "refund" }),
-      ),
+      payload: storable(stripReferences({ ...refund, servingToken: undefined, kind_of: "refund" })),
     });
     return { id: refund.id, status: "rejected", reason: r.reason };
   };
@@ -235,6 +233,7 @@ async function processOne(raw: unknown, ctx: RefundCtx, deps: RefundDeps): Promi
   let outcome;
   try {
     outcome = await deps.recordRefund({
+      shift_id: refund.shiftId ?? null,
       refund: {
         id: refund.id,
         org_id: ctx.orgId,

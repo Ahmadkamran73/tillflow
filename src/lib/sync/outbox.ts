@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { LocalRefund, LocalSale, RegisterDb } from "@/lib/register/db";
+import type { LocalRefund, LocalSale, LocalShiftEvent, RegisterDb } from "@/lib/register/db";
 import { refundResponse, type SyncRefund } from "./refund-protocol";
 import { toWireTender } from "@/lib/register/tender-input";
 import { MAX_BATCH, syncResponse, type SyncSale } from "./protocol";
@@ -47,7 +47,8 @@ export const pendingSales = (db: RegisterDb) =>
  * reached the server (the server would otherwise have no credit to take).
  */
 export async function sendableSales(db: RegisterDb): Promise<LocalSale[]> {
-  const pending = await pendingSales(db);
+  const unopened = await unsyncedOpens(db);
+  const pending = (await pendingSales(db)).filter((s) => !s.shiftId || !unopened.has(s.shiftId));
   if (!pending.some((s) => s.exchangeRefundId)) return pending;
   const waiting = new Set(
     (await db.refunds.where("syncState").equals("pending").primaryKeys()) as string[],
@@ -56,12 +57,24 @@ export async function sendableSales(db: RegisterDb): Promise<LocalSale[]> {
 }
 
 /**
+ * Shifts whose `open` has not reached the server yet. A sale or refund of such a shift waits: the
+ * server would not know the shift. (An open the server refused does not hold anything up: its
+ * sales go and the server turns them into a Needs attention item.)
+ */
+async function unsyncedOpens(db: RegisterDb): Promise<Set<string>> {
+  const opens = await db.shiftEvents.where("syncState").equals("pending").toArray();
+  return new Set(opens.filter((e) => e.kind === "open").map((e) => e.shiftId));
+}
+
+/**
  * Pending refunds that can go now: a refund waits while the sale it refunds is still in this
  * device's outbox (the server cannot refund a sale it has not got).
  */
 export async function sendableRefunds(db: RegisterDb): Promise<LocalRefund[]> {
-  const pending = await db.refunds.where("syncState").equals("pending").sortBy("id");
-  if (pending.length === 0) return pending;
+  const all = await db.refunds.where("syncState").equals("pending").sortBy("id");
+  if (all.length === 0) return all;
+  const unopened = await unsyncedOpens(db);
+  const pending = all.filter((r) => !r.shiftId || !unopened.has(r.shiftId));
   const waiting = new Set(
     (await db.sales.where("syncState").equals("pending").primaryKeys()) as string[],
   );
@@ -82,7 +95,10 @@ async function failOrphanedExchangeSales(db: RegisterDb) {
   for (const s of waiting) {
     const refund = await db.refunds.get(s.exchangeRefundId!);
     if (refund?.syncState === "rejected") {
-      await db.sales.update(s.id, { syncState: "rejected", rejectReason: "exchange_refund_rejected" });
+      await db.sales.update(s.id, {
+        syncState: "rejected",
+        rejectReason: "exchange_refund_rejected",
+      });
     }
   }
 }
@@ -96,6 +112,7 @@ const toWireRefund = (r: LocalRefund): SyncRefund => ({
   receiptSeq: r.receiptSeq,
   completedAt: r.completedAt,
   cashierUserId: r.cashierUserId,
+  shiftId: r.shiftId,
   approvalId: r.approvalId,
   claimedApprover: r.claimedApprover,
   servingToken: r.servingToken,
@@ -125,6 +142,7 @@ const toWire = (s: LocalSale): SyncSale => ({
   id: s.id,
   cashierUserId: s.cashierUserId ?? LEGACY_CASHIER,
   approvalId: s.approvalId,
+  shiftId: s.shiftId,
   receiptSeq: s.receiptSeq,
   completedAt: s.completedAt,
   catalogAsOf: s.catalogAsOf,
@@ -181,13 +199,21 @@ export function drainOutbox(
         if (backoff && backoff.nextAt > now() && !options.force) return { state: "backoff", sent };
         options = { ...options, force: false };
 
+        // Shift opens and cash movements first (sales need their shift to exist); a close goes once
+        // every sale and refund of its shift has been judged by the server.
+        const shifts = await drainShiftEvents(db, fetchFn, { now, random });
+        if (shifts.state !== "ok") return { state: shifts.state, sent };
+
         await failOrphanedExchangeSales(db);
         const pending = await sendableSales(db);
         if (pending.length === 0) {
           // Sales first, then the refunds of them (an exchange sale waits for its refund above).
           const due = await sendableRefunds(db);
           if (due.length > 0) {
-            const r = await sendRefunds(db, orgId, fetchFn, due.slice(0, MAX_BATCH), { now, random });
+            const r = await sendRefunds(db, orgId, fetchFn, due.slice(0, MAX_BATCH), {
+              now,
+              random,
+            });
             if (r.state !== "ok") return { state: r.state, sent };
             sent += r.sent;
             continue;
@@ -400,6 +426,101 @@ async function drainEvents(
   }
 }
 
+const shiftResponse = z.object({
+  results: z.array(
+    z.object({ id: z.string(), status: z.enum(["recorded", "duplicate", "rejected"]) }),
+  ),
+});
+
+const toWireShiftEvent = (e: LocalShiftEvent) => ({
+  kind: e.kind,
+  id: e.id,
+  cashierUserId: e.cashierUserId,
+  at: e.at,
+  ...(e.kind === "open" ? { floatCents: e.floatCents } : {}),
+  ...(e.kind === "cash"
+    ? { shiftId: e.shiftId, movement: e.movement, amountCents: e.amountCents, note: e.note }
+    : {}),
+  ...(e.kind === "close"
+    ? {
+        shiftId: e.shiftId,
+        countedCents: e.countedCents,
+        expectedCents: e.expectedCents,
+        saleCount: e.saleCount,
+        refundCount: e.refundCount,
+        rejectedCount: e.rejectedCount ?? 0,
+      }
+    : {}),
+});
+
+/**
+ * Sends queued shift events (open, cash in/out, close), oldest first, stopping at a close whose
+ * sales or refunds are still waiting (the server builds the Z from what it has). The server answers
+ * per event: recorded/duplicate = synced; rejected is kept flagged and never retried.
+ */
+async function drainShiftEvents(
+  db: RegisterDb,
+  fetchFn: typeof fetch,
+  opts: Required<Pick<DrainOptions, "now" | "random">>,
+): Promise<{ state: "ok" | "backoff" | "signed-out" }> {
+  for (;;) {
+    const queued = await db.shiftEvents.where("syncState").equals("pending").sortBy("id");
+    if (queued.length === 0) return { state: "ok" };
+    const [sales, refunds] = await Promise.all([
+      db.sales.where("syncState").equals("pending").toArray(),
+      db.refunds.where("syncState").equals("pending").toArray(),
+    ]);
+    const held = new Set([...sales, ...refunds].map((d) => d.shiftId).filter((id) => !!id));
+    const batch: LocalShiftEvent[] = [];
+    for (const e of queued) {
+      if (e.kind === "close" && held.has(e.shiftId)) break;
+      batch.push(e);
+      if (batch.length >= 25) break;
+    }
+    if (batch.length === 0) return { state: "ok" };
+    let res: Response;
+    try {
+      res = await fetchFn("/api/v1/sync/shifts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        cache: "no-store",
+        body: JSON.stringify({ events: batch.map(toWireShiftEvent) }),
+      });
+    } catch {
+      await fail(db, opts);
+      return { state: "backoff" };
+    }
+    if (res.status === 401 || res.status === 403 || res.status === 404) {
+      return { state: "signed-out" };
+    }
+    let results;
+    try {
+      if (!res.ok) throw new Error(String(res.status));
+      results = shiftResponse.parse(await res.json()).results;
+    } catch {
+      await fail(db, opts);
+      return { state: "backoff" };
+    }
+    const byId = new Map(results.map((r) => [r.id, r.status]));
+    let unresolved = 0;
+    await db.transaction("rw", db.shiftEvents, async () => {
+      for (const e of batch) {
+        const status = byId.get(e.id);
+        if (status === "recorded" || status === "duplicate") {
+          await db.shiftEvents.update(e.id, { syncState: "synced" });
+        } else if (status === "rejected") {
+          await db.shiftEvents.update(e.id, { syncState: "rejected" });
+        } else unresolved++;
+      }
+    });
+    if (unresolved > 0) {
+      await fail(db, opts);
+      return { state: "backoff" };
+    }
+  }
+}
+
 /** Tells the server this till is alive (an empty batch), so managers see when it last synced. */
 export async function heartbeat(
   db: RegisterDb,
@@ -436,4 +557,12 @@ async function prune(db: RegisterDb, now: number) {
     .filter((r) => (r.syncedAt ?? now) < now - KEEP_SYNCED_MS)
     .primaryKeys();
   if (oldRefunds.length) await db.refunds.bulkDelete(oldRefunds);
+  // Synced shift events carry no timestamp of their own sync: keep them for as long as the shift's
+  // own record would be, by their (device) time.
+  const oldShiftEvents = await db.shiftEvents
+    .where("syncState")
+    .equals("synced")
+    .filter((e) => new Date(e.at).getTime() < now - KEEP_SYNCED_MS)
+    .primaryKeys();
+  if (oldShiftEvents.length) await db.shiftEvents.bulkDelete(oldShiftEvents);
 }

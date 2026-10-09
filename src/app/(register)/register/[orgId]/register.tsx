@@ -3,6 +3,7 @@
 import {
   ArchiveIcon,
   CheckIcon,
+  ClockIcon,
   LockIcon,
   MinusIcon,
   PauseIcon,
@@ -48,6 +49,7 @@ import {
 } from "@/lib/register/cart";
 import {
   registerDb,
+  type CurrentShift,
   type ExchangeDraft,
   type LocalRefund,
   type LocalSale,
@@ -69,6 +71,16 @@ import {
 } from "@/lib/register/print";
 import { buildReceipt, receiptLabels, receiptText } from "@/lib/register/receipt";
 import { completeSale, setInvoice } from "@/lib/register/sale";
+import {
+  addCashMove,
+  closeShift,
+  currentShift,
+  openShift,
+  summariseShift,
+  type ClosedShift,
+  type ShiftSummary,
+} from "@/lib/register/shift";
+import { shiftReportLines } from "@/lib/register/shift-receipt";
 import {
   discountLimitOf,
   refundLimitOf,
@@ -93,6 +105,14 @@ import { DoneDialog, EmailDialog, InvoiceDialog, PrinterDialog } from "./sale-di
 import { RefundDialog, RefundDoneDialog } from "./refund-dialog";
 import { TenderDialog, type TenderOption } from "./tender-dialog";
 import { LockScreen, type Cashier } from "./lock-screen";
+import {
+  CashMoveDialog,
+  CloseShiftDialog,
+  OpenShiftDialog,
+  ShiftClosedDialog,
+  ShiftMenuDialog,
+  XReportDialog,
+} from "./shift-dialogs";
 import { OverrideDialog } from "./override-dialog";
 
 /** Nobody touches the till for this long and it locks itself. */
@@ -122,7 +142,12 @@ type Dialog =
   | { kind: "email"; sale: LocalSale; status: string; sending: boolean }
   | { kind: "invoice"; sale: LocalSale }
   | { kind: "refund"; code?: string }
-  | { kind: "refundDone"; refund: LocalRefund; status: string };
+  | { kind: "refundDone"; refund: LocalRefund; status: string }
+  | { kind: "shiftMenu" }
+  | { kind: "cashMove"; movement: "in" | "out" }
+  | { kind: "xReport"; summary: ShiftSummary; status: string }
+  | { kind: "closeShift"; summary: ShiftSummary }
+  | { kind: "shiftClosed"; closed: ClosedShift; status: string };
 
 /** A sale in progress older than this is dropped rather than restored. */
 const CART_KEEP_MS = 12 * 3_600_000;
@@ -168,6 +193,17 @@ export function Register({ orgId }: { orgId: string }) {
   const [printJob, setPrintJob] = useState<{ n: number; lines: string[] } | null>(null);
   // Who is serving. Memory only: a reload locks the till.
   const [cashier, setCashier] = useState<Cashier | null>(null);
+  // The shift open on this till: `null` while it is being read from IndexedDB, `undefined` when none
+  // is open (selling is blocked until one is).
+  const [shift, setShift] = useState<CurrentShift | undefined | null>(null);
+  useEffect(() => {
+    if (!db) return;
+    let live = true;
+    void currentShift(db).then((s) => live && setShift(s));
+    return () => {
+      live = false;
+    };
+  }, [db]);
   // A manager's approval of the discounts as they are now (void as soon as they change).
   // approvalId is the server's proof (online); without it the sale is held for a manager on sync.
   const [approval, setApproval] = useState<{
@@ -415,7 +451,7 @@ export function Register({ orgId }: { orgId: string }) {
         say(t("register.scanError"));
       }
     },
-    dialog === null && cashier !== null,
+    dialog === null && cashier !== null && !!shift,
   );
 
   async function park() {
@@ -542,7 +578,11 @@ export function Register({ orgId }: { orgId: string }) {
   }
 
   /** An exchange refund is saved: print its slip, then take payment for the new items. */
-  async function exchanged(e: { input: ExchangeDraft["input"]; saleId: string; creditCents: number }) {
+  async function exchanged(e: {
+    input: ExchangeDraft["input"];
+    saleId: string;
+    creditCents: number;
+  }) {
     if (!db || !e.input.id) return;
     const next: ExchangeDraft = {
       refundId: e.input.id,
@@ -673,6 +713,67 @@ export function Register({ orgId }: { orgId: string }) {
     outbox.kick(); // only now, after the receipt: the sale never waits for the network
   }
 
+  /** Prints report lines; browser mode or a failure opens the browser print window. */
+  async function printText(lines: string[]): Promise<string> {
+    const result = await printLines(printer, lines, false);
+    if (result === "printed") return t("shift.printed");
+    setPrintJob((j) => ({ n: (j?.n ?? 0) + 1, lines }));
+    return result === "failed" ? t("register.printFallback") : t("shift.printed");
+  }
+
+  async function openShiftNow(floatCents: number) {
+    if (!db || !till || !cashier) return;
+    setShift(
+      await openShift(db, { registerId: till.id, cashierUserId: cashier.userId, floatCents }),
+    );
+    outbox.kick();
+    focusCart();
+  }
+
+  async function saveCashMove(movement: "in" | "out", amountCents: number, note: string) {
+    if (!db || !shift || !cashier) return;
+    await addCashMove(db, shift, { cashierUserId: cashier.userId, movement, amountCents, note });
+    outbox.kick();
+    setDialog(null);
+    say(t("shift.moveSaved"));
+  }
+
+  const reportLines = (
+    kind: "X" | "Z",
+    sh: { registerId: string; openedAt: string },
+    summary: ShiftSummary,
+    extra: { closedAt?: string; countedCents?: number; overShortCents?: number } = {},
+  ) =>
+    data?.org
+      ? shiftReportLines(
+          {
+            kind,
+            businessName: data.org.legalName || data.org.name,
+            tillName: tillName(sh.registerId),
+            timezone: data.org.timezone,
+            openedAt: sh.openedAt,
+            summary,
+            ...extra,
+          },
+          printer.cols,
+        )
+      : [];
+
+  async function closeShiftNow(countedCents: number) {
+    if (!db || !shift || !cashier) return;
+    const closed = await closeShift(db, shift, { cashierUserId: cashier.userId, countedCents });
+    setShift(undefined);
+    outbox.kick();
+    const status = await printText(
+      reportLines("Z", closed, closed.summary, {
+        closedAt: closed.closedAt,
+        countedCents: closed.countedCents,
+        overShortCents: closed.overShortCents,
+      }),
+    );
+    setDialog({ kind: "shiftClosed", closed, status });
+  }
+
   function newSale() {
     dispatch({ type: "load", cart: emptyCart });
     setDialog(null);
@@ -680,7 +781,7 @@ export function Register({ orgId }: { orgId: string }) {
   }
 
   function pay() {
-    if (!till) return;
+    if (!till || !shift) return;
     if (needsApproval && approval?.key !== discountKey) {
       setDialog({ kind: "override", ask: overrideAsk });
     } else void openTender();
@@ -892,6 +993,79 @@ export function Register({ orgId }: { orgId: string }) {
             }}
           />
         );
+      case "shiftMenu":
+        if (!shift || !data?.org) return null;
+        return (
+          <ShiftMenuDialog
+            shift={shift}
+            time={new Intl.DateTimeFormat("en-IE", {
+              timeZone: data.org.timezone,
+              hour: "2-digit",
+              minute: "2-digit",
+              hourCycle: "h23",
+            }).format(new Date(shift.openedAt))}
+            onClose={close}
+            onCash={(movement) => setDialog({ kind: "cashMove", movement })}
+            onReport={async () =>
+              db &&
+              setDialog({ kind: "xReport", summary: await summariseShift(db, shift), status: "" })
+            }
+            onCloseShift={async () =>
+              db && setDialog({ kind: "closeShift", summary: await summariseShift(db, shift) })
+            }
+          />
+        );
+      case "cashMove":
+        return (
+          <CashMoveDialog
+            movement={dialog.movement}
+            onClose={() => setDialog({ kind: "shiftMenu" })}
+            onSave={(amount, note) => void saveCashMove(dialog.movement, amount, note)}
+          />
+        );
+      case "xReport": {
+        const { summary } = dialog;
+        return (
+          <XReportDialog
+            summary={summary}
+            status={dialog.status}
+            onClose={close}
+            onPrint={async () => {
+              if (!shift) return;
+              const status = await printText(reportLines("X", shift, summary));
+              setDialog({ kind: "xReport", summary, status });
+            }}
+          />
+        );
+      }
+      case "closeShift":
+        return (
+          <CloseShiftDialog
+            summary={dialog.summary}
+            onClose={() => setDialog({ kind: "shiftMenu" })}
+            onConfirm={(counted) => void closeShiftNow(counted)}
+          />
+        );
+      case "shiftClosed": {
+        const { closed } = dialog;
+        return (
+          <ShiftClosedDialog
+            closed={closed}
+            status={dialog.status}
+            onDone={close}
+            onPrint={async () => {
+              const status = await printText(
+                reportLines("Z", closed, closed.summary, {
+                  closedAt: closed.closedAt,
+                  countedCents: closed.countedCents,
+                  overShortCents: closed.overShortCents,
+                }),
+              );
+              setDialog({ kind: "shiftClosed", closed, status });
+            }}
+          />
+        );
+      }
       case "printer":
         return (
           <PrinterDialog
@@ -1073,8 +1247,20 @@ export function Register({ orgId }: { orgId: string }) {
             <Button
               size="touch"
               variant="outline"
-              disabled={!till || !data?.org || !preset}
-              onClick={() => setDialog({ kind: "refund" })}
+              aria-disabled={!shift}
+              onClick={() => (shift ? setDialog({ kind: "shiftMenu" }) : say(t("shift.needOpenShift")))}
+            >
+              <ClockIcon aria-hidden /> {t("shift.button")}
+            </Button>
+            <Button
+              size="touch"
+              variant="outline"
+              aria-disabled={!till || !data?.org || !preset || !shift}
+              onClick={() =>
+                till && data?.org && preset && shift
+                  ? setDialog({ kind: "refund" })
+                  : say(t("shift.needOpenShift"))
+              }
             >
               <RotateCcwIcon aria-hidden /> {t("register.refund")}
             </Button>
@@ -1212,15 +1398,16 @@ export function Register({ orgId }: { orgId: string }) {
         }
         cart={
           <>
-            {message.text && (
-              <p
-                key={message.n}
-                role="status"
-                className="border-solid-border bg-paper mb-3 rounded-lg border-2 p-2 text-sm font-medium"
-              >
-                {message.text}
-              </p>
-            )}
+            <p
+              role="status"
+              className={
+                message.text
+                  ? "border-solid-border bg-paper mb-3 rounded-lg border-2 p-2 text-sm font-medium"
+                  : "sr-only"
+              }
+            >
+              {message.text}
+            </p>
             <p role="status" className="sr-only">
               {priced &&
                 t("register.status", { count: itemCount, total: formatCents(priced.basket.total) })}
@@ -1406,6 +1593,9 @@ export function Register({ orgId }: { orgId: string }) {
         }
       />
       {renderDialog()}
+      {shift === undefined && dialog === null && !!till && (
+        <OpenShiftDialog onOpen={(f) => void openShiftNow(f)} onLock={() => setCashier(null)} />
+      )}
       <PrintArea job={printJob} cols={printer.cols} />
     </>
   );
