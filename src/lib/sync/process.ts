@@ -297,6 +297,7 @@ async function processOne(raw: unknown, ctx: SyncCtx, deps: SyncDeps): Promise<S
   try {
     outcome = await deps.recordSale({
       shift_id: sale.shiftId ?? null,
+      customer_id: sale.customerId ?? null,
       ...buildSaleRecord({
         orgId: ctx.orgId,
         registerId: ctx.registerId,

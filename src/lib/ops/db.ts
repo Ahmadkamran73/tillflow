@@ -153,6 +153,19 @@ export async function deviceFindSale(tokenHash: string, query: unknown): Promise
   return row?.s ?? null;
 }
 
+/** Customers of the till's own shop matching `q` (name, email, phone). null: not paired. */
+export async function deviceCustomerSearch(tokenHash: string, q: string): Promise<unknown> {
+  const [row] = await db()<{ r: unknown }[]>`select ops.device_customer_search(${tokenHash}, ${q}) as r`;
+  return row?.r ?? null;
+}
+
+/** Adds a customer to the till's shop. null: not paired. A taken email throws 23505. */
+export async function deviceCustomerCreate(tokenHash: string, input: unknown): Promise<unknown> {
+  const [row] = await db()<{ r: unknown }[]>`
+    select ops.device_customer_create(${tokenHash}, ${db().json(input as postgres.JSONValue)}) as r`;
+  return row?.r ?? null;
+}
+
 export async function deviceRefundsKnown(tokenHash: string, ids: string[]): Promise<string[]> {
   const rows = await db()<{ id: string }[]>`
     select ops.device_refunds_known(${tokenHash}, ${ids}::uuid[]) as id`;

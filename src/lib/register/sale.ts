@@ -25,6 +25,8 @@ export async function completeSale(
     id?: string;
     /** An exchange sale: the refund whose returned goods pay for part of it. */
     exchangeRefundId?: string;
+    /** The customer rung up for, if one was picked. */
+    customerId?: string;
     cart: Cart;
     tenders: LocalTender[];
     roundCash?: boolean;
@@ -47,6 +49,7 @@ export async function completeSale(
       cashierUserId: input.cashierUserId,
       approvalId: input.approvalId,
       shiftId: shift?.id,
+      customerId: input.customerId,
       receiptSeq: seq,
       completedAt: new Date().toISOString(),
       cart: input.cart,

@@ -7,6 +7,7 @@ import {
   LockIcon,
   MinusIcon,
   PauseIcon,
+  UserRoundIcon,
   PercentIcon,
   PrinterIcon,
   PlusIcon,
@@ -101,6 +102,7 @@ import {
   VariantPicker,
   type ModifierGroupView,
 } from "./dialogs";
+import { CustomerDialog, type TillCustomer } from "./customer-dialog";
 import { DoneDialog, EmailDialog, InvoiceDialog, PrinterDialog } from "./sale-dialogs";
 import { RefundDialog, RefundDoneDialog } from "./refund-dialog";
 import { TenderDialog, type TenderOption } from "./tender-dialog";
@@ -135,6 +137,7 @@ type Dialog =
   | { kind: "flow"; flow: Flow }
   | { kind: "discount"; target: "basket" | string }
   | { kind: "parked" }
+  | { kind: "customer" }
   | { kind: "tender" }
   | { kind: "override"; ask: OverrideAsk }
   | { kind: "printer" }
@@ -186,6 +189,9 @@ export function Register({ orgId }: { orgId: string }) {
   const sync = useCatalogRefresh(db, orgId);
   const [cart, dispatch] = useReducer(cartReducer, emptyCart);
   const [dialog, setDialog] = useState<Dialog>(null);
+  // The customer picked for this sale: memory only, never stored on the device (only the id is sent).
+  const [customer, setCustomer] = useState<TillCustomer | null>(null);
+  const customerButton = useRef<HTMLButtonElement>(null);
   const [query, setQuery] = useState("");
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [message, setMessage] = useState({ text: "", n: 0 });
@@ -458,6 +464,7 @@ export function Register({ orgId }: { orgId: string }) {
     if (!db || cart.lines.length === 0) return;
     await db.parked.put({ id: uuidv7(), savedAt: Date.now(), cart });
     dispatch({ type: "load", cart: emptyCart });
+    setCustomer(null);
     say(t("register.parkedDone"));
     focusCart();
   }
@@ -673,6 +680,7 @@ export function Register({ orgId }: { orgId: string }) {
       approvalId: needsApproval ? approval?.approvalId : undefined,
       id: exchangeDraft?.saleId,
       exchangeRefundId: exchangeDraft?.refundId,
+      customerId: customer?.id,
       cart,
       tenders,
       roundCash,
@@ -776,6 +784,7 @@ export function Register({ orgId }: { orgId: string }) {
 
   function newSale() {
     dispatch({ type: "load", cart: emptyCart });
+    setCustomer(null);
     setDialog(null);
     focusCart();
   }
@@ -891,6 +900,18 @@ export function Register({ orgId }: { orgId: string }) {
           />
         );
       }
+      case "customer":
+        return (
+          <CustomerDialog
+            orgId={orgId}
+            onClose={close}
+            onPick={(c) => {
+              setCustomer(c);
+              setDialog(null);
+              say(t("till.customer.picked", { name: c.name }));
+            }}
+          />
+        );
       case "parked":
         return (
           <ParkedList
@@ -1248,7 +1269,9 @@ export function Register({ orgId }: { orgId: string }) {
               size="touch"
               variant="outline"
               aria-disabled={!shift}
-              onClick={() => (shift ? setDialog({ kind: "shiftMenu" }) : say(t("shift.needOpenShift")))}
+              onClick={() =>
+                shift ? setDialog({ kind: "shiftMenu" }) : say(t("shift.needOpenShift"))
+              }
             >
               <ClockIcon aria-hidden /> {t("shift.button")}
             </Button>
@@ -1576,6 +1599,37 @@ export function Register({ orgId }: { orgId: string }) {
                 >
                   <PercentIcon aria-hidden /> {t("register.discount")}
                 </Button>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  size="touch"
+                  variant="outline"
+                  className="min-w-0 flex-1 justify-start"
+                  ref={customerButton}
+                  aria-haspopup="dialog"
+                  title={customer ? customer.name : undefined}
+                  onClick={() => setDialog({ kind: "customer" })}
+                >
+                  <UserRoundIcon aria-hidden />
+                  <span className="truncate">
+                    {customer
+                      ? t("till.customer.buttonNamed", { name: customer.name })
+                      : t("till.customer.button")}
+                  </span>
+                </Button>
+                {customer ? (
+                  <Button
+                    size="touch"
+                    variant="outline"
+                    onClick={() => {
+                      setCustomer(null);
+                      say(t("till.customer.cleared"));
+                      customerButton.current?.focus(); // the Remove button is about to unmount
+                    }}
+                  >
+                    {t("till.customer.remove")}
+                  </Button>
+                ) : null}
               </div>
               <Button size="pay" className="hidden lg:inline-flex" disabled={!canPay} onClick={pay}>
                 {payLabel}
