@@ -17,6 +17,7 @@ export function DoneDialog({
   status,
   invoiceIssued,
   onPrint,
+  onTickets,
   onEmail,
   onInvoice,
   onNewSale,
@@ -25,10 +26,13 @@ export function DoneDialog({
   status: string;
   invoiceIssued: boolean;
   onPrint: () => void;
+  /** Cafes with kitchen tickets: print the kitchen and bar tickets again. */
+  onTickets?: () => Promise<void> | void;
   onEmail: () => void;
   onInvoice: () => void;
   onNewSale: () => void;
 }) {
+  const [busy, setBusy] = useState(false);
   return (
     <Modal title={t("register.complete")} onClose={() => {}}>
       <p role="status" className="text-heading font-semibold tabular-nums">
@@ -41,6 +45,24 @@ export function DoneDialog({
         <Button type="button" size="touch" variant="outline" onClick={onPrint}>
           <PrinterIcon aria-hidden /> {t("register.printAgain")}
         </Button>
+        {onTickets && (
+          <Button
+            type="button"
+            size="touch"
+            variant="outline"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                await onTickets();
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            <PrinterIcon aria-hidden /> {t("register.ticketsReprint")}
+          </Button>
+        )}
         <Button type="button" size="touch" variant="outline" onClick={onEmail}>
           <MailIcon aria-hidden /> {t("register.emailReceipt")}
         </Button>
@@ -128,11 +150,14 @@ export function PrinterDialog({
   onSave,
   onTest,
   onClose,
+  status,
 }: {
   value: PrinterSettings;
   onSave: (p: PrinterSettings) => void;
   onTest: (p: PrinterSettings) => void;
   onClose: () => void;
+  /** Result of the last test print, announced inside the dialog. */
+  status?: string;
 }) {
   const [p, setP] = useState<PrinterSettings>(value);
   const [errors, setErrors] = useState<{ bridgeUrl?: string; host?: string }>({});
@@ -237,6 +262,9 @@ export function PrinterDialog({
             />
           </>
         )}
+        <p role="status" className="min-h-5 text-sm font-medium">
+          {status}
+        </p>
         <div className="grid grid-cols-3 gap-2">
           <Cancel onClick={onClose} />
           <Button type="button" size="touch" variant="outline" onClick={run(onTest)}>

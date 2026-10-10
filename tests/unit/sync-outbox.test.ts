@@ -314,6 +314,60 @@ describe("drainOutbox", () => {
   });
 });
 
+describe("order name on the device", () => {
+  const named = (name: string) =>
+    completeSale(db, {
+      registerId: REG,
+      cashierUserId: CASHIER,
+      cart: { ...cart, orderName: name },
+      tenders: CASH_2000,
+      expectedDueCents: 1235,
+    });
+  const names = async () => (await db.sales.orderBy("id").toArray()).map((s) => s.cart.orderName);
+
+  it("is removed only once the server confirmed the sale (created or duplicate)", async () => {
+    for (const n of ["A", "B"]) {
+      await named(n);
+      await new Promise((r) => setTimeout(r, 1));
+    }
+    const all = await db.sales.orderBy("id").toArray();
+    const s = server((id) => (id === all[0]!.id ? "created" : "duplicate"));
+    await drainOutbox(db, ORG, { fetchFn: s.fetchFn });
+    expect(await states()).toEqual(["synced", "synced"]);
+    expect(await names()).toEqual([undefined, undefined]);
+    // The rest of the sale is kept as it was.
+    expect((await db.sales.get(all[0]!.id))!.cart.lines).toHaveLength(1);
+  });
+
+  it("stays while the sale is pending, rejected or unanswered, and when sync fails", async () => {
+    for (const n of ["A", "B", "C"]) {
+      await named(n);
+      await new Promise((r) => setTimeout(r, 1));
+    }
+    // Network down: nothing is sent, nothing is cleared.
+    const down = (async () => new Response("{}", { status: 503 })) as unknown as typeof fetch;
+    await drainOutbox(db, ORG, { fetchFn: down });
+    expect(await names()).toEqual(["A", "B", "C"]);
+    // First created, second rejected, third not answered.
+    const all = await db.sales.orderBy("id").toArray();
+    const partial = (async (_u: string, init: RequestInit) => {
+      const body = JSON.parse(init.body as string) as Call;
+      return Response.json({
+        results: body.sales
+          .slice(0, 2)
+          .map((x) =>
+            x.id === all[1]!.id
+              ? { id: x.id, status: "rejected", reason: "price_mismatch" }
+              : { id: x.id, status: "created" },
+          ),
+      });
+    }) as unknown as typeof fetch;
+    await drainOutbox(db, ORG, { fetchFn: partial, force: true });
+    expect(await states()).toEqual(["synced", "rejected", "pending"]);
+    expect(await names()).toEqual([undefined, "B", "C"]);
+  });
+});
+
 describe("backoffDelay and heartbeat", () => {
   it("doubles from 2s, caps at 5 minutes and keeps between half and all of it", () => {
     expect(backoffDelay(1, () => 1)).toBe(2000);

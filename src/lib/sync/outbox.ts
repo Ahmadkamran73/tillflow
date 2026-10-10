@@ -276,7 +276,13 @@ export function drainOutbox(
             } else if (r.status === "rejected") {
               await db.sales.update(sale.id, { syncState: "rejected", rejectReason: r.reason });
             } else {
-              await db.sales.update(sale.id, { syncState: "synced", syncedAt: now() });
+              // created or duplicate: the server holds the sale. Only now does the device-only
+              // order name go; every other outcome above keeps it with the outbox sale.
+              await db.sales.update(sale.id, {
+                syncState: "synced",
+                syncedAt: now(),
+                "cart.orderName": undefined,
+              });
             }
           }
         });
