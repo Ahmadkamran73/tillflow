@@ -31,12 +31,7 @@ const serverSays = (status: number, body: unknown = {}) =>
 describe("the server-signed serving token", () => {
   it("comes back with an online unlock, and is simply absent offline", async () => {
     const online = (async () =>
-      Response.json({
-        result: "ok",
-        userId: CSH,
-        role: "cashier",
-        servingToken: "payload.sig",
-      })) as unknown as typeof fetch;
+      Response.json({ result: "ok", userId: CSH, role: "cashier", servingToken: "payload.sig" })) as unknown as typeof fetch;
     expect(await checkPin(db, cashier, "7391", "unlock", { fetchFn: online })).toMatchObject({
       status: "ok",
       servingToken: "payload.sig",

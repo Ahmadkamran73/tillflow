@@ -203,9 +203,7 @@ describe("settleRefund", () => {
   it("lets cash drift 2c per refund so the last refund of a rounded cash sale is never stuck", () => {
     // 3 x 10.04 paid in cash: 30.12 rounds to 30.10. Each 10.04 refund rounds up to 10.05.
     const paid = 3010;
-    const second = settleRefund(1004, [leg("cash", 1005)], avail(paid - 1005), {
-      cashSlack: 2 * 2,
-    });
+    const second = settleRefund(1004, [leg("cash", 1005)], avail(paid - 1005), { cashSlack: 2 * 2 });
     expect(second.ok).toBe(true);
     // the third has 1000 left in the till's books but needs 1005: three refunds, 6c of slack
     const third = settleRefund(1004, [leg("cash", 1005)], avail(paid - 2010), { cashSlack: 2 * 3 });

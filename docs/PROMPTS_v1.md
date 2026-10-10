@@ -581,7 +581,9 @@ Tests: split tender combinations, change maths, card-number rejection, offline c
 ```
 
 After: `/security-review` → commit → `/clear`.
+
 ### Step 2.2 — Refunds, voids and exchanges
+
 ```text
 Implement refunds/voids/exchanges per docs/PLAN.md: find receipt (scan, number, or serial/IMEI for electronics), select lines, reason required, manager override above threshold, refund to original tender (card refunds are done on the shop's own terminal; Tillflow records them as a card refund tender), exchanges for clothing, stock movements reversed, VAT reversed at the ORIGINAL line rate. Never edit the original sale. Tests for partial refund VAT maths.
 ```
@@ -632,15 +634,15 @@ After: commit → `/clear`.
 ### Step 2.7 — Restaurant flow: tables, tabs, courses, split bills
 
 Session: `/clear` · plan mode ON
- Build the restaurant flow (business_type = restaurant), reusing the café modifiers/allergens/tickets:
+
+```text
+Build the restaurant flow (business_type = restaurant), reusing the café modifiers/allergens/tickets:
 - Floor plan editor (drag tables, seats) in back office; table map on the register with status (free, seated, ordered, bill requested)
 - Open tab per table; add items by seat and course; "send" fires kitchen tickets by course; "fire next course"
 - Split bill by item, by seat, or evenly; each part paid by cash/card; service charge (configurable, clearly shown) and tips
 - Transfer tab between tables; merge tables
 - Tabs survive offline and sync like sales (reuse the outbox pattern)
 Playwright: table of 4, two courses, split by seat, one pays card with tip, one cash.
-```text
- 
 ```
 
 Mid-step: `/compact focus on the tab/table data model and the split-bill logic` when context fills.
@@ -763,6 +765,7 @@ Then run, in order:
 ```
 
 Session: `/clear` · After: commit → `/clear`.
+
 **Pilot gate:** pen test passed; offline tests lose no sales; restore drill done. Update `docs/STATUS.md`.
 
 ---
