@@ -52,7 +52,7 @@ export const sales = pgTable(
     clientDueCents: integer("client_due_cents").notNull(),
     /** The VAT the till printed (newer tills only); compared with `vatCents`, never trusted. */
     clientVatCents: integer("client_vat_cents"),
-    /** Saved but worth a manager's look: vat_differs, old_prices, rounding_differs. Set at insert only. */
+    /** Saved but worth a manager's look: vat_differs, old_prices, rounding_differs, service_differs. Set at insert only. */
     reviewFlags: text("review_flags")
       .array()
       .notNull()
@@ -79,7 +79,7 @@ export const sales = pgTable(
     check("sales_due_close", sql`abs(${t.amountDueCents} - ${t.clientDueCents}) <= 1`),
     check(
       "sales_review_flags",
-      sql`${t.reviewFlags} <@ array['vat_differs', 'old_prices', 'rounding_differs']::text[]`,
+      sql`${t.reviewFlags} <@ array['vat_differs', 'old_prices', 'rounding_differs', 'service_differs']::text[]`,
     ),
   ],
 );

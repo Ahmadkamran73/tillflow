@@ -43,7 +43,7 @@ import {
 } from "@/lib/register/staff";
 import { tenderReference } from "@/lib/register/tender-input";
 import { useScanner } from "@/lib/register/use-scanner";
-import { availableOf, type SaleDetail } from "@/lib/sync/refund-detail";
+import { availableOf, isServiceLine, type SaleDetail } from "@/lib/sync/refund-detail";
 import { priceRefundLines, type RefundPick } from "@/lib/sync/refund-price";
 import { refundReasonCodes, type RefundReasonCode } from "@/lib/sync/refund-protocol";
 import { Cancel, Modal } from "./dialogs";
@@ -318,7 +318,11 @@ export function RefundDialog({
   }
 
   // ------------------------------------------------------------------ the lines
-  const items = useMemo(() => detail?.lines.filter((l) => l.kind === "item") ?? [], [detail]);
+  // Service-charge lines are not offered on their own: they go back with the item they were charged on.
+  const items = useMemo(
+    () => detail?.lines.filter((l) => l.kind === "item" && !isServiceLine(l)) ?? [],
+    [detail],
+  );
 
   /** Void is allowed for a whole, untouched sale from this till, on the day it was made. */
   const voidable =
@@ -345,7 +349,7 @@ export function RefundDialog({
     }
     const out: RefundPick[] = [];
     for (const l of detail.lines) {
-      if (l.kind !== "item") continue;
+      if (l.kind !== "item" || isServiceLine(l)) continue;
       const qty = qtys[l.line_no] ?? 0;
       if (qty < 1) continue;
       out.push({ lineNo: l.line_no, qty, restock: restock[l.line_no] ?? true });
@@ -355,6 +359,19 @@ export function RefundDialog({
         out.push({
           lineNo: next.line_no,
           qty: Math.min(qty, next.qty - next.refunded_qty),
+          restock: false,
+        });
+      }
+      // The service charge on this item is stored right after it (and its deposit): the same share
+      // of it goes back for the same units, so the charge is returned pro rata.
+      const following = detail.lines.filter((d) => d.line_no > l.line_no).slice(0, 2);
+      const service = following.find(
+        (d, i) => isServiceLine(d) && (i === 0 || following[0]!.kind === "deposit"),
+      );
+      if (service) {
+        out.push({
+          lineNo: service.line_no,
+          qty: Math.min(qty, service.qty - service.refunded_qty),
           restock: false,
         });
       }

@@ -1,5 +1,11 @@
 import { lineDiscountOf, type Settlement } from "@/lib/money";
-import { unitWithModifiers, type Cart, type PricedCart } from "@/lib/register/cart";
+import {
+  serviceChargeName,
+  serviceLineOf,
+  unitWithModifiers,
+  type Cart,
+  type PricedCart,
+} from "@/lib/register/cart";
 import type { ReviewFlag } from "./process";
 import type { SyncSale } from "./protocol";
 
@@ -66,6 +72,28 @@ export function buildSaleRecord(args: {
         gross_cents: deposit.gross,
       });
     }
+    // The service charge on this item, kept right after it (and its deposit): an ordinary taxed item
+    // line with the item's quantity, so a refund of k of its units returns k/qty of the charge.
+    const service = serviceLineOf(priced, at);
+    if (service) {
+      const unit = Math.ceil(service.gross / l.qty);
+      lines.push({
+        kind: "item",
+        variant_id: null,
+        product_id: null,
+        name: serviceChargeName(cart.serviceBp ?? 0),
+        qty: l.qty,
+        unit_price_cents: unit,
+        modifiers: [],
+        serial: null,
+        discount_cents: unit * l.qty - service.gross,
+        tax_category: service.taxCategory,
+        tax_rate_bp: service.rateBp,
+        net_cents: service.net,
+        vat_cents: service.vat,
+        gross_cents: service.gross,
+      });
+    }
   });
 
   return {
@@ -87,6 +115,7 @@ export function buildSaleRecord(args: {
       amount_due: settlement.amountDue,
       client_due: sale.expectedDueCents,
       client_vat: sale.expectedVatCents ?? null,
+      service_charge_bp: cart.serviceBp ?? 0,
       review_flags: args.reviewFlags ?? [],
     },
     lines,

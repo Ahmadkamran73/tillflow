@@ -1,10 +1,11 @@
 import "server-only";
 import { createSupabaseServerClient } from "@/lib/auth";
 import { getLocation, getTaxRates } from "@/lib/catalog";
-import { parseSyncMeta, parseTenderMeta } from "@/lib/device/meta";
+import { parseRestaurantMeta, parseSyncMeta, parseTenderMeta } from "@/lib/device/meta";
 import {
   deviceFindSale,
   deviceRefundsKnown,
+  deviceRestaurantMeta,
   deviceSaleCatalogAsOf,
   deviceSalesKnown,
   deviceSyncMeta,
@@ -65,6 +66,8 @@ export async function syncSalesFromDevice(
   const rawTypes = await deviceTenderTypes(device.tokenHash);
   if (!rawTypes) throw new Error("Device is not paired");
   const tenderMeta = parseTenderMeta(rawTypes);
+  const rawRestaurant = await deviceRestaurantMeta(device.tokenHash);
+  if (!rawRestaurant) throw new Error("Device is not paired");
 
   return run(
     rawSales,
@@ -75,6 +78,7 @@ export async function syncSalesFromDevice(
       tenderTypes: tenderMeta.types,
       tipsAllowed: presets[tenderMeta.businessType].register.tips,
       shopRoundCash: presets[tenderMeta.businessType].register.cashRounding5c,
+      shopServiceChargeBp: parseRestaurantMeta(rawRestaurant).serviceChargeBp,
     },
     meta,
     {
@@ -130,6 +134,7 @@ export async function syncSalesFromSession(
       })),
       tipsAllowed: presets[org.businessType].register.tips,
       shopRoundCash: presets[org.businessType].register.cashRounding5c,
+      shopServiceChargeBp: org.serviceChargeBp,
     },
     { timezone: location.timezone, taxRates },
     {

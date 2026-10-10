@@ -54,6 +54,8 @@ export async function refreshCatalog(db: RegisterDb, orgId: string): Promise<voi
           { key: "staff", value: feed.staff },
           { key: "taxRates", value: feed.taxRates },
           { key: "tenderTypes", value: feed.tenderTypes },
+          // Restaurants: the floor plan, replaced whole every time (tables can be archived).
+          { key: "floorPlan", value: { floors: feed.floors, tables: feed.tables } },
           { key: "cursor", value: feed.cursor },
           // When this device last saw the server’s prices: sent with each sale (`catalogAsOf`).
           { key: "pulledAt", value: feed.serverTime },

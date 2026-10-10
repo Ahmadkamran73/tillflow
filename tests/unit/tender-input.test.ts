@@ -69,7 +69,9 @@ describe("exchange credit as a tender", () => {
     expect(tenderInput.safeParse({ ...credit, typeId: id }).success).toBe(false);
     expect(tenderInput.safeParse({ ...credit, tipCents: 5 }).success).toBe(false);
     expect(tendersInput.safeParse([credit, credit]).success).toBe(false);
-    expect(tendersInput.safeParse([credit, { ...base, method: "cash" as const }]).success).toBe(true);
+    expect(tendersInput.safeParse([credit, { ...base, method: "cash" as const }]).success).toBe(
+      true,
+    );
   });
 });
 

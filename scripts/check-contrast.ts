@@ -60,6 +60,11 @@ const pairs: [string, string, number][] = [
   ["ring", "card", 3],
   ["solid-border", "solid", 3],
   ["foreground", "paper", 4.5],
+  ["foreground", "accent", 4.5],
+  ["muted-foreground", "accent", 4.5],
+  ["input", "paper", 3],
+  ["solid-border", "paper", 3],
+  ["primary", "paper", 3],
 ];
 let fail = 0;
 for (const [name, body] of [

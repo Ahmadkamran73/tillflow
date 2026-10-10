@@ -59,7 +59,8 @@ export const refundsEnIE = {
     "Exchange credit of {amount}. Add the new items and pay. Nothing is recorded until the sale is complete.",
   "refund.exchangeCancel": "Cancel exchange",
   "refund.exchangeCancelled": "Exchange cancelled. Nothing was recorded.",
-  "refund.exchangeTooSmall": "The cart is worth less than the credit. Add items or cancel the exchange.",
+  "refund.exchangeTooSmall":
+    "The cart is worth less than the credit. Add items or cancel the exchange.",
 
   // Till: paying back
   "refund.payTitle": "Pay back",
@@ -134,7 +135,7 @@ export const refundsEnIE = {
   "sales.refunds": "Refunds and voids",
   "sales.refundsNone": "No refunds yet.",
   "sales.refundsNote":
-    "Latest 50. A refund is a separate record; the original sale is never changed. \"Not verified\" means the server could not check a manager's PIN for a refund that needed one: look at those.",
+    'Latest 50. A refund is a separate record; the original sale is never changed. "Not verified" means the server could not check a manager\'s PIN for a refund that needed one: look at those.',
   "sales.refund.number": "Refund",
   "sales.refund.original": "Original sale",
   "sales.refund.kind": "Type",

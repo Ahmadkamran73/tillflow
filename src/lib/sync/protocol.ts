@@ -29,6 +29,12 @@ const syncSaleShape = z.strictObject({
   /** When the till's catalogue was last pulled: a second chance to match its prices. */
   catalogAsOf: z.iso.datetime().optional(),
   mode: z.enum(["eat_in", "take_away"]).default("eat_in"),
+  /** Service charge in basis points on this bill (restaurants); the shop's setting when it was made. */
+  serviceChargeBp: z.int().min(0).max(2500).default(0),
+  /** A part of a split bill: its whole-cent share of the whole bill's charge (checked against the percentage). */
+  serviceChargeCents: z.int().min(0).max(10_000_000).optional(),
+  /** The restaurant tab this bill belongs to and the seat it was split for (links only). */
+  tabId: z.uuid().optional(),
   lines: z.array(saleLine).min(1).max(100),
   basketDiscount: discount.optional(),
   /** 1-10 payments (cash handed over, card amounts, card tips); the server re-checks they add up. */

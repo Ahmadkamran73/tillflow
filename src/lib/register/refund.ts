@@ -1,6 +1,12 @@
 import { v7 as uuidv7 } from "uuid";
 import { settleTenders, type RefundAvailable } from "@/lib/money";
-import { lineTotal, unitWithModifiers, type PricedCart } from "./cart";
+import {
+  lineTotal,
+  serviceChargeName,
+  serviceLineOf,
+  unitWithModifiers,
+  type PricedCart,
+} from "./cart";
 import type { LocalRefund, LocalRefundLeg, LocalRefundLine, LocalSale, RegisterDb } from "./db";
 import type { Feed } from "./feed";
 import { completeSale } from "./sale";
@@ -72,6 +78,27 @@ export function detailOfLocalSale(
         net: null,
         vat: null,
         gross: deposit.gross,
+        refunded_qty: 0,
+      });
+    }
+    const service = serviceLineOf(priced, at);
+    if (service) {
+      const unitCents = Math.ceil(service.gross / l.qty);
+      lines.push({
+        id: `${sale.id}:${lines.length + 1}`,
+        line_no: lines.length + 1,
+        kind: "item",
+        variant_id: null,
+        name: serviceChargeName(sale.cart.serviceBp ?? 0),
+        qty: l.qty,
+        unit_price: unitCents,
+        serial: null,
+        discount: unitCents * l.qty - service.gross,
+        tax_category: service.taxCategory,
+        tax_rate_bp: service.rateBp,
+        net: service.net,
+        vat: service.vat,
+        gross: service.gross,
         refunded_qty: 0,
       });
     }
