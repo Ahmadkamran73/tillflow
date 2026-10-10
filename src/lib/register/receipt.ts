@@ -1,7 +1,13 @@
 import type { ReceiptOptions } from "@/config/business-type-presets";
 import { t } from "@/lib/i18n";
 import { formatCents, lineDiscountOf, localDate, settleTenders } from "@/lib/money";
-import { lineTotal, unitWithModifiers, type PricedCart } from "./cart";
+import {
+  lineTotal,
+  serviceChargeName,
+  serviceLinesOf,
+  unitWithModifiers,
+  type PricedCart,
+} from "./cart";
 import type { ReceiptSale } from "./db";
 import { BARCODE_MARK } from "./print/escpos";
 import { receiptNo } from "./sale";
@@ -109,7 +115,7 @@ export function buildReceipt(args: {
   const saleDay = localDate(when, header.timezone);
   const isInvoice = !!args.asInvoice && !!sale.invoice;
 
-  const lines = sale.cart.lines.map((l, i) => {
+  const itemLines = sale.cart.lines.map((l, i) => {
     const at = priced.itemIndex[i]!;
     const v = basket.vatLines.find((x) => x.index === at)!;
     return {
@@ -127,6 +133,32 @@ export function buildReceipt(args: {
         : {}),
     };
   });
+  // The service charge prints as its own line, one per VAT rate, after the items (the sale stores it
+  // per item so refunds can pair it with them; the receipt adds the items of one rate together).
+  const serviceByRate = new Map<number, { gross: number; net: number; vat: number }>();
+  for (const v of serviceLinesOf(priced)) {
+    const r = serviceByRate.get(v.rateBp) ?? { gross: 0, net: 0, vat: 0 };
+    r.gross += v.gross;
+    r.net += v.net;
+    r.vat += v.vat;
+    serviceByRate.set(v.rateBp, r);
+  }
+  const lines = [
+    ...itemLines,
+    ...[...serviceByRate]
+      .sort((x, y) => y[0] - x[0])
+      .map(([rateBp, r]) => ({
+        name: serviceChargeName(sale.cart.serviceBp ?? 0),
+        detail: [] as string[],
+        qty: 1,
+        unitCents: r.gross,
+        totalCents: r.gross,
+        discountCents: 0,
+        rateBp,
+        netCents: r.net,
+        vatCents: r.vat,
+      })),
+  ];
   const deposits = sale.cart.lines.flatMap((l, i) => {
     const d = basket.nonVatLines.find((x) => x.index === priced.itemIndex[i]! + 1);
     return l.depositCents > 0 && d ? [{ name: l.name, cents: d.gross }] : [];

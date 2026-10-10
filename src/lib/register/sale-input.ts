@@ -22,6 +22,10 @@ export const emailReceiptInput = z.strictObject({
   lines: z.array(saleLine).min(1).max(100),
   basketDiscount: discount.optional(),
   mode: z.enum(["eat_in", "take_away"]).default("eat_in"),
+  /** Service charge in basis points on this bill (restaurants); 0 = none. */
+  serviceChargeBp: z.int().min(0).max(2500).default(0),
+  /** A part of a split bill: its whole-cent share of the charge. */
+  serviceChargeCents: z.int().min(0).max(10_000_000).optional(),
   /** What the till showed; the email is refused if the server's price differs. */
   expectedDueCents: z.int().min(0).max(100_000_000),
   tenders: tendersInput,
@@ -61,7 +65,7 @@ const isCategory = (c: string): c is TaxCategory =>
  */
 export function buildServerCart(
   input: Pick<EmailReceiptInput, "lines" | "basketDiscount"> &
-    Partial<Pick<EmailReceiptInput, "mode">>,
+    Partial<Pick<EmailReceiptInput, "mode" | "serviceChargeBp" | "serviceChargeCents">>,
   rows: SaleRows,
 ): Cart {
   const variants = new Map(rows.variants.map((v) => [v.id, v]));
@@ -73,6 +77,8 @@ export function buildServerCart(
     ageChecked: true,
     discount: input.basketDiscount,
     mode: input.mode,
+    serviceBp: input.serviceChargeBp || undefined,
+    serviceCents: input.serviceChargeCents,
     lines: input.lines.map((l, i) => {
       const v = variants.get(l.variantId);
       const p = v && products.get(v.productId);

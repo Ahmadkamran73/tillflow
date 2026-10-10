@@ -35,6 +35,7 @@ const record = (cart: Cart, tendered = 5000) => {
       receiptSeq: 1,
       completedAt: "2026-10-06T12:00:00.000Z",
       mode: "eat_in",
+      serviceChargeBp: 0,
       lines: [],
       tenders: [
         {

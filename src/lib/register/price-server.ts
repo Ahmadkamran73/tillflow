@@ -6,7 +6,10 @@ import { priceCart, type Cart, type PricedCart } from "./cart";
 import { rowsFromAsOf } from "@/lib/sync/as-of";
 import { buildServerCart, SaleError, type EmailReceiptInput, type SaleRows } from "./sale-input";
 
-type PricingInput = Pick<EmailReceiptInput, "lines" | "basketDiscount" | "completedAt" | "mode">;
+type PricingInput = Pick<
+  EmailReceiptInput,
+  "lines" | "basketDiscount" | "completedAt" | "mode" | "serviceChargeBp" | "serviceChargeCents"
+>;
 
 /**
  * The catalogue as it stood at `at`, from the price-history tables (RLS applies). Prices, VAT

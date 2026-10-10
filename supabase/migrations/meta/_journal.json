@@ -169,6 +169,13 @@
       "when": 1791558240846,
       "tag": "0036_customers",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1791638306007,
+      "tag": "0038_restaurant",
+      "breakpoints": true
     }
   ]
 }

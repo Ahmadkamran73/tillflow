@@ -155,7 +155,9 @@ export async function deviceFindSale(tokenHash: string, query: unknown): Promise
 
 /** Customers of the till's own shop matching `q` (name, email, phone). null: not paired. */
 export async function deviceCustomerSearch(tokenHash: string, q: string): Promise<unknown> {
-  const [row] = await db()<{ r: unknown }[]>`select ops.device_customer_search(${tokenHash}, ${q}) as r`;
+  const [row] = await db()<
+    { r: unknown }[]
+  >`select ops.device_customer_search(${tokenHash}, ${q}) as r`;
   return row?.r ?? null;
 }
 
@@ -176,6 +178,22 @@ export async function deviceRefundsKnown(tokenHash: string, ids: string[]): Prom
 export async function deviceRefundMeta(tokenHash: string): Promise<unknown> {
   const [row] = await db()<{ m: unknown }[]>`select ops.device_refund_meta(${tokenHash}) as m`;
   return row?.m ?? null;
+}
+
+/** The shop's service charge and this till's floor plan (ops.device_restaurant_meta). */
+export async function deviceRestaurantMeta(tokenHash: string): Promise<unknown> {
+  const [row] = await db()<{ m: unknown }[]>`select ops.device_restaurant_meta(${tokenHash}) as m`;
+  return row?.m ?? null;
+}
+
+export type TabEventResult = "recorded" | "duplicate";
+
+/** One restaurant tab event from a paired till (ops.record_tab_event); idempotent by event id. */
+export async function recordTabEvent(tokenHash: string, event: unknown): Promise<TabEventResult> {
+  const [row] = await db()<{ r: TabEventResult }[]>`
+    select ops.record_tab_event(${tokenHash}, ${db().json(event as postgres.JSONValue)}) as r`;
+  if (!row) throw new Error("record_tab_event returned no row");
+  return row.r;
 }
 
 export async function recordSyncRejection(payload: unknown): Promise<void> {
@@ -300,7 +318,7 @@ export async function pinAttemptFinish(
   return { locked: row?.locked === true, lockedUntil: row?.locked_until ?? null };
 }
 
-export type ApprovalPurpose = "discount" | "no_sale" | "refund";
+export type ApprovalPurpose = "discount" | "no_sale" | "refund" | "void_item";
 
 /**
  * Turns a manager PIN the server just verified into a single-use proof (register_approvals) for one

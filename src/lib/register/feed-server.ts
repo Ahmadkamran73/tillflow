@@ -1,10 +1,16 @@
 import "server-only";
 import { z } from "zod";
-import { mapTaxRates, parseFeedMeta, parseTenderMeta } from "@/lib/device/meta";
+import {
+  mapTaxRates,
+  parseFeedMeta,
+  parseRestaurantMeta,
+  parseTenderMeta,
+} from "@/lib/device/meta";
 import {
   deviceFeedMeta,
   deviceFeedTable,
   deviceRefundMeta,
+  deviceRestaurantMeta,
   deviceTenderTypes,
   type FeedTable,
 } from "@/lib/device/service";
@@ -50,6 +56,8 @@ export async function getCatalogFeed(
   const refundMeta = z
     .object({ refund_override_cents: z.int().min(0), last_refund_seq: z.int().min(0) })
     .safeParse(await deviceRefundMeta(tokenHash));
+  const rawRestaurant = await deviceRestaurantMeta(tokenHash);
+  const restaurant = rawRestaurant ? parseRestaurantMeta(rawRestaurant) : null;
   const rawTypes = await deviceTenderTypes(tokenHash);
   const tenderTypes = rawTypes ? parseTenderMeta(rawTypes).types.filter((t) => !t.archived) : [];
 
@@ -77,7 +85,10 @@ export async function getCatalogFeed(
       receiptFooter: meta.location.receipt_footer,
       discountOverrideBp: meta.org.discount_override_bp,
       refundOverrideCents: refundMeta.success ? refundMeta.data.refund_override_cents : undefined,
+      serviceChargeBp: restaurant?.serviceChargeBp,
     },
+    floors: restaurant?.floors ?? [],
+    tables: restaurant?.tables ?? [],
     staff: meta.staff.map((s) => ({
       userId: s.user_id,
       displayName: s.display_name,

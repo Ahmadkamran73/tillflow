@@ -31,6 +31,7 @@ const ctx = {
   ],
   tipsAllowed: false,
   shopRoundCash: true,
+  shopServiceChargeBp: 0,
 };
 const CASHIER = "00000000-0000-4000-8000-0000000000d1";
 const MANAGER = "00000000-0000-4000-8000-0000000000d2";
@@ -49,6 +50,7 @@ const sale = (over: Partial<SyncSale> = {}): SyncSale => ({
   receiptSeq: n,
   completedAt: NOW.toISOString(),
   mode: "eat_in",
+  serviceChargeBp: 0,
   lines: [{ variantId: V1, qty: 1, modifierIds: [] }],
   tenders: [tender("cash", 2000)],
   roundCash: true,
@@ -796,5 +798,92 @@ describe("review flags after the VAT audit", () => {
     const { d, recorded } = deps(() => 1234);
     await processBatch([sale({ expectedVatCents: 230 })], ctx, d);
     expect(recordOf(recorded).review_flags).toEqual(["vat_differs"]);
+  });
+});
+
+describe("service charge on a sale", () => {
+  const card = (over: Partial<SyncSale> = {}) =>
+    sale({
+      roundCash: false,
+      serviceChargeBp: 1250,
+      tenders: [tender("card", 1388)],
+      expectedDueCents: 1388,
+      ...over,
+    });
+  const shop = { ...ctx, shopServiceChargeBp: 1250, shopRoundCash: false };
+
+  it("prices with the percentage the sale carries and records the charge as a taxed line", async () => {
+    const { d, recorded } = deps(() => 1234);
+    const [r] = await processBatch([card()], shop, d);
+    expect(r).toMatchObject({ status: "created" });
+    const rec = recorded[0] as { lines: Record<string, unknown>[]; sale: Record<string, unknown> };
+    expect(rec.lines[1]).toMatchObject({
+      name: "Service charge 12.5%",
+      gross_cents: 154,
+      variant_id: null,
+    });
+    expect(rec.sale.review_flags).toEqual([]);
+  });
+
+  it("flags a sale whose percentage differs from the shop's, but still saves it", async () => {
+    const { d, recorded } = deps(() => 1234);
+    await processBatch([card()], { ...shop, shopServiceChargeBp: 1000 }, d);
+    expect((recorded[0] as { sale: Record<string, unknown> }).sale.review_flags).toEqual([
+      "service_differs",
+    ]);
+  });
+
+  it("flags a take-away sale paid from a tab when the shop charges service", async () => {
+    const { d, recorded } = deps(() => 1234);
+    await processBatch(
+      [
+        sale({
+          mode: "take_away",
+          roundCash: false,
+          serviceChargeBp: 1250,
+          tabId: "00000000-0000-7000-8000-0000000000aa",
+          tenders: [tender("card", 1234)],
+          expectedDueCents: 1234,
+        }),
+      ],
+      shop,
+      d,
+    );
+    expect((recorded[0] as { sale: Record<string, unknown> }).sale.review_flags).toEqual([
+      "service_differs",
+    ]);
+  });
+
+  it("accepts a split part's fixed share within 1.5c of the percentage and refuses further", async () => {
+    const ok = deps(() => 1234);
+    const [a] = await processBatch(
+      [card({ serviceChargeCents: 155, tenders: [tender("card", 1389)], expectedDueCents: 1389 })],
+      shop,
+      ok.d,
+    );
+    expect(a).toMatchObject({ status: "created" });
+    const bad = deps(() => 1234);
+    const [b] = await processBatch(
+      [card({ serviceChargeCents: 157, tenders: [tender("card", 1391)], expectedDueCents: 1391 })],
+      shop,
+      bad.d,
+    );
+    expect(b).toMatchObject({ status: "rejected", reason: "cannot_price" });
+    expect(bad.recorded).toHaveLength(0);
+    // a charge where the percentage is 0 is never accepted
+    const none = deps(() => 1234);
+    const [c] = await processBatch(
+      [
+        card({
+          serviceChargeBp: 0,
+          serviceChargeCents: 1,
+          tenders: [tender("card", 1235)],
+          expectedDueCents: 1235,
+        }),
+      ],
+      { ...shop, shopServiceChargeBp: 0 },
+      none.d,
+    );
+    expect(c).toMatchObject({ status: "rejected" });
   });
 });

@@ -419,31 +419,68 @@ describe("processRefunds", () => {
       reasonCode: "void_mistake",
       lines: [{ lineNo: 1, qty: 2, restock: true }],
       legs: [
-        { id: "00000000-0000-7000-a000-0000000000a1", typeId: CARD_TYPE, method: "card", amountCents: 400, tipCents: 100 },
-        { id: "00000000-0000-7000-a000-0000000000a2", typeId: CASH_TYPE, method: "cash", amountCents: 300, tipCents: 0 },
+        {
+          id: "00000000-0000-7000-a000-0000000000a1",
+          typeId: CARD_TYPE,
+          method: "card",
+          amountCents: 400,
+          tipCents: 100,
+        },
+        {
+          id: "00000000-0000-7000-a000-0000000000a2",
+          typeId: CASH_TYPE,
+          method: "cash",
+          amountCents: 300,
+          tipCents: 0,
+        },
       ],
       expectedAmountCents: 700,
     });
-    expect((await run(tipVoid)).result).toMatchObject({ status: "rejected", reason: "refund_mismatch" });
+    expect((await run(tipVoid)).result).toMatchObject({
+      status: "rejected",
+      reason: "refund_mismatch",
+    });
     const taken = detail();
     taken.payments[0] = { ...taken.payments[0]!, tip: 100 }; // the sale took a 1.00 tip
     expect((await run(tipVoid, undefined, taken)).result.status).toBe("created");
 
     // a sale paid by exchange credit: the credit is not money, so it cannot be paid out at all
     const credit = detail();
-    credit.payments = [{ method: "exchange", type_id: null, label: "Exchange credit", amount: 700, tip: 0 }];
+    credit.payments = [
+      { method: "exchange", type_id: null, label: "Exchange credit", amount: 700, tip: 0 },
+    ];
     const asCash = refund({
       lines: [{ lineNo: 1, qty: 2, restock: true }],
-      legs: [{ id: "00000000-0000-7000-a000-0000000000a3", typeId: CASH_TYPE, method: "cash", amountCents: 700, tipCents: 0 }],
+      legs: [
+        {
+          id: "00000000-0000-7000-a000-0000000000a3",
+          typeId: CASH_TYPE,
+          method: "cash",
+          amountCents: 700,
+          tipCents: 0,
+        },
+      ],
       expectedAmountCents: 700,
     });
-    expect((await run(asCash, undefined, credit)).result).toMatchObject({ reason: "refund_exceeds" });
+    expect((await run(asCash, undefined, credit)).result).toMatchObject({
+      reason: "refund_exceeds",
+    });
     const asCard = refund({
       lines: [{ lineNo: 1, qty: 2, restock: true }],
-      legs: [{ id: "00000000-0000-7000-a000-0000000000a4", typeId: CARD_TYPE, method: "card", amountCents: 700, tipCents: 0 }],
+      legs: [
+        {
+          id: "00000000-0000-7000-a000-0000000000a4",
+          typeId: CARD_TYPE,
+          method: "card",
+          amountCents: 700,
+          tipCents: 0,
+        },
+      ],
       expectedAmountCents: 700,
     });
-    expect((await run(asCard, undefined, credit)).result).toMatchObject({ reason: "refund_exceeds" });
+    expect((await run(asCard, undefined, credit)).result).toMatchObject({
+      reason: "refund_exceeds",
+    });
     // it can only be exchanged again, the whole value as new credit
     const again = refund({
       kind: "exchange",
@@ -491,7 +528,12 @@ describe("processRefunds", () => {
 
   it("keeps neither the token nor an approval proof from a refund it cannot even read", async () => {
     const x = deps();
-    const unreadable = { ...refund(), lines: "nope", servingToken: "payload.sig", approvalId: "a1" };
+    const unreadable = {
+      ...refund(),
+      lines: "nope",
+      servingToken: "payload.sig",
+      approvalId: "a1",
+    };
     const [r] = await processRefunds([unreadable], ctx, x.d);
     expect(r).toMatchObject({ status: "rejected", reason: "invalid" });
     expect(JSON.stringify(x.rejections)).not.toContain("payload.sig");

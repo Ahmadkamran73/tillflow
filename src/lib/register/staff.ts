@@ -8,7 +8,7 @@ export type Role = StaffMember["role"];
 export type PinPurpose = "unlock" | "override";
 
 /** What a manager's PIN is being used to approve. */
-export type ApprovalFor = "discount" | "no_sale" | "refund";
+export type ApprovalFor = "discount" | "no_sale" | "refund" | "void_item";
 
 export type PinResult =
   /**
