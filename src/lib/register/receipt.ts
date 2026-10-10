@@ -20,6 +20,8 @@ export type ReceiptHeader = {
 export type Receipt = {
   kind: "receipt" | "vat_invoice";
   takeAway: boolean;
+  /** Cafes: the name the order is called by; device-only. */
+  orderName?: string;
   number: string;
   /** Shop-local, e.g. "05/10/2026 14:32". */
   dateTime: string;
@@ -133,6 +135,7 @@ export function buildReceipt(args: {
   return {
     kind: isInvoice ? "vat_invoice" : "receipt",
     takeAway: sale.cart.mode === "take_away",
+    ...(sale.cart.orderName ? { orderName: sale.cart.orderName } : {}),
     number: receiptNo(args.registerName, sale.receiptSeq),
     dateTime: fmt.format(when).replace(",", ""),
     business: {
@@ -202,6 +205,7 @@ export function receiptText(r: Receipt, cols: 32 | 42 | 48, labels: ReceiptLabel
   out.push(`${labels.receiptNo} ${r.number}`);
   out.push(r.dateTime);
   if (r.takeAway) out.push(labels.takeAway);
+  if (r.orderName) wrap(`${labels.orderName}: ${r.orderName}`);
   if (r.customer) {
     rule();
     wrap(r.customer.name);
@@ -264,6 +268,7 @@ export type ReceiptLabels = {
   reference: string;
   change: string;
   takeAway: string;
+  orderName: string;
   discount: string;
 };
 
@@ -283,5 +288,6 @@ export const receiptLabels = (): ReceiptLabels => ({
   reference: t("receipt.reference"),
   change: t("receipt.change"),
   takeAway: t("receipt.takeAway"),
+  orderName: t("receipt.orderName"),
   discount: t("receipt.discount"),
 });

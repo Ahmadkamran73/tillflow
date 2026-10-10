@@ -6,6 +6,7 @@ import {
   ClockIcon,
   LockIcon,
   MinusIcon,
+  ChefHatIcon,
   PauseIcon,
   UserRoundIcon,
   PercentIcon,
@@ -15,8 +16,10 @@ import {
   SearchIcon,
   Trash2Icon,
   TriangleAlertIcon,
+  WheatIcon,
 } from "lucide-react";
 import Link from "next/link";
+import { flushSync } from "react-dom";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { v7 as uuidv7 } from "uuid";
 import { RegisterLayout } from "@/components/register/register-layout";
@@ -34,6 +37,8 @@ import {
 } from "@/lib/money";
 import {
   cartReducer,
+  ORDER_NAME_MAX,
+  allergensOf,
   depositOf,
   warrantyOf,
   emptyCart,
@@ -66,12 +71,18 @@ import type { InvoiceInput } from "@/lib/register/invoice";
 import {
   defaultPrinter,
   loadPrinter,
+  loadStations,
+  noStations,
   printLines,
   savePrinter,
+  saveStations,
   type PrinterSettings,
+  type StationSetup,
 } from "@/lib/register/print";
 import { buildReceipt, receiptLabels, receiptText } from "@/lib/register/receipt";
-import { completeSale, setInvoice } from "@/lib/register/sale";
+import { allergenListLines, buildTickets, type Station } from "@/lib/register/ticket";
+import { AllergenBadge, AllergenListDialog, allergenName, StationsDialog } from "./cafe-dialogs";
+import { completeSale, receiptNo, setInvoice } from "@/lib/register/sale";
 import {
   addCashMove,
   closeShift,
@@ -140,7 +151,9 @@ type Dialog =
   | { kind: "customer" }
   | { kind: "tender" }
   | { kind: "override"; ask: OverrideAsk }
-  | { kind: "printer" }
+  | { kind: "printer"; station?: Station }
+  | { kind: "stations" }
+  | { kind: "allergens" }
   | { kind: "done"; sale: LocalSale; status: string }
   | { kind: "email"; sale: LocalSale; status: string; sending: boolean }
   | { kind: "invoice"; sale: LocalSale }
@@ -196,6 +209,9 @@ export function Register({ orgId }: { orgId: string }) {
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [message, setMessage] = useState({ text: "", n: 0 });
   const [printer, setPrinter] = useState<PrinterSettings>(defaultPrinter);
+  // Print results shown inside the open dialog (the cart pane's status is behind its scrim).
+  const [dialogStatus, setDialogStatus] = useState({ text: "", n: 0 });
+  const [stationSetup, setStationSetup] = useState<StationSetup>(noStations);
   const [printJob, setPrintJob] = useState<{ n: number; lines: string[] } | null>(null);
   // Who is serving. Memory only: a reload locks the till.
   const [cashier, setCashier] = useState<Cashier | null>(null);
@@ -262,6 +278,7 @@ export function Register({ orgId }: { orgId: string }) {
   useEffect(() => {
     if (!db) return;
     void loadPrinter(db).then(setPrinter);
+    void loadStations(db).then(setStationSetup);
   }, [db]);
 
   useEffect(() => {
@@ -410,6 +427,7 @@ export function Register({ orgId }: { orgId: string }) {
       depositCents: depositOf(variant.attributes),
       serial: flow.serial,
       warrantyMonths: warrantyOf(variant.attributes),
+      allergens: allergensOf(variant.attributes),
     };
     dispatch({ type: "add", line });
     say(t("register.added", { name: line.name }));
@@ -521,6 +539,53 @@ export function Register({ orgId }: { orgId: string }) {
     if (result === "printed") return t("register.printed");
     setPrintJob((j) => ({ n: (j?.n ?? 0) + 1, lines }));
     return result === "failed" ? t("register.printFallback") : t("register.printed");
+  }
+
+  /**
+   * Prints the kitchen and bar tickets of a sale, each on its station's printer. A station with no
+   * printer prints nothing; a browser-mode or failed one goes to the browser print window.
+   */
+  async function printTickets(sale: LocalSale): Promise<string> {
+    if (!preset?.register.kitchenTickets || !data?.org) return "";
+    const tickets = buildTickets({
+      cart: sale.cart,
+      number: receiptNo(tillName(sale.registerId), sale.receiptSeq),
+      time: new Intl.DateTimeFormat("en-IE", {
+        timeZone: data.org.timezone,
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23",
+      }).format(new Date(sale.completedAt)),
+      colsOf: (s) => stationSetup.printers[s]?.cols ?? 42,
+      stationOf: (l) =>
+        stationSetup.categories[index.products.get(l.productId)?.categoryId ?? ""] ?? "kitchen",
+      labels: {
+        order: t("ticket.order"),
+        eatIn: t("ticket.eatIn"),
+        takeAway: t("receipt.takeAway"),
+        allergens: t("ticket.allergens"),
+        allergen: allergenName,
+      },
+    });
+    const fallback: string[] = [];
+    let printed = 0;
+    let failed = false;
+    for (const ticket of tickets) {
+      const p = stationSetup.printers[ticket.station];
+      if (!p) continue;
+      const result = await printLines(p, ticket.lines, false);
+      if (result === "printed") printed++;
+      else {
+        fallback.push(...ticket.lines, "");
+        failed ||= result === "failed";
+      }
+    }
+    // Flushed now: the receipt prints next and would replace a job that was only queued.
+    if (fallback.length)
+      flushSync(() => setPrintJob((j) => ({ n: (j?.n ?? 0) + 1, lines: fallback })));
+    if (printed === 0 && fallback.length === 0)
+      return tickets.length ? t("register.ticketsNone") : "";
+    return failed ? t("register.ticketsFailed") : t("register.ticketsPrinted");
   }
 
   // The shop's discount limit (basis points): above it, a manager's PIN is needed.
@@ -714,8 +779,11 @@ export function Register({ orgId }: { orgId: string }) {
         exchangeRefund.legs.some((l) => l.method === "cash"),
       );
     }
+    // The tickets go first: the kitchen can start while the receipt prints.
+    const ticketStatus = await printTickets(sale);
     // The drawer opens with the receipt only when cash was taken.
-    const status = `${t("register.saved")} ${await print(sale, { kick: tenders.some((x) => x.method === "cash") })}`;
+    const status =
+      `${t("register.saved")} ${await print(sale, { kick: tenders.some((x) => x.method === "cash") })} ${ticketStatus}`.trim();
     setDialog({ kind: "done", sale, status });
     say(status);
     outbox.kick(); // only now, after the receipt: the sale never waits for the network
@@ -832,7 +900,12 @@ export function Register({ orgId }: { orgId: string }) {
 
   function renderDialog() {
     if (!dialog) return null;
-    const close = () => setDialog(null);
+    const close = () => {
+      setDialogStatus({ text: "", n: 0 });
+      setDialog(null);
+    };
+    // A new object each time, so identical text is announced again.
+    const announce = (text: string) => setDialogStatus((s) => ({ text, n: s.n + 1 }));
     switch (dialog.kind) {
       case "variant": {
         const { product } = dialog;
@@ -1087,26 +1160,91 @@ export function Register({ orgId }: { orgId: string }) {
           />
         );
       }
-      case "printer":
+      case "printer": {
+        const station = dialog.station;
         return (
           <PrinterDialog
-            value={printer}
-            onClose={close}
+            value={station ? (stationSetup.printers[station] ?? printer) : printer}
+            status={dialogStatus.text}
+            onClose={
+              station
+                ? () => {
+                    setDialogStatus({ text: "", n: 0 });
+                    setDialog({ kind: "stations" });
+                  }
+                : close
+            }
             onSave={async (p) => {
+              if (station) {
+                const next = {
+                  ...stationSetup,
+                  printers: { ...stationSetup.printers, [station]: p },
+                };
+                if (db) await saveStations(db, next);
+                setStationSetup(next);
+                setDialogStatus({ text: "", n: 0 });
+                setDialog({ kind: "stations" });
+                return;
+              }
               if (db) await savePrinter(db, p);
               setPrinter(p);
               close();
             }}
             onTest={async (p) => {
               const lines = ["Tillflow", "Test print", "EUR \u20ac"];
-              if ((await printLines(p, lines, false)) === "printed") say(t("register.printed"));
+              if ((await printLines(p, lines, false)) === "printed")
+                announce(t("register.printed"));
               else {
                 setPrintJob((j) => ({ n: (j?.n ?? 0) + 1, lines }));
-                say(t("register.printFallback"));
+                announce(t("register.printFallback"));
               }
             }}
           />
         );
+      }
+      case "stations":
+        return (
+          <StationsDialog
+            value={stationSetup}
+            categories={data?.categories ?? []}
+            onChange={async (next) => {
+              if (db) await saveStations(db, next);
+              setStationSetup(next);
+            }}
+            onSetUp={(station) => setDialog({ kind: "printer", station })}
+            onClose={close}
+          />
+        );
+      case "allergens": {
+        const items = (data?.variants ?? []).flatMap((v) => {
+          const allergens = allergensOf(v.attributes);
+          const p = index.products.get(v.productId);
+          return p && allergens.length
+            ? [{ id: v.id, name: [p.name, variantLabel(v)].filter(Boolean).join(" – "), allergens }]
+            : [];
+        });
+        return (
+          <AllergenListDialog
+            items={items}
+            status={dialogStatus.text}
+            onClose={close}
+            onPrint={async () => {
+              const lines = allergenListLines(
+                items,
+                printer.cols,
+                t("register.allergensTitle"),
+                allergenName,
+              );
+              if ((await printLines(printer, lines, false)) === "printed")
+                announce(t("register.printed"));
+              else {
+                setPrintJob((j) => ({ n: (j?.n ?? 0) + 1, lines }));
+                announce(t("register.printFallback"));
+              }
+            }}
+          />
+        );
+      }
       case "done": {
         const { sale } = dialog;
         const change = ctx
@@ -1128,6 +1266,11 @@ export function Register({ orgId }: { orgId: string }) {
             onNewSale={newSale}
             onPrint={async () =>
               setDialog({ ...dialog, status: await print(sale, { asInvoice: !!sale.invoice }) })
+            }
+            onTickets={
+              preset?.register.kitchenTickets
+                ? async () => setDialog({ ...dialog, status: await printTickets(sale) })
+                : undefined
             }
             onEmail={() => setDialog({ kind: "email", sale, status: "", sending: false })}
             onInvoice={() => setDialog({ kind: "invoice", sale })}
@@ -1291,6 +1434,24 @@ export function Register({ orgId }: { orgId: string }) {
               <PrinterIcon aria-hidden /> {t("register.printer")}:{" "}
               {t(`register.printer.${printer.type}`)}
             </Button>
+            {preset?.register.kitchenTickets && (
+              <Button
+                size="touch"
+                variant="outline"
+                onClick={() => setDialog({ kind: "stations" })}
+              >
+                <ChefHatIcon aria-hidden /> {t("register.stations")}
+              </Button>
+            )}
+            {preset?.receipt.allergens && (
+              <Button
+                size="touch"
+                variant="outline"
+                onClick={() => setDialog({ kind: "allergens" })}
+              >
+                <WheatIcon aria-hidden /> {t("register.allergens")}
+              </Button>
+            )}
             <SyncStatusPill state={outbox.pill} waiting={outbox.waiting} />
           </>
         }
@@ -1397,11 +1558,16 @@ export function Register({ orgId }: { orgId: string }) {
                           <button
                             type="button"
                             onClick={() => tapProduct(p)}
-                            className="till-key flex h-24 w-full flex-col items-start justify-between rounded-xl p-3 text-left"
+                            className="till-key flex min-h-24 w-full flex-col items-start justify-between rounded-xl p-3 text-left"
                           >
                             <span className="font-display leading-tight font-semibold">
                               {p.name}
                             </span>
+                            {preset?.receipt.allergens && (
+                              <AllergenBadge
+                                codes={[...new Set(vs.flatMap((v) => allergensOf(v.attributes)))]}
+                              />
+                            )}
                             {low !== null && (
                               <span className="font-mono text-sm tabular-nums">
                                 {vs.length > 1
@@ -1465,6 +1631,25 @@ export function Register({ orgId }: { orgId: string }) {
                 })}
               </div>
             )}
+            {preset?.register.orderName && (
+              <div className="mb-3 flex flex-col gap-1 text-sm">
+                <label htmlFor="order-name" className="font-medium">
+                  {t("register.orderName")}
+                </label>
+                <Input
+                  id="order-name"
+                  className="h-12"
+                  maxLength={ORDER_NAME_MAX}
+                  autoComplete="off"
+                  aria-describedby="order-name-hint"
+                  value={cart.orderName ?? ""}
+                  onChange={(e) => dispatch({ type: "orderName", name: e.target.value })}
+                />
+                <span id="order-name-hint" className="text-muted-foreground text-xs">
+                  {t("register.orderNameHint")}
+                </span>
+              </div>
+            )}
             <div className="min-h-0 flex-1 overflow-y-auto">
               {cart.lines.length === 0 ? (
                 <p className="text-muted-foreground">{t("register.cartEmpty")}</p>
@@ -1497,6 +1682,7 @@ export function Register({ orgId }: { orgId: string }) {
                             .join(" · ")}
                         </p>
                       )}
+                      <AllergenBadge codes={l.allergens ?? []} />
                       <div className="flex items-center gap-2">
                         <Button
                           size="icon-touch"

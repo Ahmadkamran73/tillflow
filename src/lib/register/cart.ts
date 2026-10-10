@@ -27,6 +27,8 @@ export type CartLine = {
   serial?: string;
   /** Electronics: months of warranty, for the end date on the receipt. */
   warrantyMonths?: number;
+  /** Allergen codes declared on the variant (cafes, restaurants), shown in the cart and on tickets. */
+  allergens?: string[];
   discount?: Discount;
 };
 
@@ -36,7 +38,11 @@ export type Cart = {
   ageChecked: boolean;
   /** Cafes and restaurants: eat-in (default) or take-away, which can change the VAT rate. */
   mode?: ServiceMode;
+  /** Cafes: a name to call the order by. Stays on the device (cart, receipt, tickets), never synced. */
+  orderName?: string;
 };
+
+export const ORDER_NAME_MAX = 30;
 
 export const emptyCart: Cart = { lines: [], ageChecked: false };
 
@@ -48,6 +54,7 @@ export type CartAction =
   | { type: "basketDiscount"; discount: Discount | undefined }
   | { type: "ageChecked" }
   | { type: "mode"; mode: ServiceMode }
+  | { type: "orderName"; name: string }
   | { type: "stripAmountDiscounts" }
   | { type: "load"; cart: Cart };
 
@@ -93,6 +100,13 @@ export function cartReducer(cart: Cart, a: CartAction): Cart {
       return { ...cart, discount: a.discount };
     case "mode":
       return { ...cart, mode: a.mode };
+    case "orderName":
+      // Control characters are dropped: a printer treats some of them as commands.
+      return {
+        ...cart,
+        orderName:
+          a.name.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, ORDER_NAME_MAX) || undefined,
+      };
     case "ageChecked":
       return { ...cart, ageChecked: true };
     case "stripAmountDiscounts": {
@@ -192,6 +206,12 @@ export const depositOf = (attributes: Record<string, unknown>) =>
   typeof attributes.depositCents === "number" && Number.isInteger(attributes.depositCents)
     ? Math.max(0, attributes.depositCents)
     : 0;
+
+/** Allergen codes stored on a cafe or restaurant variant (strings only); [] for every other type. */
+export const allergensOf = (attributes: Record<string, unknown>): string[] =>
+  Array.isArray(attributes.allergens)
+    ? attributes.allergens.filter((a): a is string => typeof a === "string")
+    : [];
 
 /** Warranty months stored on an electronics variant, 0 for every other type. */
 export const warrantyOf = (attributes: Record<string, unknown>) =>
