@@ -22,6 +22,8 @@ const syncSaleShape = z.strictObject({
   approvalId: z.uuid().optional(),
   /** The shift this sale was rung in (absent on sales queued before shifts); must be a shift of this till. */
   shiftId: z.uuid().optional(),
+  /** The customer rung up for (optional); linked only if it is a live customer of this shop. */
+  customerId: z.uuid().optional(),
   receiptSeq: z.int().min(1).max(99_999_999),
   completedAt: z.iso.datetime(),
   /** When the till's catalogue was last pulled: a second chance to match its prices. */

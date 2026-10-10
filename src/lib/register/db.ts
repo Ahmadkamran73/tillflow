@@ -25,6 +25,8 @@ export type LocalSale = {
   approvalId?: string;
   /** The shift this sale was rung in (the till's open shift at the time). */
   shiftId?: string;
+  /** The customer picked at the till (an id only; the name is never kept on the device). */
+  customerId?: string;
   receiptSeq: number;
   completedAt: string;
   /** Inputs only: totals are always re-derived with `priceCart`. */

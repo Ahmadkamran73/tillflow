@@ -143,6 +143,7 @@ const toWire = (s: LocalSale): SyncSale => ({
   cashierUserId: s.cashierUserId ?? LEGACY_CASHIER,
   approvalId: s.approvalId,
   shiftId: s.shiftId,
+  customerId: s.customerId,
   receiptSeq: s.receiptSeq,
   completedAt: s.completedAt,
   catalogAsOf: s.catalogAsOf,
