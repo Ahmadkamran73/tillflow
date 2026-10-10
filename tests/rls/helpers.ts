@@ -138,14 +138,23 @@ async function seedShop(tx: TransactionSql, name: string): Promise<Shop> {
  * rolled back, so tests leave nothing behind and audit_log stays append-only for real.
  */
 export async function inWorld(fn: (ctx: Ctx) => Promise<void>) {
-  try {
-    await sql.begin(async (tx) => {
-      const world = { a: await seedShop(tx, "Shop A"), b: await seedShop(tx, "Shop B") };
-      await fn(makeCtx(tx, world));
-      throw new Rollback();
-    });
-  } catch (e) {
-    if (!(e instanceof Rollback)) throw e;
+  // Another test file's denied TRUNCATE takes an exclusive lock for an instant. If that deadlocks
+  // with this transaction (which already holds locks from seeding), Postgres aborts one of them;
+  // the test says nothing about the rule being tested, so run it again in a fresh transaction.
+  // Every test is rolled back and uses its own random ids, so a rerun is safe.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await sql.begin(async (tx) => {
+        const world = { a: await seedShop(tx, "Shop A"), b: await seedShop(tx, "Shop B") };
+        await fn(makeCtx(tx, world));
+        throw new Rollback();
+      });
+      return;
+    } catch (e) {
+      if (e instanceof Rollback) return;
+      if ((e as { code?: string }).code !== "40P01" || attempt >= 4) throw e;
+      await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
+    }
   }
 }
 
