@@ -24,6 +24,15 @@ function assertZipIsSafe(zip: Buffer): void {
   }
   if (eocd < 0) throw bad();
   const declared = zip.readUInt16LE(eocd + 10);
+  // JSZip goes into zip64 mode (and takes the directory from a second record this check never reads)
+  // when ANY of these fields is at its maximum. Only plain single-disk archives are accepted.
+  if (
+    zip.readUInt16LE(eocd + 4) !== 0 ||
+    zip.readUInt16LE(eocd + 6) !== 0 ||
+    zip.readUInt16LE(eocd + 8) !== declared
+  ) {
+    throw bad();
+  }
   const dirSize = zip.readUInt32LE(eocd + 12);
   const dirStart = zip.readUInt32LE(eocd + 16);
   if (declared > MAX_ZIP_ENTRIES || declared === 0xffff || dirSize === 0xffffffff || dirStart === 0xffffffff) {

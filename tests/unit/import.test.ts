@@ -455,6 +455,14 @@ describe("zip parser differentials (what the check sees is what ExcelJS reads)",
     expect(await code("many.xlsx", zipParts(parts))).toBe("size");
   });
 
+  it("refuses any disk-number field that would switch JSZip to zip64, where it reads another directory", async () => {
+    for (const field of [4, 6, 8]) {
+      const zip = zipParts([{ name: "xl/worksheets/sheet1.xml", size: BOMB }]);
+      zip.writeUInt16LE(0xffff, zip.length - 22 + field);
+      expect(await code("zip64.xlsx", zip)).toBe("unreadable");
+    }
+  });
+
   it("still accepts a normal workbook written by ExcelJS (data descriptors, comments and all)", async () => {
     const book = new ExcelJS.Workbook();
     const sheet = book.addWorksheet("Products");
