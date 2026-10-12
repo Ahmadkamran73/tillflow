@@ -1,6 +1,7 @@
 import { inflateRawSync } from "node:zlib";
 import ExcelJS from "exceljs";
 import Papa from "papaparse";
+import { canonicalXlsx, XlsxZipError } from "./xlsx-zip.mjs";
 
 export const MAX_FILE_BYTES = 10 * 1024 * 1024;
 export const MAX_ROWS = 50_000;
@@ -98,7 +99,8 @@ function cleanHeaders(raw: string[]): string[] {
 function cellText(v: ExcelJS.CellValue): string {
   if (v === null || v === undefined) return "";
   if (typeof v === "object") {
-    if (v instanceof Date) return v.toISOString().slice(0, 10);
+    // A date-styled cell holding an impossible number becomes an Invalid Date: read it as empty.
+    if (v instanceof Date) return Number.isNaN(v.getTime()) ? "" : v.toISOString().slice(0, 10);
     // Formulas are never evaluated: only the value Excel stored is read.
     if ("result" in v) return cellText(v.result as ExcelJS.CellValue);
     if ("richText" in v) return v.richText.map((r) => r.text).join("");
@@ -133,10 +135,18 @@ export async function parseUpload(fileName: string, bytes: Buffer): Promise<Pars
 
   if (kind === "xlsx") {
     if (bytes[0] !== 0x50 || bytes[1] !== 0x4b) throw new ImportFileError("unreadable"); // zip "PK"
-    assertZipIsSafe(bytes);
+    assertZipIsSafe(bytes); // cheap early refusal
+    // ExcelJS never receives the uploaded bytes: it reads a fresh zip of our own, holding only the
+    // whitelisted parts, each inflated under its cap and checked against its CRC (xlsx-zip.mjs).
+    let canonical: Buffer;
+    try {
+      canonical = canonicalXlsx(bytes);
+    } catch (e) {
+      throw new ImportFileError(e instanceof XlsxZipError ? e.code : "unreadable");
+    }
     const book = new ExcelJS.Workbook();
     try {
-      await book.xlsx.load(bytes as unknown as ArrayBuffer);
+      await book.xlsx.load(canonical as unknown as ArrayBuffer);
     } catch {
       throw new ImportFileError("unreadable");
     }
@@ -144,16 +154,21 @@ export async function parseUpload(fileName: string, bytes: Buffer): Promise<Pars
     if (!sheet) throw new ImportFileError("empty");
     // Check the size before walking it.
     if (sheet.rowCount - 1 > MAX_ROWS) throw new ImportFileError("rows");
-    const head = sheet.getRow(1);
-    const width = Math.min(head.cellCount, MAX_COLUMNS + 1);
-    const headers = Array.from({ length: width }, (_, i) => cellText(head.getCell(i + 1).value));
-    const matrix: string[][] = [];
-    sheet.eachRow((row, n) => {
-      if (n === 1) return;
-      const cells = headers.map((_, i) => cellText(row.getCell(i + 1).value));
-      if (cells.some((c) => c !== "")) matrix.push(cells);
-    });
-    return toRows(headers, matrix);
+    try {
+      const head = sheet.getRow(1);
+      const width = Math.min(head.cellCount, MAX_COLUMNS + 1);
+      const headers = Array.from({ length: width }, (_, i) => cellText(head.getCell(i + 1).value));
+      const matrix: string[][] = [];
+      sheet.eachRow((row, n) => {
+        if (n === 1) return;
+        const cells = headers.map((_, i) => cellText(row.getCell(i + 1).value));
+        if (cells.some((c) => c !== "")) matrix.push(cells);
+      });
+      return toRows(headers, matrix);
+    } catch (e) {
+      // ExcelJS can throw while a cell is read (odd numbers, broken styles): a refusal, not a 500.
+      throw e instanceof ImportFileError ? e : new ImportFileError("unreadable");
+    }
   }
 
   if (bytes.includes(0)) throw new ImportFileError("unreadable"); // binary, not text

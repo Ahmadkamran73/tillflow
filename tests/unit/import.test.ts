@@ -439,11 +439,7 @@ describe("zip parser differentials (what the check sees is what ExcelJS reads)",
   });
 
   it("refuses a zip with bytes in front, which would shift JSZip's offsets", async () => {
-    const zip = zipParts(
-      [{ name: "xl/worksheets/sheet1.xml", size: BOMB }],
-      1,
-      64,
-    );
+    const zip = zipParts([{ name: "xl/worksheets/sheet1.xml", size: BOMB }], 1, 64);
     expect(await code("prefixed.xlsx", zip)).toBe("unreadable");
   });
 
@@ -456,22 +452,20 @@ describe("zip parser differentials (what the check sees is what ExcelJS reads)",
   });
 
   it("refuses any disk-number field that would switch JSZip to zip64, where it reads another directory", async () => {
+    const base = zipParts([{ name: "xl/worksheets/sheet1.xml", size: BOMB }]); // deflating 150 MB once
     for (const field of [4, 6, 8]) {
-      const zip = zipParts([{ name: "xl/worksheets/sheet1.xml", size: BOMB }]);
+      const zip = Buffer.from(base);
       zip.writeUInt16LE(0xffff, zip.length - 22 + field);
       expect(await code("zip64.xlsx", zip)).toBe("unreadable");
     }
-  });
+  }, 30_000);
 
   it("still accepts a normal workbook written by ExcelJS (data descriptors, comments and all)", async () => {
     const book = new ExcelJS.Workbook();
     const sheet = book.addWorksheet("Products");
     sheet.addRow(["Name", "Price"]);
     for (let i = 0; i < 500; i++) sheet.addRow([`Item ${i}`, i]);
-    const p = await parseUpload(
-      "ok.xlsx",
-      Buffer.from(await book.xlsx.writeBuffer()),
-    );
+    const p = await parseUpload("ok.xlsx", Buffer.from(await book.xlsx.writeBuffer()));
     expect(p.rows).toHaveLength(500);
   });
 });
