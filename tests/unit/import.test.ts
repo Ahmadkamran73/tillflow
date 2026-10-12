@@ -381,3 +381,89 @@ describe("upload abuse limits", () => {
     expect(r.items[1]!.variants[0]!.attr_set).toEqual(["depositCents"]);
   });
 });
+/**
+ * A zip with several parts, built by hand so a test can lie in the headers. `declared` is the entry
+ * count written in the end record; `prefix` bytes are put in front (offsets then no longer match).
+ */
+function zipParts(
+  parts: { name: string; size: number }[],
+  declared = parts.length,
+  prefix = 0,
+): Buffer {
+  const locals: Buffer[] = [];
+  const centrals: Buffer[] = [];
+  let offset = 0;
+  for (const part of parts) {
+    const data = deflateRawSync(Buffer.alloc(part.size));
+    const name = Buffer.from(part.name);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(8, 8);
+    local.writeUInt32LE(data.length, 18);
+    local.writeUInt32LE(part.size, 22);
+    local.writeUInt16LE(name.length, 26);
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(8, 10);
+    central.writeUInt32LE(data.length, 20);
+    central.writeUInt32LE(part.size, 24);
+    central.writeUInt16LE(name.length, 28);
+    central.writeUInt32LE(offset, 42);
+    locals.push(local, name, data);
+    centrals.push(central, name);
+    offset += local.length + name.length + data.length;
+  }
+  const dir = Buffer.concat(centrals);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(declared, 8);
+  end.writeUInt16LE(declared, 10);
+  end.writeUInt32LE(dir.length, 12);
+  end.writeUInt32LE(offset, 16);
+  return Buffer.concat([Buffer.alloc(prefix, 0x41), ...locals, dir, end]);
+}
+
+describe("zip parser differentials (what the check sees is what ExcelJS reads)", () => {
+  const BOMB = 150 * 1024 * 1024;
+
+  it("refuses a directory that holds more entries than the end record declares", async () => {
+    // The end record says 1 entry; JSZip would read all 2 and inflate the bomb.
+    const zip = zipParts(
+      [
+        { name: "[Content_Types].xml", size: 10 },
+        { name: "xl/worksheets/sheet1.xml", size: BOMB },
+      ],
+      1,
+    );
+    expect(["size", "unreadable"]).toContain(await code("sneaky.xlsx", zip));
+  });
+
+  it("refuses a zip with bytes in front, which would shift JSZip's offsets", async () => {
+    const zip = zipParts(
+      [{ name: "xl/worksheets/sheet1.xml", size: BOMB }],
+      1,
+      64,
+    );
+    expect(await code("prefixed.xlsx", zip)).toBe("unreadable");
+  });
+
+  it("refuses several modest parts that together pass the cap, and counts the real output", async () => {
+    const parts = Array.from({ length: 3 }, (_, i) => ({
+      name: `xl/p${i}.xml`,
+      size: 40 * 1024 * 1024,
+    }));
+    expect(await code("many.xlsx", zipParts(parts))).toBe("size");
+  });
+
+  it("still accepts a normal workbook written by ExcelJS (data descriptors, comments and all)", async () => {
+    const book = new ExcelJS.Workbook();
+    const sheet = book.addWorksheet("Products");
+    sheet.addRow(["Name", "Price"]);
+    for (let i = 0; i < 500; i++) sheet.addRow([`Item ${i}`, i]);
+    const p = await parseUpload(
+      "ok.xlsx",
+      Buffer.from(await book.xlsx.writeBuffer()),
+    );
+    expect(p.rows).toHaveLength(500);
+  });
+});

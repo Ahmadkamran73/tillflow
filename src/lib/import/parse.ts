@@ -23,12 +23,23 @@ function assertZipIsSafe(zip: Buffer): void {
     }
   }
   if (eocd < 0) throw bad();
-  const entries = zip.readUInt16LE(eocd + 10);
-  let at = zip.readUInt32LE(eocd + 16);
-  if (entries > MAX_ZIP_ENTRIES || entries === 0xffff || at === 0xffffffff) throw bad();
+  const declared = zip.readUInt16LE(eocd + 10);
+  const dirSize = zip.readUInt32LE(eocd + 12);
+  const dirStart = zip.readUInt32LE(eocd + 16);
+  if (declared > MAX_ZIP_ENTRIES || declared === 0xffff || dirSize === 0xffffffff || dirStart === 0xffffffff) {
+    throw bad();
+  }
+  // JSZip (inside ExcelJS) moves every offset by the bytes found between the directory and this
+  // record, and reads headers until the signature stops matching, whatever count is declared. To make
+  // sure it sees exactly what is checked here, the directory must end exactly at this record and every
+  // header up to it is inspected.
+  if (dirStart + dirSize !== eocd) throw bad();
   let total = 0;
-  for (let n = 0; n < entries; n++) {
-    if (at + 46 > zip.length || zip.readUInt32LE(at) !== 0x02014b50) throw bad();
+  let count = 0;
+  let at = dirStart;
+  while (at < eocd) {
+    if (++count > MAX_ZIP_ENTRIES) throw bad();
+    if (at + 46 > eocd || zip.readUInt32LE(at) !== 0x02014b50) throw bad();
     const method = zip.readUInt16LE(at + 10);
     const compressed = zip.readUInt32LE(at + 20);
     const local = zip.readUInt32LE(at + 42);
@@ -48,6 +59,7 @@ function assertZipIsSafe(zip: Buffer): void {
     if (total > MAX_UNZIPPED_BYTES) throw new ImportFileError("size");
     at = next;
   }
+  if (at !== eocd || count !== declared) throw bad();
 }
 
 export type ImportErrorCode = "sql" | "type" | "size" | "rows" | "columns" | "empty" | "unreadable";
