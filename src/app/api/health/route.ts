@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { xlsxStatusPeek } from "@/lib/import/sandbox";
 import { heartbeatAgeSeconds } from "@/lib/ops/db";
 
 export const dynamic = "force-dynamic";
@@ -37,6 +38,8 @@ export async function GET() {
     version: process.env.APP_VERSION ?? "unknown",
     commit: process.env.APP_COMMIT ?? "unknown",
     environment: process.env.NEXT_PUBLIC_APP_ENV ?? "unknown",
+    // "disabled" (the default), "unchecked", "ready" or "unavailable": the Excel importer, see docs/specs/bulk-import.md
+    importXlsx: xlsxStatusPeek(),
   };
   const headers = { "Cache-Control": "no-store" };
   try {

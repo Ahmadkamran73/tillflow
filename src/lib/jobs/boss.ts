@@ -18,6 +18,8 @@ export type JobHandler<S extends z.ZodType = z.ZodType> = {
   /** Cron in Europe/Dublin time, for scheduled jobs. */
   cron?: string;
   handle: (data: z.infer<S>) => Promise<void>;
+  /** Queue settings that differ from DEFAULT_QUEUE_OPTIONS (long-running jobs). */
+  queue?: Partial<Omit<Queue, "name">>;
 };
 
 /**

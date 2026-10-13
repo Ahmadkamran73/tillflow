@@ -1,5 +1,6 @@
 import { catalogEnIE } from "./catalog-en-IE";
 import { customersEnIE } from "./customers-en-IE";
+import { importEnIE } from "./import-en-IE";
 import { deviceEnIE } from "./device-en-IE";
 import { inventoryEnIE } from "./inventory-en-IE";
 import { refundsEnIE } from "./refunds-en-IE";
@@ -182,6 +183,7 @@ export const enIE = {
   ...tendersEnIE,
   ...refundsEnIE,
   ...customersEnIE,
+  ...importEnIE,
   ...restaurantEnIE,
 } as const;
 

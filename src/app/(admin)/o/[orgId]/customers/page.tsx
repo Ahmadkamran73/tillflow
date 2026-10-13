@@ -45,9 +45,14 @@ export default async function CustomersPage({
     <section className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-title font-semibold tracking-tight">{t("customers.title")}</h1>
-        <Link href={`/o/${orgId}/customers/new`} className={buttonVariants({ size: "touch" })}>
-          {t("customers.add")}
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link href={`/o/${orgId}/products/import?type=customers`} className={pill}>
+            {t("import.link.customers")}
+          </Link>
+          <Link href={`/o/${orgId}/customers/new`} className={buttonVariants({ size: "touch" })}>
+            {t("customers.add")}
+          </Link>
+        </div>
       </div>
       <p className="text-muted-foreground max-w-3xl text-sm">{t("customers.intro")}</p>
 

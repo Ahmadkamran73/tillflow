@@ -56,6 +56,14 @@ export default async function InventoryPage({
     <section className="flex flex-col gap-4">
       <h1 className="text-title font-semibold tracking-tight">{t("inventory.title")}</h1>
       <p className="text-muted-foreground max-w-3xl text-sm">{t("inventory.intro")}</p>
+      <div>
+        <Link
+          href={`/o/${orgId}/products/import?type=stock`}
+          className="border-border inline-flex h-12 items-center rounded-full border px-5 text-sm font-medium"
+        >
+          {t("import.link.stock")}
+        </Link>
+      </div>
 
       <div className="surface-panel flex flex-col gap-1 p-5">
         <p className="text-muted-foreground font-mono text-xs tracking-wide">
