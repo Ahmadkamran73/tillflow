@@ -503,3 +503,82 @@ describe("customer import: erasure and retries", () => {
     });
   });
 });
+
+describe("preview lookup, saved matches and file retention", () => {
+  it("import_stock_keys tells tracked from untracked products, this shop only, managers only", async () => {
+    await inWorld(async (ctx) => {
+      const { a, b } = ctx.world;
+      await product(ctx, a, "T1", { barcode: "5391", stock: 1 });
+      await product(ctx, a, "U1", { track: false });
+      await product(ctx, b, "B1");
+      const ask = (who: Actor | null, org: string, by = "sku") =>
+        ctx.as(who, async () => {
+          const r =
+            await ctx.sql`select public.import_stock_keys(${org}, ${["T1", "U1", "B1", "X"]}::text[], ${by}) as r`;
+          return r[0]!.r as { tracked: string[]; untracked: string[] };
+        });
+      const r = await ask(a.manager, a.orgId);
+      expect([r.tracked, r.untracked]).toEqual([["T1"], ["U1"]]);
+      expect((await ask(b.manager, a.orgId)).tracked).toEqual([]);
+      const bc = await ctx.as(a.manager, async () => {
+        const x =
+          await ctx.sql`select public.import_stock_keys(${a.orgId}, ${["5391"]}::text[], 'barcode') as r`;
+        return x[0]!.r as { tracked: string[] };
+      });
+      expect(bc.tracked).toEqual(["5391"]);
+    });
+  });
+
+  it("customer files expire after 24 hours, other files after 7 days, and the purge removes them", async () => {
+    await inWorld(async (ctx) => {
+      const { a } = ctx.world;
+      const hours = async (id: string) =>
+        Number(
+          (
+            await ctx.sql`select extract(epoch from (expires_at - now()))/3600 as h from import_files where import_id = ${id}`
+          )[0]!.h,
+        );
+      const up = async (type: Kind) => {
+        const id = randomUUID();
+        await ctx.as(
+          a.manager,
+          () =>
+            ctx.sql`select public.create_import(${a.orgId}, ${id}, 'f.csv', ${Buffer.from("A\n1")}, ${1}, ${type})`,
+        );
+        return id;
+      };
+      const c = await up("customers");
+      expect(await hours(c)).toBeLessThanOrEqual(24);
+      expect(await hours(c)).toBeGreaterThan(23);
+      const s = await up("stock"); // a new upload replaces the unstarted one
+      expect(await hours(s)).toBeGreaterThan(160);
+      const c2 = await up("customers");
+      await ctx.sql`update import_files set expires_at = now() - interval '1 second' where import_id = ${c2}`;
+      await ctx.sql`select ops.import_purge()`;
+      expect(
+        (await ctx.sql`select count(*)::int as n from import_files where import_id = ${c2}`)[0]!.n,
+      ).toBe(0);
+    });
+  });
+
+  it("saved matches are per kind: the same name can exist for products and customers", async () => {
+    await inWorld(async (ctx) => {
+      const { a } = ctx.world;
+      const save = (type: string) =>
+        ctx.as(
+          a.manager,
+          () =>
+            ctx.sql`insert into import_mappings (id, org_id, type, name, mapping) values (${randomUUID()}, ${a.orgId}, ${type}, 'My file', '{}'::jsonb)`,
+        );
+      await save("products");
+      await save("customers");
+      await ctx.denied(() => save("customers"), ["23505"]);
+      await ctx.denied(() => save("suppliers"), ["23514"]);
+      const rows = await ctx.as(
+        a.manager,
+        () => ctx.sql`select type from import_mappings where org_id = ${a.orgId} order by type`,
+      );
+      expect(rows.map((r) => r.type)).toEqual(["customers", "products"]);
+    });
+  });
+});

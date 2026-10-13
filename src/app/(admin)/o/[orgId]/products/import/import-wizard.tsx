@@ -111,10 +111,12 @@ export function ImportWizard({
     if (error) alertRef.current?.focus();
   }, [error]);
 
+  // Saved matches belong to one kind of import: a product match is never offered for customers.
+  const mapType = up?.importType ?? importType;
   const loadSaved = useCallback(async () => {
-    const res = await fetch(`/api/v1/imports/mappings?orgId=${orgId}`);
+    const res = await fetch(`/api/v1/imports/mappings?orgId=${orgId}&type=${mapType}`);
     if (res.ok) setSaved((await res.json()) as Saved[]);
-  }, [orgId]);
+  }, [orgId, mapType]);
   useEffect(() => {
     void loadSaved();
   }, [loadSaved]);
@@ -268,7 +270,7 @@ export function ImportWizard({
     const r = await call<{ id: string }>("/api/v1/imports/mappings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ orgId, name: saveName, mapping }),
+      body: JSON.stringify({ orgId, type: mapType, name: saveName, mapping }),
     });
     if (!r.ok) {
       setErrorField("save");

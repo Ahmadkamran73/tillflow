@@ -156,6 +156,8 @@ export const importEnIE = {
   "import.err.stockQtyZero": "A delivery must be at least 1.",
   "import.err.stockNote": "The note can be up to 200 characters.",
   "import.err.stockNotFound": "No product with this SKU or barcode in your shop.",
+  "import.err.stockUntracked":
+    "This product does not track stock, so its stock cannot be changed. Turn on stock tracking on the product first.",
   "import.err.dupEmail": "This email is already used on row {row} of the file.",
   "import.err.cName": "Enter a name of up to 120 characters.",
   "import.err.cEmail": "Enter a valid email address.",

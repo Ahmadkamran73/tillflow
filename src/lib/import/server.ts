@@ -89,6 +89,31 @@ async function existingKeys(
   return found;
 }
 
+/** Which SKUs/barcodes belong to a product that tracks stock, and which to one that does not. */
+async function stockKeys(
+  supabase: SupabaseClient,
+  orgId: string,
+  by: "sku" | "barcode",
+  keys: string[],
+): Promise<{ tracked: Set<string>; untracked: Set<string> }> {
+  const tracked = new Set<string>();
+  const untracked = new Set<string>();
+  for (let i = 0; i < keys.length; i += CHUNK) {
+    const { data, error } = await supabase.rpc("import_stock_keys", {
+      p_org: orgId,
+      p_keys: keys.slice(i, i + CHUNK),
+      p_by: by,
+    });
+    if (error) throw error;
+    const res = z
+      .object({ tracked: z.array(z.string()), untracked: z.array(z.string()) })
+      .parse(data);
+    for (const k of res.tracked) tracked.add(k);
+    for (const k of res.untracked) untracked.add(k);
+  }
+  return { tracked, untracked };
+}
+
 /**
  * Re-reads the stored upload and checks it with the chosen mapping: what would be created, updated or
  * skipped, and every row that cannot be imported. Reads only (RLS applies).
@@ -120,7 +145,7 @@ export async function analyse(
       key,
       settings.mode === "received" ? "received" : "count",
     );
-    const existing = await existingKeys(
+    const { tracked, untracked } = await stockKeys(
       supabase,
       orgId,
       key,
@@ -129,8 +154,11 @@ export async function analyse(
     const errors = [...built.errors];
     let matched = 0;
     for (const item of built.items) {
-      if (existing.has(item.key)) matched += 1;
-      else errors.push({ row: item.rows[0]!, field: key, message: t("import.err.stockNotFound") });
+      const row = item.rows[0]!;
+      if (tracked.has(item.key)) matched += 1;
+      else if (untracked.has(item.key))
+        errors.push({ row, field: key, message: t("import.err.stockUntracked") });
+      else errors.push({ row, field: key, message: t("import.err.stockNotFound") });
     }
     errors.sort((a, b) => a.row - b.row);
     return {

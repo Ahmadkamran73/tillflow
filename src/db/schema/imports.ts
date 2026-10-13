@@ -95,12 +95,15 @@ export const importMappings = pgTable(
   {
     id: uuid("id").primaryKey(),
     orgId: orgCol(),
+    /** Which kind of import it is for (a product match is not offered for a customer file). */
+    type: text("type").notNull().default("products"),
     name: text("name").notNull(),
     mapping: jsonb("mapping").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    unique("import_mappings_org_name_key").on(t.orgId, t.name),
+    unique("import_mappings_org_type_name_key").on(t.orgId, t.type, t.name),
+    check("import_mappings_type", sql`${t.type} in ('products','stock','customers')`),
     check("import_mappings_name", sql`char_length(btrim(${t.name})) between 1 and 60`),
     check("import_mappings_size", sql`octet_length(${t.mapping}::text) <= 8000`),
   ],

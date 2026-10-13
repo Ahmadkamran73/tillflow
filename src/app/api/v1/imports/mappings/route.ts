@@ -3,30 +3,34 @@ import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { authorizeApi, createSupabaseServerClient } from "@/lib/auth";
 import { t } from "@/lib/i18n";
-import { mappingSchema } from "@/lib/import/server";
+import { importTypeSchema, mappingSchema } from "@/lib/import/server";
 
 export const dynamic = "force-dynamic";
 
 const orgParam = (request: NextRequest) =>
   z.uuid().safeParse(request.nextUrl.searchParams.get("orgId"));
 
-/** GET /api/v1/imports/mappings?orgId=: this shop's saved column mappings. */
+/** GET /api/v1/imports/mappings?orgId=&type=: this shop's saved column mappings for one kind of import. */
 export async function GET(request: NextRequest) {
   const orgId = orgParam(request);
   if (!orgId.success) return new Response(null, { status: 404 });
   const auth = await authorizeApi(["owner", "manager"], orgId.data);
   if (!auth.ok) return new Response(null, { status: auth.status });
+  const type = importTypeSchema.safeParse(request.nextUrl.searchParams.get("type") ?? "products");
+  if (!type.success) return new Response(null, { status: 400 });
   const supabase = await createSupabaseServerClient();
   const { data } = await supabase
     .from("import_mappings")
     .select("id, name, mapping")
     .eq("org_id", orgId.data)
+    .eq("type", type.data)
     .order("name");
   return Response.json(data ?? [], { headers: { "Cache-Control": "no-store" } });
 }
 
 const create = z.object({
   orgId: z.uuid(),
+  type: importTypeSchema.default("products"),
   name: z.string().trim().min(1).max(60),
   mapping: mappingSchema,
 });
@@ -43,6 +47,7 @@ export async function POST(request: NextRequest) {
   const { error } = await supabase.from("import_mappings").insert({
     id,
     org_id: parsed.data.orgId,
+    type: parsed.data.type,
     name: parsed.data.name,
     mapping: parsed.data.mapping,
   });

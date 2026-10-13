@@ -190,6 +190,13 @@
       "when": 1791881238589,
       "tag": "0042_import_types",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1791886733365,
+      "tag": "0044_import_mapping_type",
+      "breakpoints": true
     }
   ]
 }
