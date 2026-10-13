@@ -1,7 +1,9 @@
 // @vitest-environment node
 import { deflateRawSync } from "node:zlib";
 import ExcelJS from "exceljs";
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { resetSandboxForTests } from "@/lib/import/sandbox";
+import { readXlsx } from "@/lib/import/sandbox/xlsx-read.mjs";
 import { ImportFileError, parseUpload } from "@/lib/import/parse";
 import {
   canonicalXlsx,
@@ -13,6 +15,16 @@ import {
 import { BASE, buildZip, listMethods, listNames, type Entry } from "./zip-builder";
 
 const MB = 1024 * 1024;
+
+vi.setConfig({ testTimeout: 60_000 });
+beforeAll(() => {
+  process.env.IMPORT_XLSX_ENABLED = "true";
+  resetSandboxForTests();
+});
+afterAll(() => {
+  delete process.env.IMPORT_XLSX_ENABLED;
+  resetSandboxForTests();
+});
 const bytes = (s: string) => Buffer.from(s, "utf8");
 
 /** The error code canonicalXlsx throws, or null when it accepts. */
@@ -311,7 +323,7 @@ describe("canonicalXlsx: size caps are enforced on the inflated bytes", () => {
   });
 });
 
-describe("parseUpload: ExcelJS only ever reads the canonical zip", () => {
+describe("readXlsx (the sandboxed child's reader): ExcelJS only ever reads the canonical zip", () => {
   async function featureRichWorkbook(): Promise<Buffer> {
     const book = new ExcelJS.Workbook();
     const png = book.addImage({
@@ -357,7 +369,7 @@ describe("parseUpload: ExcelJS only ever reads the canonical zip", () => {
     };
     const spy = vi.spyOn(proto, "load");
     try {
-      const parsed = await parseUpload("products.xlsx", upload);
+      const parsed = await readXlsx(upload);
       expect(spy).toHaveBeenCalledTimes(1);
       const received = spy.mock.calls[0]?.[0] as Buffer;
       expect(Buffer.isBuffer(received)).toBe(true);
@@ -369,8 +381,8 @@ describe("parseUpload: ExcelJS only ever reads the canonical zip", () => {
       expect(new Set(listMethods(received))).toEqual(new Set([0]));
       expect(parsed.headers).toEqual(["Name", "Price", "Link"]);
       // 4 product rows, plus the 2 rows of the table the workbook also holds
-      expect(parsed.rows).toHaveLength(6);
-      expect(parsed.rows[1]).toEqual({ Name: "Item 1", Price: "1.5", Link: "site" });
+      expect(parsed.matrix).toHaveLength(6);
+      expect(parsed.matrix[1]).toEqual(["Item 1", "1.5", "site"]);
     } finally {
       spy.mockRestore();
     }
@@ -382,9 +394,9 @@ describe("parseUpload: ExcelJS only ever reads the canonical zip", () => {
     };
     const spy = vi.spyOn(proto, "load");
     try {
-      // Passes the cheap early guard (structure fine, small) but has a lying CRC.
+      // Structurally fine and small, but a lying CRC.
       const zip = withBase({ name: "xl/styles.xml", data: bytes("<s/>"), crc: 7 });
-      await expect(parseUpload("bad.xlsx", zip)).rejects.toMatchObject({ code: "unreadable" });
+      await expect(readXlsx(zip)).rejects.toMatchObject({ code: "unreadable" });
       expect(spy).not.toHaveBeenCalled();
     } finally {
       spy.mockRestore();
@@ -400,14 +412,14 @@ describe("parseUpload: ExcelJS only ever reads the canonical zip", () => {
     const odd = sheet.getCell("B3");
     odd.value = 1e15;
     odd.numFmt = "yyyy-mm-dd";
-    const parsed = await parseUpload("dates.xlsx", Buffer.from(await book.xlsx.writeBuffer()));
-    expect(parsed.rows).toEqual([
-      { Name: "Tea", Price: "3" },
-      { Name: "Odd", Price: "" },
+    const parsed = await readXlsx(Buffer.from(await book.xlsx.writeBuffer()));
+    expect(parsed.matrix).toEqual([
+      ["Tea", "3"],
+      ["Odd", ""],
     ]);
   });
 
-  it("maps the refusal codes to the user-facing import errors", async () => {
+  it("maps the refusal codes to the user-facing import errors (through the real sandbox)", async () => {
     const bomb = withBase({ name: "xl/worksheets/sheet1.xml", data: Buffer.alloc(33 * MB) });
     const err = await parseUpload("bomb.xlsx", bomb).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ImportFileError);

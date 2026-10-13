@@ -1,11 +1,22 @@
 // @vitest-environment node
 import fs from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { resetSandboxForTests } from "@/lib/import/sandbox";
 import { parseUpload } from "@/lib/import/parse";
 
 // Genuine Excel / LibreOffice / Google Sheets exports. See tests/fixtures/xlsx-real/README.md.
 // With no files this whole group is skipped, and the todo below keeps the gap visible in every run.
+
+vi.setConfig({ testTimeout: 60_000 });
+beforeAll(() => {
+  process.env.IMPORT_XLSX_ENABLED = "true";
+  resetSandboxForTests();
+});
+afterAll(() => {
+  delete process.env.IMPORT_XLSX_ENABLED;
+  resetSandboxForTests();
+});
 
 const dir = path.join(process.cwd(), "tests", "fixtures", "xlsx-real");
 const files = fs.existsSync(dir)

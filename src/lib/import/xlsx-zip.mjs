@@ -249,7 +249,7 @@ export function canonicalXlsx(zip) {
  * Our own zip: stored (no compression), fixed timestamps, ASCII names, no extras or comments.
  * @param {{ name: Buffer, data: Buffer, crc: number }[]} parts
  */
-function writeStoredZip(parts) {
+export function writeStoredZip(parts) {
   const chunks = [];
   const central = [];
   let offset = 0;

@@ -12,6 +12,8 @@ export const importEnIE = {
 
   "import.upload.label": "Product file",
   "import.upload.hint": "Excel (.xlsx), CSV or JSON. Up to 10 MB and 50,000 rows.",
+  "import.upload.hintNoExcel":
+    "CSV or JSON, up to 10 MB and 50,000 rows. Excel files are switched off for now: save your sheet as CSV first (File > Save As > CSV).",
   "import.upload.button": "Upload and continue",
   "import.upload.busy": "Uploading and reading the file…",
   "import.template.title": "Start from a template",
@@ -89,6 +91,13 @@ export const importEnIE = {
   "import.err.rows": "That file has more than 50,000 rows. Split it into smaller files.",
   "import.err.columns": "That file has more than 60 columns.",
   "import.err.empty": "That file has no product rows.",
+  "import.err.xlsx_disabled":
+    "Excel files (.xlsx) can't be imported yet. Save your sheet as CSV (File > Save As > CSV) and upload that.",
+  "import.err.xlsx_unavailable":
+    "Excel import isn't available right now. Save your sheet as CSV and upload that, or try again later.",
+  "import.err.complex":
+    "That Excel file is too large or complex to read safely. Save it as CSV and upload that.",
+  "import.err.parser_busy": "The Excel reader is busy. Please try again in a minute.",
   "import.err.unreadable": "We couldn't read that file. Check it opens in Excel, then try again.",
   "import.err.limit": "You've started a lot of imports. Please try again in an hour.",
   "import.err.busy": "An import is already running for this shop. Wait for it to finish.",

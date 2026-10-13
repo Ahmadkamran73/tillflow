@@ -7,6 +7,7 @@ import { REQUIRED } from "@/lib/import/fields";
 import { ImportFileError } from "@/lib/import/parse";
 import { analyse, fileErrorMessage, settingsSchema } from "@/lib/import/server";
 import { getOrganisation } from "@/lib/org";
+import { rateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +32,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   const org = await getOrganisation(orgId);
   if (!org) return new Response(null, { status: 404 });
+  // Every preview re-reads the stored file (an Excel file starts a parser process): count it per shop.
+  if (!(await rateLimit("import-reparse", orgId)).allowed) {
+    return json({ error: t("import.err.limit") }, 429);
+  }
   try {
     const supabase = await createSupabaseServerClient();
     const a = await analyse(

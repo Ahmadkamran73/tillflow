@@ -1,11 +1,24 @@
-import { deflateRawSync } from "node:zlib";
+// @vitest-environment node
 import ExcelJS from "exceljs";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { errorsCsv } from "@/lib/import/errors-file";
 import type { Mapping } from "@/lib/import/fields";
 import { ImportFileError, MAX_ROWS, parseUpload } from "@/lib/import/parse";
 import { autoMatch, detectSource } from "@/lib/import/presets";
+import { resetSandboxForTests } from "@/lib/import/sandbox";
 import { buildItems, derivedId, taxCategoryFrom } from "@/lib/import/validate";
+import { BASE, buildZip } from "./zip-builder";
+
+// Excel files are read by a separate, restricted process; switch the feature on for these tests.
+vi.setConfig({ testTimeout: 60_000 });
+beforeAll(() => {
+  process.env.IMPORT_XLSX_ENABLED = "true";
+  resetSandboxForTests();
+});
+afterAll(() => {
+  delete process.env.IMPORT_XLSX_ENABLED;
+  resetSandboxForTests();
+});
 
 const ID = "0197f3a0-0000-7000-8000-000000000001";
 const buf = (s: string) => Buffer.from(s, "utf8");
@@ -311,35 +324,10 @@ describe("buildItems", () => {
     expect(Date.now() - t0).toBeLessThan(15_000);
   });
 });
-/** A minimal one-part zip whose single file inflates to `size` zero bytes (sizes in the headers are honest). */
-function zipOf(size: number): Buffer {
-  const data = deflateRawSync(Buffer.alloc(size));
-  const name = Buffer.from("xl/big.xml");
-  const local = Buffer.alloc(30);
-  local.writeUInt32LE(0x04034b50, 0);
-  local.writeUInt16LE(8, 8);
-  local.writeUInt32LE(data.length, 18);
-  local.writeUInt32LE(size, 22);
-  local.writeUInt16LE(name.length, 26);
-  const central = Buffer.alloc(46);
-  central.writeUInt32LE(0x02014b50, 0);
-  central.writeUInt16LE(8, 10);
-  central.writeUInt32LE(data.length, 20);
-  central.writeUInt32LE(size, 24);
-  central.writeUInt16LE(name.length, 28);
-  const cdOffset = local.length + name.length + data.length;
-  const end = Buffer.alloc(22);
-  end.writeUInt32LE(0x06054b50, 0);
-  end.writeUInt16LE(1, 8);
-  end.writeUInt16LE(1, 10);
-  end.writeUInt32LE(central.length + name.length, 12);
-  end.writeUInt32LE(cdOffset, 16);
-  return Buffer.concat([local, name, data, central, name, end]);
-}
 
 describe("upload abuse limits", () => {
   it("refuses an xlsx that inflates past the cap", async () => {
-    const bomb = zipOf(150 * 1024 * 1024);
+    const bomb = buildZip([...BASE, { name: "xl/worksheets/sheet1.xml", data: Buffer.alloc(150 * 1024 * 1024) }]);
     expect(bomb.length).toBeLessThan(1024 * 1024);
     expect(await code("bomb.xlsx", bomb)).toBe("size");
   });
@@ -381,86 +369,8 @@ describe("upload abuse limits", () => {
     expect(r.items[1]!.variants[0]!.attr_set).toEqual(["depositCents"]);
   });
 });
-/**
- * A zip with several parts, built by hand so a test can lie in the headers. `declared` is the entry
- * count written in the end record; `prefix` bytes are put in front (offsets then no longer match).
- */
-function zipParts(
-  parts: { name: string; size: number }[],
-  declared = parts.length,
-  prefix = 0,
-): Buffer {
-  const locals: Buffer[] = [];
-  const centrals: Buffer[] = [];
-  let offset = 0;
-  for (const part of parts) {
-    const data = deflateRawSync(Buffer.alloc(part.size));
-    const name = Buffer.from(part.name);
-    const local = Buffer.alloc(30);
-    local.writeUInt32LE(0x04034b50, 0);
-    local.writeUInt16LE(8, 8);
-    local.writeUInt32LE(data.length, 18);
-    local.writeUInt32LE(part.size, 22);
-    local.writeUInt16LE(name.length, 26);
-    const central = Buffer.alloc(46);
-    central.writeUInt32LE(0x02014b50, 0);
-    central.writeUInt16LE(8, 10);
-    central.writeUInt32LE(data.length, 20);
-    central.writeUInt32LE(part.size, 24);
-    central.writeUInt16LE(name.length, 28);
-    central.writeUInt32LE(offset, 42);
-    locals.push(local, name, data);
-    centrals.push(central, name);
-    offset += local.length + name.length + data.length;
-  }
-  const dir = Buffer.concat(centrals);
-  const end = Buffer.alloc(22);
-  end.writeUInt32LE(0x06054b50, 0);
-  end.writeUInt16LE(declared, 8);
-  end.writeUInt16LE(declared, 10);
-  end.writeUInt32LE(dir.length, 12);
-  end.writeUInt32LE(offset, 16);
-  return Buffer.concat([Buffer.alloc(prefix, 0x41), ...locals, dir, end]);
-}
-
-describe("zip parser differentials (what the check sees is what ExcelJS reads)", () => {
-  const BOMB = 150 * 1024 * 1024;
-
-  it("refuses a directory that holds more entries than the end record declares", async () => {
-    // The end record says 1 entry; JSZip would read all 2 and inflate the bomb.
-    const zip = zipParts(
-      [
-        { name: "[Content_Types].xml", size: 10 },
-        { name: "xl/worksheets/sheet1.xml", size: BOMB },
-      ],
-      1,
-    );
-    expect(["size", "unreadable"]).toContain(await code("sneaky.xlsx", zip));
-  });
-
-  it("refuses a zip with bytes in front, which would shift JSZip's offsets", async () => {
-    const zip = zipParts([{ name: "xl/worksheets/sheet1.xml", size: BOMB }], 1, 64);
-    expect(await code("prefixed.xlsx", zip)).toBe("unreadable");
-  });
-
-  it("refuses several modest parts that together pass the cap, and counts the real output", async () => {
-    const parts = Array.from({ length: 3 }, (_, i) => ({
-      name: `xl/p${i}.xml`,
-      size: 40 * 1024 * 1024,
-    }));
-    expect(await code("many.xlsx", zipParts(parts))).toBe("size");
-  });
-
-  it("refuses any disk-number field that would switch JSZip to zip64, where it reads another directory", async () => {
-    const base = zipParts([{ name: "xl/worksheets/sheet1.xml", size: BOMB }]); // deflating 150 MB once
-    for (const field of [4, 6, 8]) {
-      const zip = Buffer.from(base);
-      zip.writeUInt16LE(0xffff, zip.length - 22 + field);
-      expect(await code("zip64.xlsx", zip)).toBe("unreadable");
-    }
-  }, 30_000);
-
-  it("still accepts a normal workbook written by ExcelJS (data descriptors, comments and all)", async () => {
+describe("xlsx through the isolated parser (zip-level attacks: import-xlsx-zip.test.ts; sandbox: import-sandbox.test.ts)", () => {
+  it("accepts a normal workbook written by ExcelJS (data descriptors, comments and all)", async () => {
     const book = new ExcelJS.Workbook();
     const sheet = book.addWorksheet("Products");
     sheet.addRow(["Name", "Price"]);

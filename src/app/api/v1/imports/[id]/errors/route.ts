@@ -5,6 +5,7 @@ import { errorsCsv } from "@/lib/import/errors-file";
 import { ImportFileError } from "@/lib/import/parse";
 import { analyse, settingsSchema } from "@/lib/import/server";
 import { getOrganisation } from "@/lib/org";
+import { rateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +26,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!auth.ok) return new Response(null, { status: auth.status });
   const org = await getOrganisation(orgId);
   if (!org) return new Response(null, { status: 404 });
+  // Same budget as the preview: this also re-reads the stored file.
+  if (!(await rateLimit("import-reparse", orgId)).allowed) return new Response(null, { status: 429 });
   try {
     const supabase = await createSupabaseServerClient();
     const a = await analyse(

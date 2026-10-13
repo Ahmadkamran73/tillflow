@@ -53,7 +53,7 @@ async function call<T>(
   return { ok: res.ok, data };
 }
 
-export function ImportWizard({ orgId }: { orgId: string }) {
+export function ImportWizard({ orgId, xlsx }: { orgId: string; xlsx: boolean }) {
   const [step, setStep] = useState<Step>("upload");
   const [up, setUp] = useState<Uploaded | null>(null);
   const [mapping, setMapping] = useState<Mapping>({});
@@ -283,7 +283,7 @@ export function ImportWizard({ orgId }: { orgId: string }) {
             id="import-file"
             name="file"
             type="file"
-            accept=".xlsx,.csv,.json"
+            accept={xlsx ? ".xlsx,.csv,.json" : ".csv,.json"}
             required
             aria-invalid={errorField === "file" && !!error}
             aria-describedby={
@@ -292,7 +292,7 @@ export function ImportWizard({ orgId }: { orgId: string }) {
             className={control + " py-2.5"}
           />
           <p id="import-file-hint" className="text-muted-foreground text-sm">
-            {t("import.upload.hint")}
+            {t(xlsx ? "import.upload.hint" : "import.upload.hintNoExcel")}
           </p>
         </div>
         <p className="text-muted-foreground text-sm">{t("import.sql")}</p>
@@ -316,12 +316,14 @@ export function ImportWizard({ orgId }: { orgId: string }) {
           >
             {t("import.template.csv")}
           </a>
-          <a
-            className="inline-flex min-h-12 items-center text-sm underline underline-offset-4"
-            href={`/api/v1/imports/template?orgId=${orgId}&format=xlsx`}
-          >
-            {t("import.template.xlsx")}
-          </a>
+          {xlsx ? (
+            <a
+              className="inline-flex min-h-12 items-center text-sm underline underline-offset-4"
+              href={`/api/v1/imports/template?orgId=${orgId}&format=xlsx`}
+            >
+              {t("import.template.xlsx")}
+            </a>
+          ) : null}
         </div>
       </form>
     );
