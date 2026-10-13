@@ -2,15 +2,20 @@ import "server-only";
 import { z } from "zod";
 import type { BusinessType } from "@/config/business-type-presets";
 import { buildItems, type RowError } from "@/lib/import/validate";
+import { buildCustomerItems } from "@/lib/import/validate-customers";
+import { buildStockItems } from "@/lib/import/validate-stock";
 import { parseUpload } from "@/lib/import/parse";
 import { t } from "@/lib/i18n";
 import { logger } from "@/lib/logger";
 import {
   importApplyBatch,
+  importApplyCustomers,
+  importApplyStock,
   importBegin,
   importFile,
   importFinish,
   importPurge,
+  type ImportBatchResult,
 } from "@/lib/ops/db";
 import { orgJobPayload, type JobHandler } from "../boss";
 
@@ -18,15 +23,40 @@ const BATCH = 500;
 const KEPT_ERRORS = 200; // the rest are rebuilt from the file for the download
 
 /** SQLSTATE the database answered with, to a sentence. Never includes the data itself. */
-const dbMessage = (code?: string) =>
-  code === "23505" ? t("import.err.dbDuplicate") : t("import.err.db");
+const dbMessage = (type: string, code?: string) => {
+  if (code === "23505")
+    return t(type === "customers" ? "import.err.dbEmailTaken" : "import.err.dbDuplicate");
+  if (code === "P0002") return t("import.err.dbNotFound");
+  if (code === "22023" && type === "stock") return t("import.err.dbInvalid");
+  return t("import.err.db");
+};
+
+/** Sends `items` in batches and turns each refused item into error rows. */
+async function applyAll<T extends { ref: string; rows: number[] }>(
+  type: string,
+  items: T[],
+  send: (slice: T[]) => Promise<ImportBatchResult>,
+  errors: RowError[],
+) {
+  for (let i = 0; i < items.length; i += BATCH) {
+    const slice = items.slice(i, i + BATCH);
+    for (const r of await send(slice)) {
+      if (r.status !== "error") continue;
+      const item = slice.find((s) => s.ref === r.ref);
+      for (const row of item?.rows ?? []) {
+        errors.push({ row, field: "row", message: dbMessage(type, r.code) });
+      }
+    }
+  }
+}
 
 /**
- * Runs a confirmed product import: reads the stored file, validates it again (the preview is not
- * trusted), and writes it 500 products at a time through ops.import_apply_batch. Safe to run twice:
- * ids come from the import id and row, and the database remembers what this import already did.
+ * Runs a confirmed import (products, stock levels or customers): reads the stored file, validates it
+ * again (the preview is not trusted), and writes it 500 rows at a time through the matching
+ * ops.import_apply_* function. Safe to run twice: ids come from the import id and row, and the
+ * database remembers what this import already did.
  */
-export async function runProductImport(data: z.infer<typeof importPayload>): Promise<void> {
+export async function runImport(data: z.infer<typeof importPayload>): Promise<void> {
   const start = await importBegin(data.import_id, data.user_id);
   if (!start) return;
   try {
@@ -37,29 +67,39 @@ export async function runProductImport(data: z.infer<typeof importPayload>): Pro
       return;
     }
     const parsed = await parseUpload(start.file_name, bytes);
-    const built = buildItems(
-      data.import_id,
-      start.business_type as BusinessType,
-      parsed.rows,
-      start.mapping,
-    );
-    const errors: RowError[] = [...built.errors];
+    const errors: RowError[] = [];
+    const base = { import_id: data.import_id, user_id: data.user_id };
+    const type = start.type ?? "products";
 
-    for (let i = 0; i < built.items.length; i += BATCH) {
-      const slice = built.items.slice(i, i + BATCH);
-      const result = await importApplyBatch({
-        import_id: data.import_id,
-        user_id: data.user_id,
-        items: slice,
-      });
-      for (const r of result) {
-        if (r.status !== "error") continue;
-        const item = slice.find((s) => s.ref === r.ref);
-        for (const row of item?.rows ?? []) {
-          errors.push({ row, field: "row", message: dbMessage(r.code) });
-        }
-      }
+    if (type === "stock") {
+      const built = buildStockItems(
+        parsed.rows,
+        start.mapping,
+        start.match_key === "barcode" ? "barcode" : "sku",
+        start.mode === "received" ? "received" : "count",
+      );
+      errors.push(...built.errors);
+      await applyAll(type, built.items, (items) => importApplyStock({ ...base, items }), errors);
+    } else if (type === "customers") {
+      const built = buildCustomerItems(data.import_id, parsed.rows, start.mapping);
+      errors.push(...built.errors);
+      await applyAll(
+        type,
+        built.items,
+        (items) => importApplyCustomers({ ...base, items }),
+        errors,
+      );
+    } else {
+      const built = buildItems(
+        data.import_id,
+        start.business_type as BusinessType,
+        parsed.rows,
+        start.mapping,
+      );
+      errors.push(...built.errors);
+      await applyAll(type, built.items, (items) => importApplyBatch({ ...base, items }), errors);
     }
+
     errors.sort((a, b) => a.row - b.row);
     await importFinish(
       data.import_id,
@@ -68,22 +108,26 @@ export async function runProductImport(data: z.infer<typeof importPayload>): Pro
       errors.slice(0, KEPT_ERRORS),
       null,
     );
-    logger.info({ job: "import-products", rows: parsed.rows.length }, "product import finished");
+    // Counts only: customer files hold personal data and nothing from them is ever logged.
+    logger.info({ job: "import", type, rows: parsed.rows.length }, "import finished");
   } catch (error) {
     await importFinish(data.import_id, false, 0, [], "unexpected_error");
     throw error;
   }
 }
+/** The job was first written for products only; the name stays for the tests that import it. */
+export const runProductImport = runImport;
 
 const importPayload = orgJobPayload.extend({ import_id: z.uuid() });
 
 export const IMPORT_HANDLERS: JobHandler[] = [
   {
+    // One queue for every import type: the job row says which one it is.
     name: "import-products",
     schema: importPayload,
     // 50,000 rows: well over the 5-minute default; no retry storm on a failed import.
     queue: { retryLimit: 0, expireInSeconds: 3600 },
-    handle: (data) => runProductImport(importPayload.parse(data)),
+    handle: (data) => runImport(importPayload.parse(data)),
   },
   {
     name: "import-purge",

@@ -3,9 +3,8 @@ import { z } from "zod";
 import { authorizeApi, createSupabaseServerClient } from "@/lib/auth";
 import { reportError } from "@/lib/errors";
 import { t } from "@/lib/i18n";
-import { REQUIRED } from "@/lib/import/fields";
 import { ImportFileError } from "@/lib/import/parse";
-import { analyse, fileErrorMessage, settingsSchema } from "@/lib/import/server";
+import { analyse, fileErrorMessage, jobType, settingsProblem, settingsSchema } from "@/lib/import/server";
 import { getOrganisation } from "@/lib/org";
 import { rateLimit } from "@/lib/rate-limit";
 
@@ -27,17 +26,18 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const auth = await authorizeApi(["owner", "manager"], orgId);
   if (!auth.ok) return new Response(null, { status: auth.status });
 
-  const missing = REQUIRED.filter((f) => !settings.mapping[f]);
-  if (missing.length) return json({ error: t("import.err.required"), missing }, 400);
-
   const org = await getOrganisation(orgId);
   if (!org) return new Response(null, { status: 404 });
+  const supabase = await createSupabaseServerClient();
+  const type = await jobType(supabase, orgId, id);
+  if (!type) return new Response(null, { status: 404 });
+  const problem = settingsProblem(type, settings);
+  if (problem) return json({ error: t(problem) }, 400);
   // Every preview re-reads the stored file (an Excel file starts a parser process): count it per shop.
   if (!(await rateLimit("import-reparse", orgId)).allowed) {
     return json({ error: t("import.err.limit") }, 429);
   }
   try {
-    const supabase = await createSupabaseServerClient();
     const a = await analyse(
       supabase,
       orgId,
@@ -49,13 +49,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (a === "expired") return json({ error: t("import.err.expired") }, 410);
     return json({
       totalRows: a.parsed.rows.length,
-      readyRows: a.built.variantCount,
-      errorRows: new Set(a.built.errors.map((e) => e.row)).size,
+      readyRows: a.readyRows,
+      errorRows: new Set(a.errors.map((e) => e.row)).size,
       willCreate: a.willCreate,
       willUpdate: a.willUpdate,
       willSkip: a.willSkip,
-      vatDefaulted: a.built.vatDefaulted,
-      errors: a.built.errors.slice(0, 100),
+      vatDefaulted: a.vatDefaulted,
+      errors: a.errors.slice(0, 100),
     });
   } catch (e) {
     if (e instanceof ImportFileError) return json({ error: fileErrorMessage(e) }, 400);

@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 const db = {
   importApplyBatch: vi.fn(),
+  importApplyStock: vi.fn(),
+  importApplyCustomers: vi.fn(),
   importBegin: vi.fn(),
   importFile: vi.fn(),
   importFinish: vi.fn(),
@@ -42,6 +44,10 @@ beforeEach(() => {
   db.importApplyBatch.mockImplementation(async (b: { items: { ref: string }[] }) =>
     b.items.map((i) => ({ ref: i.ref, status: "ok" })),
   );
+  for (const fn of [db.importApplyStock, db.importApplyCustomers])
+    fn.mockImplementation(async (b: { items: { ref: string }[] }) =>
+      b.items.map((i) => ({ ref: i.ref, status: "ok" })),
+    );
 });
 
 describe("import-products job", () => {
@@ -133,5 +139,70 @@ describe("import-products job: a 10,000 row file", () => {
     expect(new Set(sent.map((i) => i.ref)).size).toBe(9_999);
     const [, ok, errorCount] = db.importFinish.mock.calls[0]!;
     expect([ok, errorCount]).toEqual([true, 1]);
+  });
+});
+
+describe("import job: stock and customers", () => {
+  it("sends a stock file to import_apply_stock only, with the mode and key", async () => {
+    db.importBegin.mockResolvedValue(
+      start({
+        type: "stock",
+        mode: "received",
+        match_key: "barcode",
+        mapping: { barcode: "Code", quantity: "Qty" },
+      }),
+    );
+    db.importFile.mockResolvedValue(Buffer.from("Code,Qty\n5390001,4\n5390002,x\n5390003,2"));
+    await runProductImport(IDS);
+    expect(db.importApplyBatch).not.toHaveBeenCalled();
+    expect(db.importApplyCustomers).not.toHaveBeenCalled();
+    const items = db.importApplyStock.mock.calls.flatMap((c) => c[0].items);
+    expect(items.map((i: { key: string; qty: number }) => [i.key, i.qty])).toEqual([
+      ["5390001", 4],
+      ["5390003", 2],
+    ]);
+    const [, ok, errorCount, errors] = db.importFinish.mock.calls[0]!;
+    expect([ok, errorCount, errors[0].row]).toEqual([true, 1, 3]);
+  });
+
+  it("maps a missing product to a row error", async () => {
+    db.importBegin.mockResolvedValue(
+      start({ type: "stock", mode: "count", mapping: { sku: "SKU", quantity: "Qty" } }),
+    );
+    db.importFile.mockResolvedValue(Buffer.from("SKU,Qty\nA,1\nB,2"));
+    db.importApplyStock.mockImplementation(async (b: { items: { ref: string }[] }) =>
+      b.items.map((i) =>
+        i.ref === "3"
+          ? { ref: i.ref, status: "error", code: "P0002" }
+          : { ref: i.ref, status: "ok" },
+      ),
+    );
+    await runProductImport(IDS);
+    const [, ok, errorCount, errors] = db.importFinish.mock.calls[0]!;
+    expect([ok, errorCount, errors[0].row]).toEqual([true, 1, 3]);
+  });
+
+  it("sends a customers file to import_apply_customers only, and never logs its content", async () => {
+    db.importBegin.mockResolvedValue(
+      start({
+        type: "customers",
+        mode: "upsert",
+        match_key: "email",
+        mapping: { name: "Name", email: "Email" },
+      }),
+    );
+    db.importFile.mockResolvedValue(
+      Buffer.from("Name,Email\nMary,mary@example.com\n,nobody@example.com"),
+    );
+    await runProductImport(IDS);
+    expect(db.importApplyBatch).not.toHaveBeenCalled();
+    expect(db.importApplyStock).not.toHaveBeenCalled();
+    const items = db.importApplyCustomers.mock.calls.flatMap((c) => c[0].items);
+    expect(items).toHaveLength(1);
+    expect(items[0].key).toBe("mary@example.com");
+    const [, ok, errorCount, errors] = db.importFinish.mock.calls[0]!;
+    expect([ok, errorCount, errors[0].row]).toEqual([true, 1, 3]);
+    // the stored problem list names rows and fields, never the values
+    expect(JSON.stringify(errors)).not.toContain("nobody@example.com");
   });
 });

@@ -152,3 +152,80 @@ test("import: with Excel import on, the Excel template is read by the isolated p
   await expect(page.locator("#map-price")).toHaveValue("Price (incl. VAT)");
   await expect(page.getByRole("status")).not.toContainText("can't be imported");
 });
+
+// Stock levels and customers use the same screens. One account: products first, then a stock
+// count and a delivery, then a customer file with a bad row; both are undone. Database rules are
+// in tests/rls/imports-types.test.ts.
+test("import: stock counts, deliveries and customers", async ({ page }) => {
+  test.setTimeout(240_000);
+  await signUpAndEnrol(page, uniqueEmail("import-types"), "E2E import types");
+  const orgId = await openDashboard(page, { type: enIE["businessType.general"] });
+
+  const run = async (type: string, body: string, name: string, radio?: string) => {
+    await page.goto(`/o/${orgId}/products/import?type=${type}`);
+    await hydrated(page);
+    await upload(page, name, body);
+    await expect(page.getByRole("heading", { name: enIE["import.step.map"] })).toBeVisible();
+    await page.getByRole("button", { name: enIE["import.map.next"] }).click();
+    await expect(page.getByRole("heading", { name: enIE["import.step.check"] })).toBeVisible();
+    if (radio) {
+      await page.getByRole("radio", { name: radio }).click(); // committed once the server has re-checked
+      await expect(page.getByRole("radio", { name: radio })).toBeChecked();
+    }
+  };
+  const finished = (text: string) =>
+    expect(page.getByRole("status").first()).toContainText(text, { timeout: 90_000 });
+
+  await run(
+    "products",
+    ["Name,Price,SKU,VAT rate,Opening stock", "Bread,2.49,BRD1,0,5", "Milk,1.35,MLK1,0,10"].join(
+      "\n",
+    ),
+    "p.csv",
+  );
+  await page.getByRole("button", { name: enIE["import.start"] }).click();
+  await finished("Finished: 2 added");
+
+  // A stock count: BRD1 becomes 20; the unknown SKU is shown as a problem row at the check step.
+  await run(
+    "stock",
+    ["SKU,Quantity", "BRD1,20", "NOPE,3"].join("\n"),
+    "s.csv",
+    enIE["import.mode.count"],
+  );
+  await expect(page.getByText("1 rows are ready to import.")).toBeVisible();
+  await expect(page.getByText("No product with this SKU or barcode in your shop.")).toBeVisible();
+  await page.getByRole("button", { name: enIE["import.start"] }).click();
+  await finished("1 updated");
+  await page.goto(`/o/${orgId}/inventory`);
+  await expect(page.getByRole("row", { name: /Bread/ })).toContainText("20");
+
+  // A delivery adds to the shelf: MLK1 10 + 5 = 15.
+  await run("stock", ["SKU,Quantity", "MLK1,5"].join("\n"), "d.csv", enIE["import.mode.received"]);
+  await page.getByRole("button", { name: enIE["import.start"] }).click();
+  await finished("1 updated");
+  await page.goto(`/o/${orgId}/inventory`);
+  await expect(page.getByRole("row", { name: /Milk/ })).toContainText("15");
+
+  // Customers: the bad email row is a problem row, the others are added without marketing consent.
+  await run(
+    "customers",
+    [
+      "Name,Email,Phone",
+      "Mary Byrne,mary@example.com,087 123 4567",
+      "Bad,not-an-email,",
+      "Sean,,",
+    ].join("\n"),
+    "c.csv",
+  );
+  await expect(page.getByText("2 rows are ready to import.")).toBeVisible();
+  await expect(page.getByRole("region", { name: enIE["import.check.errorsTitle"] })).toContainText(
+    "Enter a valid email address.",
+  );
+  await page.getByRole("button", { name: enIE["import.start"] }).click();
+  await finished("Finished: 2 added");
+  await page.goto(`/o/${orgId}/customers`);
+  await expect(page.getByText("Mary Byrne")).toBeVisible();
+  await expect(page.getByText("Sean")).toBeVisible();
+  await expect(page.getByText("Bad", { exact: true })).toHaveCount(0);
+});

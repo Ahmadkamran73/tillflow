@@ -4,7 +4,7 @@ import { z } from "zod";
 import { businessTypes } from "@/config/business-type-presets";
 import { authorizeApi } from "@/lib/auth";
 import { csvRow } from "@/lib/csv";
-import { templateRows } from "@/lib/import/fields";
+import { IMPORT_TYPES, templateRows } from "@/lib/import/fields";
 import { getOrganisation } from "@/lib/org";
 
 export const dynamic = "force-dynamic";
@@ -24,8 +24,11 @@ export async function GET(request: NextRequest) {
   if (!org) return new Response(null, { status: 404 });
   const asked = z.enum(businessTypes).safeParse(q.get("type"));
   const type = asked.success ? asked.data : (org.businessType as (typeof businessTypes)[number]);
-  const rows = templateRows(type);
-  const base = `tillflow-products-${type}`;
+  // ?import=stock|customers picks another kind of file; ?type= still picks the business type (products).
+  const kind = z.enum(IMPORT_TYPES).safeParse(q.get("import") ?? "products");
+  if (!kind.success) return new Response(null, { status: 400 });
+  const rows = templateRows(type, kind.data);
+  const base = kind.data === "products" ? `tillflow-products-${type}` : `tillflow-${kind.data}`;
 
   if (q.get("format") === "xlsx") {
     const book = new ExcelJS.Workbook();

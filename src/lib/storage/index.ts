@@ -12,7 +12,14 @@ const hex = (b: Buffer) => `\\x${b.toString("hex")}`;
 
 export async function putImportFile(
   supabase: SupabaseClient,
-  a: { orgId: string; importId: string; fileName: string; bytes: Buffer; totalRows: number },
+  a: {
+    orgId: string;
+    importId: string;
+    fileName: string;
+    bytes: Buffer;
+    totalRows: number;
+    type: "products" | "stock" | "customers";
+  },
 ) {
   return supabase.rpc("create_import", {
     p_org: a.orgId,
@@ -20,6 +27,7 @@ export async function putImportFile(
     p_file_name: a.fileName,
     p_bytes: hex(a.bytes),
     p_total: a.totalRows,
+    p_type: a.type,
   });
 }
 

@@ -54,8 +54,18 @@ export function sandboxConfig() {
   };
 }
 
-/** The switch. Anything but the exact string "true" means off. */
-export const xlsxFlagOn = () => process.env.IMPORT_XLSX_ENABLED === "true";
+/**
+ * The switch. IMPORT_XLSX_ENABLED=true turns Excel on and =false turns it off, wherever the app runs.
+ * Unset (or anything else) means: ON when NEXT_PUBLIC_APP_ENV is exactly "staging", OFF everywhere
+ * else, production included. Staging is where a host is verified, so it starts on; being on only
+ * means "try": the self-test below must still pass on that host, or the answer stays "unavailable".
+ */
+export const xlsxFlagOn = () => {
+  const v = process.env.IMPORT_XLSX_ENABLED;
+  if (v === "true") return true;
+  if (v === "false") return false;
+  return process.env.NEXT_PUBLIC_APP_ENV === "staging";
+};
 
 // Where the child code lives. The app runs from its source folder (`next start`), so the working
 // directory is the app root; if the files are not there, the importer fails closed.

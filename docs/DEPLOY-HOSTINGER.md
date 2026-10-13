@@ -72,7 +72,7 @@ Names only. Values come from your password manager. Same names in both apps, dif
 | `AUTH_GOOGLE_ENABLED`                                     | yes         | `true` only after Google is enabled in that Supabase project                                                                                                                                  |
 | `JOBS_DATABASE_URL`                                       | yes         | Supabase **session pooler** URL (port 5432) with user `tillflow_ops.<project-ref>`, never `postgres`. Used for background jobs, rate limits, the error log and the health check. Server only. |
 | `JOBS_ENABLED`                                            | optional    | leave unset (on). `false` stops this app running the job worker.                                                                                                                              |
-| `IMPORT_XLSX_ENABLED` | optional | **Leave unset (Excel import OFF) until the sandbox probe has passed on this app.** `true` turns on reading Excel files in a separate restricted process, and only if the host also passes a self-test. CSV and JSON imports do not depend on it. See "Excel import" below. |
+| `IMPORT_XLSX_ENABLED` | optional | **Leave unset: Excel import is OFF in production and ON by default on staging only (`NEXT_PUBLIC_APP_ENV=staging`; `false` turns it off there). Do not enable in production until the sandbox probe has passed on this app.** `true` turns on reading Excel files in a separate restricted process, and only if the host also passes a self-test. CSV and JSON imports do not depend on it. See "Excel import" below. |
 | `IMPORT_SANDBOX_PROBE_ON_BOOT` | optional | `true` for ONE deploy: at start-up the app runs the sandbox probe and writes its JSON report to the application log (it starts a few misbehaving child processes; none is allowed past about 900 MB, and the address-space step is skipped if the host reports less than 2 GB). Remove it again afterwards. |
 | `IMPORT_SANDBOX_*` | optional | Limits of the Excel parser process: `TIMEOUT_MS` (20000), `HEAP_MB` (256), `RSS_MB` (768), `OUTPUT_BYTES` (41943040), `ULIMIT_KB` (0 = off), `CONCURRENCY` (2), `QUEUE` (4), `QUEUE_WAIT_MS` (10000). Positive integers; leave unset unless the probe shows the host needs different values. |
 | `ALERT_EMAIL`                                             | yes         | where new-error alerts and the daily digest go                                                                                                                                                |
@@ -90,7 +90,10 @@ Names only. Values come from your password manager. Same names in both apps, dif
 
 `.env.example` is write-protected for Claude; its lines are updated by hand to match this table.
 
-## Excel import (off until verified on this host)
+## Excel import (off until verified on this host; on by default on staging only)
+
+**Staging exception:** on an app whose `NEXT_PUBLIC_APP_ENV` is `staging`, Excel import is on when `IMPORT_XLSX_ENABLED` is unset (still only after the self-test passes), so real workbooks can be tried there. Set `IMPORT_XLSX_ENABLED=false` to switch it off on staging. Production (and any other value) stays off unless `IMPORT_XLSX_ENABLED=true`. The `.env.example` line must be updated by hand (write-protected for Claude).
+
 
 Reading `.xlsx` files runs in a separate Node process with its own memory, time and output limits, no file writes, no child processes and no credentials (`docs/specs/bulk-import.md`). **It is off by default and there is no in-process fallback.** CSV and JSON imports work either way. Hostinger's documentation says nothing about child processes, worker threads or process counts for Node.js apps, so nothing is assumed:
 

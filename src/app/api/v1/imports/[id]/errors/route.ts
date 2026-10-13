@@ -39,7 +39,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     );
     if (a === "missing") return new Response(null, { status: 404 });
     if (a === "expired") return new Response(null, { status: 410 });
-    return new Response(errorsCsv(a.parsed.headers, a.parsed.rows, a.built.errors), {
+    return new Response(errorsCsv(a.parsed.headers, a.parsed.rows, a.errors), {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
         "Content-Disposition": 'attachment; filename="import-problems.csv"',

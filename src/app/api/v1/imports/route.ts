@@ -4,10 +4,10 @@ import { z } from "zod";
 import { authorizeApi, createSupabaseServerClient } from "@/lib/auth";
 import { reportError } from "@/lib/errors";
 import { t } from "@/lib/i18n";
-import { fieldsFor } from "@/lib/import/fields";
+import { importFieldsFor } from "@/lib/import/fields";
 import { ImportFileError, MAX_FILE_BYTES, parseUpload } from "@/lib/import/parse";
 import { autoMatch, detectSource } from "@/lib/import/presets";
-import { fileErrorMessage } from "@/lib/import/server";
+import { fileErrorMessage, importTypeSchema } from "@/lib/import/server";
 import { getOrganisation } from "@/lib/org";
 import { rateLimit } from "@/lib/rate-limit";
 import { putImportFile } from "@/lib/storage";
@@ -28,6 +28,9 @@ export async function POST(request: NextRequest) {
   if (!orgId.success) return new Response(null, { status: 404 });
   const auth = await authorizeApi(["owner", "manager"], orgId.data);
   if (!auth.ok) return new Response(null, { status: auth.status });
+  // What the file holds: products (default), stock levels or customers.
+  const kind = importTypeSchema.safeParse(request.nextUrl.searchParams.get("type") ?? "products");
+  if (!kind.success) return new Response(null, { status: 400 });
 
   const length = Number(request.headers.get("content-length") ?? "0");
   if (!length || length > MAX_FILE_BYTES + 100_000) {
@@ -59,6 +62,7 @@ export async function POST(request: NextRequest) {
       fileName: file.name.slice(0, 200),
       bytes,
       totalRows: parsed.rows.length,
+      type: kind.data,
     });
     if (error) {
       if (error.code === "55006") return json({ error: t("import.err.busy") }, 409);
@@ -66,16 +70,19 @@ export async function POST(request: NextRequest) {
       await reportError(error, { source: "server", route: "imports-upload" });
       return json({ error: t("import.err.generic") }, 503);
     }
-    const source = detectSource(parsed.headers);
+    // The Square/Lightspeed/Imonggo/Shopify presets describe product exports only.
+    const source = kind.data === "products" ? detectSource(parsed.headers) : null;
+    const fields = importFieldsFor(kind.data, org.businessType as Parameters<typeof importFieldsFor>[1]);
     return json({
+      importType: kind.data,
       importId,
       fileName: file.name,
       headers: parsed.headers,
       sample: parsed.rows.slice(0, 3),
       totalRows: parsed.rows.length,
       source,
-      mapping: autoMatch(parsed.headers, source),
-      fields: fieldsFor(org.businessType as Parameters<typeof fieldsFor>[0]),
+      mapping: autoMatch(parsed.headers, source, fields),
+      fields,
     });
   } catch (e) {
     if (e instanceof ImportFileError)

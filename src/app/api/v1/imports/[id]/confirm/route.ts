@@ -3,8 +3,7 @@ import { z } from "zod";
 import { authorizeApi, createSupabaseServerClient } from "@/lib/auth";
 import { reportError } from "@/lib/errors";
 import { t } from "@/lib/i18n";
-import { REQUIRED } from "@/lib/import/fields";
-import { settingsSchema } from "@/lib/import/server";
+import { jobType, settingsProblem, settingsSchema } from "@/lib/import/server";
 import { enqueue } from "@/lib/jobs";
 
 export const dynamic = "force-dynamic";
@@ -27,11 +26,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const { orgId, ...settings } = parsed.data;
   const auth = await authorizeApi(["owner", "manager"], orgId);
   if (!auth.ok) return new Response(null, { status: auth.status });
-  if (REQUIRED.some((f) => !settings.mapping[f])) {
-    return json({ error: t("import.err.required") }, 400);
-  }
-
   const supabase = await createSupabaseServerClient();
+  const type = await jobType(supabase, orgId, id);
+  if (!type) return new Response(null, { status: 404 });
+  const problem = settingsProblem(type, settings);
+  if (problem) return json({ error: t(problem) }, 400);
   const { error } = await supabase.rpc("confirm_import", {
     p_org: orgId,
     p_id: id,

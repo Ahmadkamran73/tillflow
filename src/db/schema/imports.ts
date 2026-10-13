@@ -55,13 +55,13 @@ export const importJobs = pgTable(
   (t) => [
     unique("import_jobs_org_id_id_key").on(t.orgId, t.id),
     index("import_jobs_org_created_idx").on(t.orgId, t.createdAt),
-    check("import_jobs_type", sql`${t.type} in ('products')`),
+    check("import_jobs_type", sql`${t.type} in ('products','stock','customers')`),
     check(
       "import_jobs_status",
       sql`${t.status} in ('uploaded','queued','running','done','failed','undone')`,
     ),
-    check("import_jobs_mode", sql`${t.mode} in ('create','upsert')`),
-    check("import_jobs_match_key", sql`${t.matchKey} in ('sku','barcode')`),
+    check("import_jobs_mode", sql`${t.mode} in ('create','upsert','count','received')`),
+    check("import_jobs_match_key", sql`${t.matchKey} in ('sku','barcode','email')`),
     check("import_jobs_rows", sql`${t.totalRows} between 0 and 50000`),
     check("import_jobs_file_name", sql`char_length(${t.fileName}) between 1 and 200`),
   ],
@@ -118,6 +118,8 @@ export const importChanges = pgTable(
     /** Variant, cost and product values before an update (null for a create). */
     before: jsonb("before"),
     openingStock: integer("opening_stock").notNull().default(0),
+    /** Stock imports: the change this import made to the variant's stock (undo reverses it). */
+    qtyDelta: integer("qty_delta").notNull().default(0),
   },
   (t) => [
     unique("import_changes_import_variant_key").on(t.importId, t.variantId),
@@ -126,6 +128,6 @@ export const importChanges = pgTable(
       columns: [t.orgId, t.importId],
       foreignColumns: [importJobs.orgId, importJobs.id],
     }),
-    check("import_changes_action", sql`${t.action} in ('created','updated')`),
+    check("import_changes_action", sql`${t.action} in ('created','updated','stock')`),
   ],
 );

@@ -263,6 +263,37 @@ describe("Excel import is off by default", () => {
     },
   );
 
+  it("starts ON for staging only (still gated by the self-test), never for production or an unset environment", async () => {
+    const was = process.env.NEXT_PUBLIC_APP_ENV;
+    try {
+      delete process.env.IMPORT_XLSX_ENABLED;
+      for (const [env, expected] of [
+        ["staging", "unchecked"],
+        ["production", "disabled"],
+        ["development", "disabled"],
+        ["Staging", "disabled"],
+        [undefined, "disabled"],
+      ] as const) {
+        if (env === undefined) delete process.env.NEXT_PUBLIC_APP_ENV;
+        else process.env.NEXT_PUBLIC_APP_ENV = env;
+        resetSandboxForTests();
+        expect(xlsxStatusPeek(), String(env)).toBe(expected);
+      }
+      // An explicit false beats the staging default; an explicit true works anywhere.
+      process.env.NEXT_PUBLIC_APP_ENV = "staging";
+      process.env.IMPORT_XLSX_ENABLED = "false";
+      resetSandboxForTests();
+      expect(xlsxStatusPeek()).toBe("disabled");
+      process.env.NEXT_PUBLIC_APP_ENV = "production";
+      process.env.IMPORT_XLSX_ENABLED = "true";
+      resetSandboxForTests();
+      expect(xlsxStatusPeek()).toBe("unchecked");
+    } finally {
+      if (was === undefined) delete process.env.NEXT_PUBLIC_APP_ENV;
+      else process.env.NEXT_PUBLIC_APP_ENV = was;
+    }
+  });
+
   it("leaves CSV and JSON working while Excel is off", async () => {
     delete process.env.IMPORT_XLSX_ENABLED;
     resetSandboxForTests();

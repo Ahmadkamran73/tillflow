@@ -3,10 +3,25 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { t } from "@/lib/i18n";
-import { REQUIRED, TEMPLATE_HEADER, type Field, type Mapping } from "@/lib/import/fields";
+import {
+  fieldLabel,
+  IMPORT_TYPES,
+  MODES,
+  requiredFor,
+  type Field,
+  type ImportType,
+  type Mapping,
+} from "@/lib/import/fields";
 import { autoMatch, SOURCES, type SourceId } from "@/lib/import/presets";
+import {
+  DEFAULTS,
+  missingFields,
+  settingsProblem,
+  type ImportSettings,
+} from "@/lib/import/settings";
 
 type Uploaded = {
+  importType: ImportType;
   importId: string;
   fileName: string;
   headers: string[];
@@ -53,13 +68,24 @@ async function call<T>(
   return { ok: res.ok, data };
 }
 
-export function ImportWizard({ orgId, xlsx }: { orgId: string; xlsx: boolean }) {
+export function ImportWizard({
+  orgId,
+  xlsx,
+  initialType,
+}: {
+  orgId: string;
+  xlsx: boolean;
+  initialType: ImportType;
+}) {
   const [step, setStep] = useState<Step>("upload");
+  const [importType, setImportType] = useState<ImportType>(initialType);
   const [up, setUp] = useState<Uploaded | null>(null);
   const [mapping, setMapping] = useState<Mapping>({});
   const [source, setSource] = useState<SourceId | "">("");
-  const [mode, setMode] = useState<"create" | "upsert">("create");
-  const [matchKey, setMatchKey] = useState<"sku" | "barcode">("sku");
+  const [mode, setMode] = useState<ImportSettings["mode"]>(DEFAULTS[initialType].mode);
+  const [matchKey, setMatchKey] = useState<ImportSettings["matchKey"]>(
+    DEFAULTS[initialType].matchKey,
+  );
   const [preview, setPreview] = useState<Preview | null>(null);
   const [job, setJob] = useState<Job | null>(null);
   const [saved, setSaved] = useState<Saved[]>([]);
@@ -114,7 +140,10 @@ export function ImportWizard({ orgId, xlsx }: { orgId: string; xlsx: boolean }) 
     setBusy(t("import.upload.busy"));
     const body = new FormData();
     body.set("file", file);
-    const r = await call<Uploaded>(`/api/v1/imports?orgId=${orgId}`, { method: "POST", body });
+    const r = await call<Uploaded>(`/api/v1/imports?orgId=${orgId}&type=${importType}`, {
+      method: "POST",
+      body,
+    });
     setBusy(null);
     if (!r.ok) {
       setErrorField("file");
@@ -123,6 +152,13 @@ export function ImportWizard({ orgId, xlsx }: { orgId: string; xlsx: boolean }) 
     setUp(r.data);
     setMapping(r.data.mapping);
     setSource(r.data.source ?? "");
+    // Start from this kind of import's usual choices; a stock file with only a barcode column matches by barcode.
+    setMode(DEFAULTS[importType].mode);
+    setMatchKey(
+      importType === "stock" && !r.data.mapping.sku && r.data.mapping.barcode
+        ? "barcode"
+        : DEFAULTS[importType].matchKey,
+    );
     setStep("map");
   }
 
@@ -248,7 +284,23 @@ export function ImportWizard({ orgId, xlsx }: { orgId: string; xlsx: boolean }) 
     if (jobStatus === "undone") heading.current?.focus();
   }, [jobStatus]);
 
-  const missing = REQUIRED.filter((f) => !mapping[f]);
+  const current: ImportSettings = { mapping, mode, matchKey };
+  const missing = missingFields(importType, current);
+  const problem = settingsProblem(importType, current);
+  const modeKey = (m: ImportSettings["mode"]) =>
+    importType === "stock"
+      ? m === "count"
+        ? "import.mode.count"
+        : "import.mode.received"
+      : importType === "customers"
+        ? m === "create"
+          ? "import.mode.createCustomers"
+          : "import.mode.upsertCustomers"
+        : m === "create"
+          ? "import.mode.create"
+          : "import.mode.upsert";
+  const isRequired = (f: Field) =>
+    requiredFor(importType).includes(f) || (importType === "stock" && f === matchKey);
   const errorLine = error ? (
     <p
       id="import-error"
@@ -275,6 +327,29 @@ export function ImportWizard({ orgId, xlsx }: { orgId: string; xlsx: boolean }) 
     return (
       <form onSubmit={onUpload} className={card}>
         {h2(t("import.step.upload"))}
+        <fieldset className="flex flex-col">
+          <legend className="text-sm font-medium">{t("import.type.title")}</legend>
+          {IMPORT_TYPES.map((kind) => (
+            <label key={kind} className="flex min-h-12 items-start gap-3 py-2 text-base">
+              <input
+                type="radio"
+                name="import-type"
+                className="mt-1 size-5"
+                checked={importType === kind}
+                onChange={() => setImportType(kind)}
+              />
+              <span className="flex flex-col">
+                <span>{t(`import.type.${kind}`)}</span>
+                <span className="text-muted-foreground text-xs">
+                  {t(`import.type.${kind}Hint`)}
+                </span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+        {importType === "customers" ? (
+          <p className="text-sm font-medium">{t("import.customers.privacy")}</p>
+        ) : null}
         <div className="flex flex-col gap-1">
           <label htmlFor="import-file" className="text-sm font-medium">
             {t("import.upload.label")}
@@ -312,14 +387,14 @@ export function ImportWizard({ orgId, xlsx }: { orgId: string; xlsx: boolean }) 
           <span className="text-sm font-medium">{t("import.template.title")}</span>
           <a
             className="inline-flex min-h-12 items-center text-sm underline underline-offset-4"
-            href={`/api/v1/imports/template?orgId=${orgId}&format=csv`}
+            href={`/api/v1/imports/template?orgId=${orgId}&format=csv&import=${importType}`}
           >
             {t("import.template.csv")}
           </a>
           {xlsx ? (
             <a
               className="inline-flex min-h-12 items-center text-sm underline underline-offset-4"
-              href={`/api/v1/imports/template?orgId=${orgId}&format=xlsx`}
+              href={`/api/v1/imports/template?orgId=${orgId}&format=xlsx&import=${importType}`}
             >
               {t("import.template.xlsx")}
             </a>
@@ -334,10 +409,13 @@ export function ImportWizard({ orgId, xlsx }: { orgId: string; xlsx: boolean }) 
       <div className={card}>
         {h2(t("import.step.map"))}
         <p className="text-muted-foreground text-sm">
-          {t("import.map.intro")} {t("import.map.file", { name: up.fileName, rows: up.totalRows })}
+          {t("import.map.intro")} {importType === "stock" ? t("import.map.introStock") : null}
+          {importType === "customers" ? t("import.map.introCustomers") : null}{" "}
+          {t("import.map.file", { name: up.fileName, rows: up.totalRows })}
         </p>
         <div className="grid gap-3 sm:grid-cols-2">
-          <div className="flex flex-col gap-1">
+          {/* The Square / Lightspeed / Imonggo / Shopify presets describe product exports only. */}
+          <div className={importType === "products" ? "flex flex-col gap-1" : "hidden"}>
             <label htmlFor="import-source" className="text-sm font-medium">
               {t("import.map.preset")}
             </label>
@@ -348,7 +426,7 @@ export function ImportWizard({ orgId, xlsx }: { orgId: string; xlsx: boolean }) 
               onChange={(e) => {
                 const s = (e.target.value || "") as SourceId | "";
                 setSource(s);
-                setMapping(autoMatch(up.headers, s || null));
+                setMapping(autoMatch(up.headers, s || null, up.fields));
               }}
             >
               <option value="">{t("import.map.presetAuto")}</option>
@@ -371,7 +449,12 @@ export function ImportWizard({ orgId, xlsx }: { orgId: string; xlsx: boolean }) 
                 const hit = saved.find((x) => x.id === e.target.value);
                 setSavedPick(hit ? hit.id : "");
                 if (hit) {
-                  setMapping(hit.mapping);
+                  // Only the columns this kind of import has (a saved match may come from another kind).
+                  setMapping(
+                    Object.fromEntries(
+                      Object.entries(hit.mapping).filter(([k]) => up.fields.includes(k as Field)),
+                    ),
+                  );
                   setNotice(t("import.map.applied", { name: hit.name }));
                 }
               }}
@@ -412,8 +495,8 @@ export function ImportWizard({ orgId, xlsx }: { orgId: string; xlsx: boolean }) 
                 <tr key={f} className="border-border border-t">
                   <th scope="row" className="py-2 pr-3 font-normal">
                     <label htmlFor={`map-${f}`}>
-                      {TEMPLATE_HEADER[f]}
-                      {REQUIRED.includes(f) ? ` (${t("import.map.required")})` : ""}
+                      {fieldLabel(importType, f)}
+                      {isRequired(f) ? ` (${t("import.map.required")})` : ""}
                     </label>
                   </th>
                   <td className="py-2">
@@ -421,7 +504,7 @@ export function ImportWizard({ orgId, xlsx }: { orgId: string; xlsx: boolean }) 
                       id={`map-${f}`}
                       className={control}
                       value={col}
-                      aria-required={REQUIRED.includes(f)}
+                      aria-required={isRequired(f)}
                       aria-invalid={errorField === "map" && !!error && missing.includes(f)}
                       aria-describedby={example ? `map-${f}-ex` : undefined}
                       onChange={(e) => setMapping({ ...mapping, [f]: e.target.value || null })}
@@ -476,7 +559,7 @@ export function ImportWizard({ orgId, xlsx }: { orgId: string; xlsx: boolean }) 
               if (busy) return;
               if (missing.length) {
                 setErrorField("map");
-                return setError(t("import.err.required"));
+                return setError(t(problem ?? "import.err.required"));
               }
               void runPreview();
             }}
@@ -493,15 +576,40 @@ export function ImportWizard({ orgId, xlsx }: { orgId: string; xlsx: boolean }) 
     return (
       <div className={card}>
         {h2(t("import.step.check"))}
+        {importType === "customers" ? (
+          <p className="text-sm font-medium">{t("import.customers.privacy")}</p>
+        ) : null}
         <ul aria-live="polite" className="flex flex-col gap-1 text-sm">
           <li>{t("import.check.ready", { count: preview.readyRows })}</li>
-          {preview.willCreate ? (
-            <li>{t("import.check.create", { count: preview.willCreate })}</li>
+          {preview.willCreate && importType !== "stock" ? (
+            <li>
+              {t(
+                importType === "customers" ? "import.check.customersCreate" : "import.check.create",
+                {
+                  count: preview.willCreate,
+                },
+              )}
+            </li>
           ) : null}
           {preview.willUpdate ? (
-            <li>{t("import.check.update", { count: preview.willUpdate })}</li>
+            <li>
+              {t(
+                importType === "stock"
+                  ? "import.check.stock"
+                  : importType === "customers"
+                    ? "import.check.customersUpdate"
+                    : "import.check.update",
+                { count: preview.willUpdate },
+              )}
+            </li>
           ) : null}
-          {preview.willSkip ? <li>{t("import.check.skip", { count: preview.willSkip })}</li> : null}
+          {preview.willSkip ? (
+            <li>
+              {t(importType === "customers" ? "import.check.customersSkip" : "import.check.skip", {
+                count: preview.willSkip,
+              })}
+            </li>
+          ) : null}
           {preview.errorRows ? (
             <li className="font-medium">
               {t("import.check.problems", { count: preview.errorRows })}
@@ -513,8 +621,16 @@ export function ImportWizard({ orgId, xlsx }: { orgId: string; xlsx: boolean }) 
         </ul>
 
         <fieldset className="flex flex-col">
-          <legend className="text-sm font-medium">{t("import.mode.title")}</legend>
-          {(["create", "upsert"] as const).map((m) => (
+          <legend className="text-sm font-medium">
+            {t(
+              importType === "stock"
+                ? "import.mode.titleStock"
+                : importType === "customers"
+                  ? "import.mode.titleCustomers"
+                  : "import.mode.title",
+            )}
+          </legend>
+          {MODES[importType].map((m) => (
             <label key={m} className={radio}>
               <input
                 type="radio"
@@ -523,25 +639,27 @@ export function ImportWizard({ orgId, xlsx }: { orgId: string; xlsx: boolean }) 
                 checked={mode === m}
                 onChange={() => void runPreview({ mode: m })}
               />
-              {t(m === "create" ? "import.mode.create" : "import.mode.upsert")}
+              {t(modeKey(m))}
             </label>
           ))}
         </fieldset>
-        <fieldset className="flex flex-col">
-          <legend className="text-sm font-medium">{t("import.match.title")}</legend>
-          {(["sku", "barcode"] as const).map((k) => (
-            <label key={k} className={radio}>
-              <input
-                type="radio"
-                name="match"
-                className="size-5"
-                checked={matchKey === k}
-                onChange={() => void runPreview({ matchKey: k })}
-              />
-              {t(k === "sku" ? "import.match.sku" : "import.match.barcode")}
-            </label>
-          ))}
-        </fieldset>
+        {importType !== "customers" ? (
+          <fieldset className="flex flex-col">
+            <legend className="text-sm font-medium">{t("import.match.title")}</legend>
+            {(["sku", "barcode"] as const).map((k) => (
+              <label key={k} className={radio}>
+                <input
+                  type="radio"
+                  name="match"
+                  className="size-5"
+                  checked={matchKey === k}
+                  onChange={() => void runPreview({ matchKey: k })}
+                />
+                {t(k === "sku" ? "import.match.sku" : "import.match.barcode")}
+              </label>
+            ))}
+          </fieldset>
+        ) : null}
 
         {preview.errors.length ? (
           <div className="flex flex-col gap-2">
@@ -705,7 +823,10 @@ export function ImportWizard({ orgId, xlsx }: { orgId: string; xlsx: boolean }) 
       ) : null}
       {errorLine}
       <div>
-        <a href={`/o/${orgId}/products`} className="inline-flex min-h-12 items-center text-sm underline underline-offset-4">
+        <a
+          href={`/o/${orgId}/products`}
+          className="inline-flex min-h-12 items-center text-sm underline underline-offset-4"
+        >
           {t("import.back")}
         </a>
       </div>

@@ -4,7 +4,7 @@ const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 
 /** Header names (normalised: lower case, letters and digits only) that mean each field. */
 const SYNONYMS: Record<Field, string[]> = {
-  name: ["name", "productname", "itemname", "title", "description", "product"],
+  name: ["name", "productname", "itemname", "title", "description", "product", "customername", "fullname", "contactname", "customer", "company"],
   price: ["priceinclvat", "price", "retailprice", "sellingprice", "variantprice", "saleprice", "unitprice"],
   category: ["category", "categories", "productcategory", "type", "department", "group"],
   taxCategory: ["vatrate", "vat", "taxrate", "tax", "taxcategory", "vatcategory"],
@@ -26,6 +26,12 @@ const SYNONYMS: Record<Field, string[]> = {
   styleCode: ["stylecode", "style"],
   allergens: ["allergensseparatewith", "allergens", "allergen"],
   course: ["course"],
+  quantity: ["quantity", "qty", "counted", "count", "onhand", "newstock", "stock", "stocklevel", "received", "delivered"],
+  email: ["email", "emailaddress", "mail", "customeremail"],
+  phone: ["phone", "phonenumber", "telephone", "tel", "mobile", "mobilenumber"],
+  vatNumber: ["vatnumber", "vatno", "vatid", "vatreg", "taxid", "vatregistration"],
+  address: ["address", "streetaddress", "billingaddress", "fulladdress"],
+  notes: ["notes", "note", "comments", "comment", "memo", "remarks"],
 };
 
 /**
@@ -66,12 +72,16 @@ export function detectSource(headers: string[]): SourceId | null {
   return best?.id ?? null;
 }
 
-/** Picks a column for every field: the chosen preset first, then header-name matches. */
-export function autoMatch(headers: string[], source?: SourceId | null): Mapping {
+/**
+ * Picks a column for the fields of one import type (`only`; default all): the chosen preset first,
+ * then header-name matches. A column is used for at most one field.
+ */
+export function autoMatch(headers: string[], source?: SourceId | null, only?: readonly Field[]): Mapping {
   const byNorm = new Map(headers.map((h) => [norm(h), h]));
   const used = new Set<string>();
   const out: Mapping = {};
   const take = (field: Field, header: string | undefined) => {
+    if (only && !only.includes(field)) return;
     if (header && !out[field] && !used.has(header)) {
       out[field] = header;
       used.add(header);

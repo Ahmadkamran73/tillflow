@@ -382,8 +382,9 @@ export async function shiftZEmailData(shiftId: string): Promise<unknown> {
 
 export type ImportStart = {
   org_id: string;
-  mode: "create" | "upsert";
-  match_key: "sku" | "barcode";
+  type?: "products" | "stock" | "customers";
+  mode: "create" | "upsert" | "count" | "received";
+  match_key: "sku" | "barcode" | "email";
   mapping: Record<string, string | null>;
   file_name: string;
   total_rows: number;
@@ -408,6 +409,22 @@ export async function importApplyBatch(batch: unknown): Promise<ImportBatchResul
   const [row] = await db()<{ r: ImportBatchResult }[]>`
     select ops.import_apply_batch(${db().json(batch as postgres.JSONValue)}) as r`;
   if (!row) throw new Error("import_apply_batch returned no row");
+  return row.r;
+}
+
+/** A batch of stock lines (see ops.import_apply_stock). */
+export async function importApplyStock(batch: unknown): Promise<ImportBatchResult> {
+  const [row] = await db()<{ r: ImportBatchResult }[]>`
+    select ops.import_apply_stock(${db().json(batch as postgres.JSONValue)}) as r`;
+  if (!row) throw new Error("import_apply_stock returned no row");
+  return row.r;
+}
+
+/** A batch of customers (see ops.import_apply_customers). */
+export async function importApplyCustomers(batch: unknown): Promise<ImportBatchResult> {
+  const [row] = await db()<{ r: ImportBatchResult }[]>`
+    select ops.import_apply_customers(${db().json(batch as postgres.JSONValue)}) as r`;
+  if (!row) throw new Error("import_apply_customers returned no row");
   return row.r;
 }
 
