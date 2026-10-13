@@ -14,7 +14,7 @@ const MAX_EVENTS = 25;
 /** What the till queued when a manager approved something outside a sale (drawer open, refund). */
 const event = z.strictObject({
   id: z.uuid(),
-  kind: z.enum(["no_sale", "refund_override"]),
+  kind: z.enum(["no_sale", "refund_override", "void_item"]),
   at: z.iso.datetime(),
   cashierUserId: z.uuid(),
   /** The server's proof of a manager PIN (register_approvals). Only the server can make one. */

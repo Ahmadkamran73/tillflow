@@ -2,12 +2,7 @@ import "fake-indexeddb/auto";
 import Dexie from "dexie";
 import { beforeEach, describe, expect, it } from "vitest";
 import { priceCart, type Cart } from "@/lib/register/cart";
-import {
-  RegisterDb,
-  type LocalRefund,
-  type LocalSale,
-  type LocalTender,
-} from "@/lib/register/db";
+import { RegisterDb, type LocalRefund, type LocalSale, type LocalTender } from "@/lib/register/db";
 import {
   applyLocalRefunds,
   completeExchange,
@@ -141,6 +136,7 @@ describe("detailOfLocalSale", () => {
         receiptSeq: 1,
         completedAt: sale.completedAt,
         mode: "eat_in",
+        serviceChargeBp: 0,
         lines: [],
         tenders: sale.tenders,
         roundCash: true,
@@ -398,25 +394,35 @@ describe("lookupOnServer", () => {
     const detail = detailOfLocalSale(sale, priced, "Till 1");
     // the server describes lines with real row ids
     detail.lines = detail.lines.map((l) => ({ ...l, id: crypto.randomUUID() }));
-    const ok = await lookupOnServer(ORG, { by: "id", id: sale.id }, CASHIER, answer(200, { sales: [detail] }),
+    const ok = await lookupOnServer(
+      ORG,
+      { by: "id", id: sale.id },
+      CASHIER,
+      answer(200, { sales: [detail] }),
     );
     expect(ok).toMatchObject({ status: "ok" });
     expect(
-      (await lookupOnServer(ORG, { by: "id", id: sale.id }, CASHIER, answer(200, { sales: [{ nope: 1 }] })))
-        .status,
+      (
+        await lookupOnServer(
+          ORG,
+          { by: "id", id: sale.id },
+          CASHIER,
+          answer(200, { sales: [{ nope: 1 }] }),
+        )
+      ).status,
     ).toBe("failed");
-    expect((await lookupOnServer(ORG, { by: "id", id: sale.id }, CASHIER, answer(401))).status).toBe(
-      "unpaired",
-    );
-    expect((await lookupOnServer(ORG, { by: "id", id: sale.id }, CASHIER, answer(503))).status).toBe(
-      "failed",
-    );
+    expect(
+      (await lookupOnServer(ORG, { by: "id", id: sale.id }, CASHIER, answer(401))).status,
+    ).toBe("unpaired");
+    expect(
+      (await lookupOnServer(ORG, { by: "id", id: sale.id }, CASHIER, answer(503))).status,
+    ).toBe("failed");
     const offline = (async () => {
       throw new TypeError("offline");
     }) as unknown as typeof fetch;
-    expect((await lookupOnServer(ORG, { by: "serial", serial: "x" }, CASHIER, offline)).status).toBe(
-      "offline",
-    );
+    expect(
+      (await lookupOnServer(ORG, { by: "serial", serial: "x" }, CASHIER, offline)).status,
+    ).toBe("offline");
     let url = "";
     const spy = (async (u: string) => {
       url = u;
@@ -519,8 +525,16 @@ describe("the outbox with refunds", () => {
     let body = "";
     const fetchFn = (async (url: string, init: RequestInit) => {
       if (url.includes("refunds")) body = init.body as string;
-      const parsed = JSON.parse(init.body as string) as { sales?: { id: string }[]; refunds?: { id: string }[] };
-      return Response.json({ results: (parsed.sales ?? parsed.refunds ?? []).map((i) => ({ id: i.id, status: "created" })) });
+      const parsed = JSON.parse(init.body as string) as {
+        sales?: { id: string }[];
+        refunds?: { id: string }[];
+      };
+      return Response.json({
+        results: (parsed.sales ?? parsed.refunds ?? []).map((i) => ({
+          id: i.id,
+          status: "created",
+        })),
+      });
     }) as unknown as typeof fetch;
     await drainOutbox(db, ORG, { fetchFn, force: true });
     expect(JSON.parse(body).refunds[0].servingToken).toBe("payload.sig");

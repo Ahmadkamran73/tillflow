@@ -15,6 +15,7 @@ export const salesEnIE = {
   "sales.flag.vat_differs": "VAT differs from the till",
   "sales.flag.old_prices": "Priced at older, lower prices",
   "sales.flag.rounding_differs": "Cash rounding differs from the shop setting now",
+  "sales.flag.service_differs": "Service charge differs from the shop setting now",
   "sales.review.title": "Sales to review",
   "sales.review.body":
     "These sales were saved with the server's prices and VAT, but something looked odd. VAT differs: the till printed a different VAT total, so check its receipt. Older prices: the sale reached the server late and was priced at a catalogue cheaper than today's, which can mean the till's clock was set back.",

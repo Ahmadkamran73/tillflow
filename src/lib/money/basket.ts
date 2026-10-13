@@ -1,4 +1,5 @@
 import { categoryFor, findRateBp, type RateRow, type ServiceMode, type TaxCategory } from "./rates";
+import { serviceChargeShares } from "./service";
 import { apportion, assertInt, cashRound, roundHalfUp, splitVat } from "./vat";
 
 /** A fixed amount in cents or a percentage in basis points (1000 = 10%). */
@@ -39,6 +40,17 @@ export interface BasketInput {
   rates: readonly RateRow[];
   tender: Tender;
   basketDiscount?: Discount;
+  /**
+   * Restaurant service charge in basis points of the eat-in food and drink AFTER discounts (never
+   * on take-away, deposits or levies). Added as one extra taxed line per charged item line, with
+   * index `lines.length + n`, each taxed at the rate of the item it was charged on.
+   */
+  serviceChargeBp?: number;
+  /**
+   * A fixed service charge in cents, used instead of the percentage: a part of a split bill carries
+   * its whole-cent share of the whole bill's charge, so the parts add up to it exactly.
+   */
+  serviceChargeCents?: number;
   lines: readonly BasketLine[];
 }
 
@@ -52,6 +64,8 @@ export interface VatLine {
   gross: number;
   net: number;
   vat: number;
+  /** A service-charge line: the index of the item line it was charged on (so a refund can pair them). */
+  serviceFor?: number;
 }
 
 export interface Basket {
@@ -59,6 +73,10 @@ export interface Basket {
   nonVatLines: { index: number; kind: "deposit" | "levy"; gross: number }[];
   vatByRate: { rateBp: number; gross: number; net: number; vat: number }[];
   itemsTotal: number;
+  /** The service charge inside `itemsTotal` (its lines have index >= the number of input lines). */
+  serviceChargeTotal: number;
+  /** The eat-in food and drink gross the service charge was worked out on (0 when none). */
+  serviceChargeBase: number;
   vatTotal: number;
   nonVatTotal: number;
   total: number;
@@ -111,7 +129,8 @@ export function discountExceedsThreshold(
   }
   if (full <= 0 || discount <= DISCOUNT_ROUNDING_SLACK_CENTS) return false;
   return (
-    BigInt(discount - DISCOUNT_ROUNDING_SLACK_CENTS) * BigInt(10_000) > BigInt(thresholdBp) * BigInt(full)
+    BigInt(discount - DISCOUNT_ROUNDING_SLACK_CENTS) * BigInt(10_000) >
+    BigInt(thresholdBp) * BigInt(full)
   );
 }
 
@@ -190,6 +209,39 @@ export function calculateBasket(input: BasketInput): Basket {
     return { ...t, rateBp, ...splitVat(t.gross, rateBp) };
   });
 
+  let serviceChargeBase = 0;
+  if (input.serviceChargeBp || input.serviceChargeCents) {
+    const served = vatLines.filter((l) => l.mode === "eat_in" && l.gross > 0);
+    serviceChargeBase = served.reduce((s, l) => s + l.gross, 0);
+    // Nothing eat-in to charge on: no charge (never a throw, which a sync queue would retry forever).
+    const shares =
+      serviceChargeBase === 0
+        ? []
+        : input.serviceChargeCents !== undefined
+          ? apportion(
+              assertInt(input.serviceChargeCents, "serviceChargeCents"),
+              served.map((l) => l.gross),
+            )
+          : serviceChargeShares(served, input.serviceChargeBp!);
+    // One service line per charged item line, taxed at that line's own rate and kept beside it, so a
+    // refund of some of the item's units gives back the same share of its charge.
+    let next = input.lines.length;
+    served.forEach((l, i) => {
+      const gross = shares[i]!;
+      if (gross === 0) return;
+      vatLines.push({
+        index: next++,
+        component: null,
+        mode: "eat_in",
+        taxCategory: l.taxCategory,
+        rateBp: l.rateBp,
+        gross,
+        ...splitVat(gross, l.rateBp),
+        serviceFor: l.index,
+      });
+    });
+  }
+
   const byRate = new Map<number, Basket["vatByRate"][number]>();
   for (const l of vatLines) {
     const r = byRate.get(l.rateBp) ?? { rateBp: l.rateBp, gross: 0, net: 0, vat: 0 };
@@ -200,6 +252,7 @@ export function calculateBasket(input: BasketInput): Basket {
   }
 
   const sum = (xs: { gross: number }[]) => xs.reduce((s, x) => s + x.gross, 0);
+  const serviceChargeTotal = sum(vatLines.filter((l) => l.index >= input.lines.length));
   const itemsTotal = sum(vatLines);
   const nonVatTotal = sum(nonVatLines);
   const total = itemsTotal + nonVatTotal;
@@ -209,6 +262,8 @@ export function calculateBasket(input: BasketInput): Basket {
     nonVatLines,
     vatByRate: [...byRate.values()].sort((a, b) => b.rateBp - a.rateBp),
     itemsTotal,
+    serviceChargeTotal,
+    serviceChargeBase,
     vatTotal: vatLines.reduce((s, l) => s + l.vat, 0),
     nonVatTotal,
     total,

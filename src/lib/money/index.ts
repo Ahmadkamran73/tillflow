@@ -6,3 +6,4 @@ export * from "./cash";
 export * from "./tender";
 export * from "./refund";
 export * from "./shift";
+export * from "./service";

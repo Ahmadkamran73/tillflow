@@ -10,6 +10,8 @@ export type TicketLabels = {
   allergens: string;
   /** Display name of an allergen code. */
   allergen: (code: string) => string;
+  /** Restaurant: the seat a line is for, e.g. "seat 2". */
+  seat?: (n: number) => string;
 };
 
 /** Breaks `s` into lines of at most `cols` characters; continuation lines start with `indent`. */
@@ -44,6 +46,8 @@ export function buildTickets(args: {
   /** Paper width of each station's printer. */
   colsOf: (station: Station) => number;
   stationOf: (line: CartLine) => Station;
+  /** Extra lines under the order line, e.g. "COURSE 2" and "FIRE" for a restaurant course. */
+  heading?: readonly string[];
   labels: TicketLabels;
 }): { station: Station; lines: string[] }[] {
   const { cart, labels } = args;
@@ -54,9 +58,12 @@ export function buildTickets(args: {
     if (mine.length === 0) return [];
     const out: string[] = [station.toUpperCase(), `${labels.order} ${args.number}`];
     if (cart.orderName) out.push(...wrapText(cart.orderName.toUpperCase(), cols));
-    out.push(cart.mode === "take_away" ? labels.takeAway : labels.eatIn, args.time, rule);
+    out.push(cart.mode === "take_away" ? labels.takeAway : labels.eatIn, args.time);
+    for (const h of args.heading ?? []) out.push(...wrapText(h, cols));
+    out.push(rule);
     for (const l of mine) {
-      out.push(...wrapText(`${l.qty} x ${l.name}`, cols));
+      const seat = l.seat && labels.seat ? ` (${labels.seat(l.seat)})` : "";
+      out.push(...wrapText(`${l.qty} x ${l.name}${seat}`, cols));
       for (const m of l.modifiers) out.push(...wrapText(m.name, cols, "   + "));
       if (l.allergens?.length)
         out.push(

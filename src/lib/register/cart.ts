@@ -30,6 +30,11 @@ export type CartLine = {
   /** Allergen codes declared on the variant (cafes, restaurants), shown in the cart and on tickets. */
   allergens?: string[];
   discount?: Discount;
+  /** Restaurant: who at the table it is for (1-based), and the course it comes in (1-based). */
+  seat?: number;
+  course?: number;
+  /** Restaurant: when it was sent to the kitchen or bar (ISO); a sent line is never changed. */
+  sentAt?: string;
 };
 
 export type Cart = {
@@ -40,6 +45,13 @@ export type Cart = {
   mode?: ServiceMode;
   /** Cafes: a name to call the order by. Stays on the device (cart, receipt, tickets), never synced. */
   orderName?: string;
+  /** Restaurant service charge in basis points (the shop's setting when the bill was made); 0 or absent = none. */
+  serviceBp?: number;
+  /**
+   * A fixed service charge in cents for this bill: set only on the parts of a split bill (their share
+   * of the whole charge). Any edit to the order clears it, and the percentage applies again.
+   */
+  serviceCents?: number;
 };
 
 export const ORDER_NAME_MAX = 30;
@@ -55,19 +67,50 @@ export type CartAction =
   | { type: "ageChecked" }
   | { type: "mode"; mode: ServiceMode }
   | { type: "orderName"; name: string }
+  | { type: "service"; bp: number }
+  | { type: "voidSent"; id: string }
   | { type: "stripAmountDiscounts" }
   | { type: "load"; cart: Cart };
 
 const MAX_QTY = 999;
 
 /** A plain line (no modifiers, serial or discount) of the same variant just gains a unit. */
-const mergeable = (l: CartLine) => !l.modifiers.length && !l.serial && !l.discount;
+const mergeable = (l: CartLine) => !l.modifiers.length && !l.serial && !l.discount && !l.sentAt;
+
+const EDITS = new Set<CartAction["type"]>([
+  "add",
+  "qty",
+  "remove",
+  "voidSent",
+  "lineDiscount",
+  "basketDiscount",
+  "mode",
+]);
 
 export function cartReducer(cart: Cart, a: CartAction): Cart {
+  const next = reduce(cart, a);
+  // The fixed share belongs to the order as it was split: once the order changes it no longer fits.
+  const changed =
+    next.lines.length !== cart.lines.length ||
+    next.lines.some((l, i) => l !== cart.lines[i]) ||
+    next.discount !== cart.discount ||
+    next.mode !== cart.mode;
+  return next.serviceCents !== undefined && changed && EDITS.has(a.type)
+    ? { ...next, serviceCents: undefined }
+    : next;
+}
+
+function reduce(cart: Cart, a: CartAction): Cart {
   switch (a.type) {
     case "add": {
       const same = mergeable(a.line)
-        ? cart.lines.find((l) => l.variantId === a.line.variantId && mergeable(l))
+        ? cart.lines.find(
+            (l) =>
+              l.variantId === a.line.variantId &&
+              mergeable(l) &&
+              l.seat === a.line.seat &&
+              l.course === a.line.course,
+          )
         : undefined;
       if (same) return cartReducer(cart, { type: "qty", id: same.id, delta: 1 });
       return { ...cart, lines: [...cart.lines, a.line] };
@@ -76,7 +119,8 @@ export function cartReducer(cart: Cart, a: CartAction): Cart {
       return {
         ...cart,
         lines: cart.lines.flatMap((l) => {
-          if (l.id !== a.id) return [l];
+          // A line already sent to the kitchen is never changed or removed from the till.
+          if (l.id !== a.id || l.sentAt) return [l];
           const qty = l.qty + a.delta;
           if (qty < 1) return [];
           // A fixed discount was sized for the old quantity; the customer re-agrees it.
@@ -90,7 +134,7 @@ export function cartReducer(cart: Cart, a: CartAction): Cart {
         }),
       };
     case "remove":
-      return { ...cart, lines: cart.lines.filter((l) => l.id !== a.id) };
+      return { ...cart, lines: cart.lines.filter((l) => l.id !== a.id || l.sentAt) };
     case "lineDiscount":
       return {
         ...cart,
@@ -107,6 +151,11 @@ export function cartReducer(cart: Cart, a: CartAction): Cart {
         orderName:
           a.name.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, ORDER_NAME_MAX) || undefined,
       };
+    case "voidSent":
+      // A manager approved taking a line already sent to the kitchen off the order.
+      return { ...cart, lines: cart.lines.filter((l) => l.id !== a.id) };
+    case "service":
+      return a.bp === (cart.serviceBp ?? 0) ? cart : { ...cart, serviceBp: a.bp || undefined };
     case "ageChecked":
       return { ...cart, ageChecked: true };
     case "stripAmountDiscounts": {
@@ -132,6 +181,8 @@ export type PricedCart = {
   basket: Basket;
   /** Per cart line: its index in the basket, to look up its (discounted) total. */
   itemIndex: number[];
+  /** Index in the basket where the service charge lines start (they run to the end of `vatLines`). */
+  serviceFrom: number;
 };
 
 /**
@@ -162,10 +213,23 @@ export function priceCart(
     mode: cart.mode ?? "eat_in",
     tender,
     basketDiscount: cart.discount,
+    serviceChargeBp: cart.serviceBp,
+    serviceChargeCents: cart.serviceCents,
     lines,
   });
-  return { basket, itemIndex };
+  return { basket, itemIndex, serviceFrom: lines.length };
 }
+
+/** The service charge lines of a priced cart: one per VAT category. */
+export const serviceLinesOf = ({ basket, serviceFrom }: PricedCart) =>
+  basket.vatLines.filter((v) => v.index >= serviceFrom);
+
+/** The service-charge line charged on the item at basket index `at`, if any. */
+export const serviceLineOf = ({ basket }: PricedCart, at: number) =>
+  basket.vatLines.find((v) => v.serviceFor === at);
+
+/** "Service charge 12.5%" */
+export const serviceChargeName = (bp: number) => `Service charge ${bp / 100}%`;
 
 /** What one cart line comes to after discounts. */
 export const lineTotal = ({ basket }: PricedCart, index: number) =>

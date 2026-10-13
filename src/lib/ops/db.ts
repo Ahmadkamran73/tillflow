@@ -155,7 +155,9 @@ export async function deviceFindSale(tokenHash: string, query: unknown): Promise
 
 /** Customers of the till's own shop matching `q` (name, email, phone). null: not paired. */
 export async function deviceCustomerSearch(tokenHash: string, q: string): Promise<unknown> {
-  const [row] = await db()<{ r: unknown }[]>`select ops.device_customer_search(${tokenHash}, ${q}) as r`;
+  const [row] = await db()<
+    { r: unknown }[]
+  >`select ops.device_customer_search(${tokenHash}, ${q}) as r`;
   return row?.r ?? null;
 }
 
@@ -176,6 +178,22 @@ export async function deviceRefundsKnown(tokenHash: string, ids: string[]): Prom
 export async function deviceRefundMeta(tokenHash: string): Promise<unknown> {
   const [row] = await db()<{ m: unknown }[]>`select ops.device_refund_meta(${tokenHash}) as m`;
   return row?.m ?? null;
+}
+
+/** The shop's service charge and this till's floor plan (ops.device_restaurant_meta). */
+export async function deviceRestaurantMeta(tokenHash: string): Promise<unknown> {
+  const [row] = await db()<{ m: unknown }[]>`select ops.device_restaurant_meta(${tokenHash}) as m`;
+  return row?.m ?? null;
+}
+
+export type TabEventResult = "recorded" | "duplicate";
+
+/** One restaurant tab event from a paired till (ops.record_tab_event); idempotent by event id. */
+export async function recordTabEvent(tokenHash: string, event: unknown): Promise<TabEventResult> {
+  const [row] = await db()<{ r: TabEventResult }[]>`
+    select ops.record_tab_event(${tokenHash}, ${db().json(event as postgres.JSONValue)}) as r`;
+  if (!row) throw new Error("record_tab_event returned no row");
+  return row.r;
 }
 
 export async function recordSyncRejection(payload: unknown): Promise<void> {
@@ -300,7 +318,7 @@ export async function pinAttemptFinish(
   return { locked: row?.locked === true, lockedUntil: row?.locked_until ?? null };
 }
 
-export type ApprovalPurpose = "discount" | "no_sale" | "refund";
+export type ApprovalPurpose = "discount" | "no_sale" | "refund" | "void_item";
 
 /**
  * Turns a manager PIN the server just verified into a single-use proof (register_approvals) for one
@@ -358,4 +376,71 @@ export async function recordShiftEvent(
 export async function shiftZEmailData(shiftId: string): Promise<unknown> {
   const [row] = await db()<{ d: unknown }[]>`select ops.shift_z_email_data(${shiftId}) as d`;
   return row?.d ?? null;
+}
+
+// ---------------------------------------------------------------- bulk import
+
+export type ImportStart = {
+  org_id: string;
+  type?: "products" | "stock" | "customers";
+  mode: "create" | "upsert" | "count" | "received";
+  match_key: "sku" | "barcode" | "email";
+  mapping: Record<string, string | null>;
+  file_name: string;
+  total_rows: number;
+  business_type: string;
+};
+
+/** Marks a confirmed import as running and returns its settings; null if there is nothing to do. */
+export async function importBegin(importId: string, userId: string): Promise<ImportStart | null> {
+  const [row] = await db()<{ r: ImportStart | null }[]>`
+    select ops.import_begin(${importId}, ${userId}) as r`;
+  return row?.r ?? null;
+}
+
+export async function importFile(importId: string): Promise<Buffer | null> {
+  const [row] = await db()<{ b: Buffer | null }[]>`select ops.import_file(${importId}) as b`;
+  return row?.b ?? null;
+}
+
+export type ImportBatchResult = { ref: string; status: "ok" | "error"; code?: string }[];
+
+export async function importApplyBatch(batch: unknown): Promise<ImportBatchResult> {
+  const [row] = await db()<{ r: ImportBatchResult }[]>`
+    select ops.import_apply_batch(${db().json(batch as postgres.JSONValue)}) as r`;
+  if (!row) throw new Error("import_apply_batch returned no row");
+  return row.r;
+}
+
+/** A batch of stock lines (see ops.import_apply_stock). */
+export async function importApplyStock(batch: unknown): Promise<ImportBatchResult> {
+  const [row] = await db()<{ r: ImportBatchResult }[]>`
+    select ops.import_apply_stock(${db().json(batch as postgres.JSONValue)}) as r`;
+  if (!row) throw new Error("import_apply_stock returned no row");
+  return row.r;
+}
+
+/** A batch of customers (see ops.import_apply_customers). */
+export async function importApplyCustomers(batch: unknown): Promise<ImportBatchResult> {
+  const [row] = await db()<{ r: ImportBatchResult }[]>`
+    select ops.import_apply_customers(${db().json(batch as postgres.JSONValue)}) as r`;
+  if (!row) throw new Error("import_apply_customers returned no row");
+  return row.r;
+}
+
+export async function importFinish(
+  importId: string,
+  ok: boolean,
+  errorCount: number,
+  errors: unknown,
+  failure: string | null,
+): Promise<void> {
+  await db()`select ops.import_finish(${importId}, ${ok}, ${errorCount},
+    ${db().json(errors as postgres.JSONValue)}, ${failure})`;
+}
+
+/** Deletes uploaded import files older than 7 days; returns how many. */
+export async function importPurge(): Promise<number> {
+  const [row] = await db()<{ n: number }[]>`select ops.import_purge() as n`;
+  return row?.n ?? 0;
 }

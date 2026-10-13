@@ -148,6 +148,9 @@ const toWire = (s: LocalSale): SyncSale => ({
   completedAt: s.completedAt,
   catalogAsOf: s.catalogAsOf,
   mode: s.cart.mode ?? "eat_in",
+  serviceChargeBp: s.cart.serviceBp ?? 0,
+  serviceChargeCents: s.cart.serviceCents,
+  tabId: s.tabId,
   lines: s.cart.lines.map((l) => ({
     variantId: l.variantId,
     qty: l.qty,
@@ -222,6 +225,9 @@ export function drainOutbox(
           // Approvals the manager gave outside a sale (drawer opens) go after the sales.
           const events = await drainEvents(db, fetchFn, { now, random });
           if (events !== "ok") return { state: events, sent };
+          // Restaurant tab events carry no money and go last: no sale ever waits for one.
+          const tabEvents = await drainTabEvents(db, fetchFn, { now, random });
+          if (tabEvents !== "ok") return { state: tabEvents, sent };
           await db.meta.delete("syncBackoff"); // nothing waiting, so nothing to back off from
           await prune(db, now());
           return { state: "idle", sent };
@@ -423,6 +429,76 @@ async function drainEvents(
         const status = byId.get(e.id);
         if (status === "recorded") await db.events.delete(e.id);
         else if (status === "rejected") await db.events.update(e.id, { syncState: "rejected" });
+        else unresolved++;
+      }
+    });
+    if (unresolved > 0) {
+      await fail(db, opts);
+      return "backoff";
+    }
+  }
+}
+
+const tabEventResponse = z.object({
+  results: z.array(
+    z.object({ id: z.string(), status: z.enum(["recorded", "duplicate", "rejected"]) }),
+  ),
+});
+
+/**
+ * Sends queued restaurant tab events (open, send, fire, transfer, merge, close), oldest first. The
+ * server answers per event: recorded/duplicate leave the device; rejected stays flagged and is never
+ * retried. Any other failure keeps everything and backs off.
+ */
+async function drainTabEvents(
+  db: RegisterDb,
+  fetchFn: typeof fetch,
+  opts: Required<Pick<DrainOptions, "now" | "random">>,
+): Promise<"ok" | "backoff" | "signed-out"> {
+  for (;;) {
+    const batch = (await db.tabEvents.where("syncState").equals("pending").sortBy("id")).slice(
+      0,
+      50,
+    );
+    if (batch.length === 0) return "ok";
+    let res: Response;
+    try {
+      res = await fetchFn("/api/v1/sync/tabs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        cache: "no-store",
+        body: JSON.stringify({
+          events: batch.map((e) => ({
+            id: e.id,
+            tabId: e.tabId,
+            kind: e.kind,
+            cashierUserId: e.cashierUserId,
+            at: e.at,
+            detail: e.detail,
+          })),
+        }),
+      });
+    } catch {
+      await fail(db, opts);
+      return "backoff";
+    }
+    if (res.status === 401 || res.status === 403 || res.status === 404) return "signed-out";
+    let results;
+    try {
+      if (!res.ok) throw new Error(String(res.status));
+      results = tabEventResponse.parse(await res.json()).results;
+    } catch {
+      await fail(db, opts);
+      return "backoff";
+    }
+    const byId = new Map(results.map((r) => [r.id, r.status]));
+    let unresolved = 0;
+    await db.transaction("rw", db.tabEvents, async () => {
+      for (const e of batch) {
+        const status = byId.get(e.id);
+        if (status === "recorded" || status === "duplicate") await db.tabEvents.delete(e.id);
+        else if (status === "rejected") await db.tabEvents.update(e.id, { syncState: "rejected" });
         else unresolved++;
       }
     });

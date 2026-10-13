@@ -26,7 +26,26 @@ export const feedSchema = z.object({
     discountOverrideBp: z.int().min(0).max(10_000),
     /** A cashier's refund above this many cents needs a manager's PIN (organisations.refund_override_cents). */
     refundOverrideCents: z.int().min(0).max(1_000_000).default(2000),
+    /** Restaurant service charge in basis points of the eat-in bill; 0 = none. */
+    serviceChargeBp: z.int().min(0).max(2500).default(0),
   }),
+  /** Restaurants: the dining areas and tables of this till's location (live ones only). */
+  floors: z.array(z.object({ id: z.string(), name: z.string(), sort: z.int() })).default([]),
+  tables: z
+    .array(
+      z.object({
+        id: z.string(),
+        floorId: z.string(),
+        name: z.string(),
+        seats: z.int(),
+        shape: z.enum(["square", "round", "rect"]),
+        x: z.int(),
+        y: z.int(),
+        w: z.int(),
+        h: z.int(),
+      }),
+    )
+    .default([]),
   /** Who can unlock the till: staff of this shop who have set a PIN. The Argon2 hashes let a till check a PIN offline. */
   staff: z.array(
     z.object({

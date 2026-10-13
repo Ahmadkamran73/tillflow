@@ -27,6 +27,8 @@ export type LocalSale = {
   shiftId?: string;
   /** The customer picked at the till (an id only; the name is never kept on the device). */
   customerId?: string;
+  /** The restaurant tab this bill was paid from (a link for covers and reports; never changes the money). */
+  tabId?: string;
   receiptSeq: number;
   completedAt: string;
   /** Inputs only: totals are always re-derived with `priceCart`. */
@@ -160,6 +162,55 @@ export type LocalShiftEvent = {
   rejectedCount?: number;
   syncState: SyncState;
 };
+/**
+ * A restaurant tab on this till (src/lib/register/tabs.ts): a cart tied to a table, with seats and
+ * courses. No money of its own: each bill is paid as an ordinary sale. A split replaces the tab by
+ * one tab per part, all sharing `rootId` (the id events and sales are linked by).
+ */
+export type LocalTab = {
+  id: string;
+  rootId: string;
+  registerId: string;
+  tableId: string | null;
+  /** The table's name when the tab was opened/moved (the plan may change later). */
+  tableName: string;
+  covers: number;
+  cashierUserId: string;
+  openedAt: string;
+  cart: Cart;
+  /** The highest course released to the kitchen so far (0 = none). */
+  firedCourse: number;
+  billAt?: string;
+  /** Set on the parts of a split bill: the tab they came from, and which part this is. */
+  splitFrom?: string;
+  part?: number;
+  state: "open" | "closed";
+  closedAt?: string;
+};
+
+/** Something that happened to a tab, waiting for /api/v1/sync/tabs. Carries no money. */
+export type LocalTabEvent = {
+  /** UUIDv7; also the idempotency key. */
+  id: string;
+  /** The tab's root id. */
+  tabId: string;
+  registerId: string;
+  kind: "open" | "send" | "fire" | "transfer" | "merge" | "close" | "void";
+  cashierUserId: string;
+  at: string;
+  detail: {
+    table?: string;
+    from?: string;
+    to?: string;
+    covers?: number;
+    course?: number;
+    lines?: number;
+    parts?: number;
+    mergedTab?: string;
+  };
+  syncState: SyncState;
+};
+
 export type Meta = { key: string; value: unknown };
 
 /**
@@ -169,7 +220,7 @@ export type Meta = { key: string; value: unknown };
 export type RegisterEvent = {
   /** UUIDv7; also the audit row's id on the server, so a replay writes nothing twice. */
   id: string;
-  kind: "no_sale" | "refund_override";
+  kind: "no_sale" | "refund_override" | "void_item";
   at: string;
   cashierUserId: string;
   /** The server's proof of the manager's PIN; absent when it was checked offline. */
@@ -202,6 +253,8 @@ export class RegisterDb extends Dexie {
   pinAttempts!: Table<PinAttempts, string>;
   refunds!: Table<LocalRefund, string>;
   shiftEvents!: Table<LocalShiftEvent, string>;
+  tabs!: Table<LocalTab, string>;
+  tabEvents!: Table<LocalTabEvent, string>;
 
   constructor(orgId: string) {
     super(`tillflow-${orgId}`);
@@ -280,6 +333,8 @@ export class RegisterDb extends Dexie {
     this.version(6).stores({ refunds: "id, syncState, originalSaleId" });
     // v7 (step 2.3): shifts wait in their own outbox; sales and refunds carry a shiftId.
     this.version(7).stores({ shiftEvents: "id, syncState, shiftId" });
+    // v8 (step 2.6): restaurant tabs and their events.
+    this.version(8).stores({ tabs: "id, rootId, tableId, state", tabEvents: "id, syncState" });
   }
 }
 

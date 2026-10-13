@@ -281,6 +281,7 @@ describe("drainOutbox", () => {
         "mode",
         "receiptSeq",
         "roundCash",
+        "serviceChargeBp",
         "tenders",
       ].sort(),
     );

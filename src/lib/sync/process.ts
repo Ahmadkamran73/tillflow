@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { discountNeedsOverride, settleTenders, type Settlement } from "@/lib/money";
+import {
+  discountNeedsOverride,
+  serviceChargeWithin,
+  settleTenders,
+  type Settlement,
+} from "@/lib/money";
 import { lineTotal, unitWithModifiers, type Cart, type PricedCart } from "@/lib/register/cart";
 import { SaleError } from "@/lib/register/sale-input";
 import { stripReferences } from "@/lib/register/tender-input";
@@ -34,6 +39,8 @@ export type SyncCtx = {
    * with its own `roundCash`. Only compared with it, to leave an audit note when they differ.
    */
   shopRoundCash: boolean;
+  /** The shop's CURRENT service charge (basis points). A sale is priced with its own; a difference is flagged. */
+  shopServiceChargeBp: number;
   /**
    * TRUSTED callers only (the back office re-running a held sale: the signed-in manager). The sync
    * route for tills never sets this; a till can only present an approvalId.
@@ -58,7 +65,7 @@ export const VAT_TOLERANCE_CENTS = 0;
 export const LATE_SYNC_MS = 60 * 60_000;
 
 /** Saved, but worth a manager's look. Keep in step with the sales_review_flags check in SQL. */
-export type ReviewFlag = "vat_differs" | "old_prices" | "rounding_differs";
+export type ReviewFlag = "vat_differs" | "old_prices" | "rounding_differs" | "service_differs";
 
 /** A real UUID, or undefined: an id that only looks like one would make the database throw and block the till. */
 const uuidOfField = (raw: unknown, field: string): string | undefined => {
@@ -262,6 +269,19 @@ async function processOne(raw: unknown, ctx: SyncCtx, deps: SyncDeps): Promise<S
     });
   }
 
+  // A part of a split bill carries a fixed share of the charge: it must sit within 1.5c of what the
+  // percentage gives on this bill's own food and drink, so a till cannot name any amount it likes.
+  if (
+    sale.serviceChargeCents !== undefined &&
+    !serviceChargeWithin(
+      match.priced.basket.serviceChargeBase,
+      sale.serviceChargeBp,
+      sale.serviceChargeCents,
+    )
+  ) {
+    return reject({ reason: "cannot_price", detail: { message: "service charge share" } });
+  }
+
   const settlement: Settlement = match.settlement;
   const known = new Map(ctx.tenderTypes.map((t) => [t.id, t.method]));
   if (sale.tenders.some((t) => t.typeId !== null && known.get(t.typeId) !== t.method)) {
@@ -292,12 +312,22 @@ async function processOne(raw: unknown, ctx: SyncCtx, deps: SyncDeps): Promise<S
   // Priced with the mode it was rung up with (never the shop's current one); if the shop's setting
   // has changed since, the sale still syncs unchanged and a manager sees it under Needs attention.
   if (sale.roundCash !== ctx.shopRoundCash) reviewFlags.push("rounding_differs");
+  // The sale carries the charge it was rung up with (so a setting changed meanwhile cannot reject
+  // it); a different one than the shop has now is saved but a manager sees it. A till that leaves
+  // the charge off to undercharge shows up here.
+  // A bill paid from a restaurant tab sent as take-away would skip the charge (and change the VAT rate).
+  if (
+    sale.serviceChargeBp !== ctx.shopServiceChargeBp ||
+    (sale.tabId && sale.mode === "take_away" && ctx.shopServiceChargeBp > 0)
+  )
+    reviewFlags.push("service_differs");
 
   let outcome;
   try {
     outcome = await deps.recordSale({
       shift_id: sale.shiftId ?? null,
       customer_id: sale.customerId ?? null,
+      tab_id: sale.tabId ?? null,
       ...buildSaleRecord({
         orgId: ctx.orgId,
         registerId: ctx.registerId,

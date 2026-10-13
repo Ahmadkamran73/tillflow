@@ -134,6 +134,21 @@ export async function hydrated(page: Page) {
   });
 }
 
+/** For screens with no form: the button is on the page and React has attached its handlers. */
+export async function buttonHydrated(page: Page, name: string) {
+  const button = page.getByRole("button", { name });
+  await button.waitFor();
+  await page.waitForFunction(
+    (label) =>
+      [...document.querySelectorAll("button")].some(
+        (b) =>
+          b.textContent?.trim() === label &&
+          Object.keys(b).some((k) => k.startsWith("__reactProps$")),
+      ),
+    name,
+  );
+}
+
 // ---------------------------------------------------------------- till pairing and PINs (step 1.7)
 
 export const TILL_NAME = "Maeve";

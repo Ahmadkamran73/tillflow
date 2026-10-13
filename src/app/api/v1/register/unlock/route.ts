@@ -19,7 +19,7 @@ const body = z.strictObject({
   /** unlock: a cashier starts serving. override: a manager approves one action. */
   purpose: z.enum(["unlock", "override"]),
   /** What an override is for; the approval the server issues is good for this and nothing else. */
-  approvalFor: z.enum(["discount", "no_sale", "refund"]).optional(),
+  approvalFor: z.enum(["discount", "no_sale", "refund", "void_item"]).optional(),
   /** A refund approval names the sale it is for and the most it may be spent on (cents). */
   saleId: z.uuid().optional(),
   maxCents: z.int().min(0).max(100_000_000).optional(),

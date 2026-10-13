@@ -59,6 +59,8 @@ describe("calculateBasket", () => {
       nonVatLines: [],
       vatByRate: [],
       itemsTotal: 0,
+      serviceChargeTotal: 0,
+      serviceChargeBase: 0,
       vatTotal: 0,
       nonVatTotal: 0,
       total: 0,
@@ -390,5 +392,59 @@ describe("property: 1,000 random baskets", () => {
         sale.vatLines.map((l) => [-l.gross || 0, -l.vat || 0]),
       );
     }
+  });
+});
+
+describe("service charge in the basket", () => {
+  const lines = [item(3000, "CATERING"), item(1000, "STANDARD"), item(500, "CATERING", 2)];
+  it("adds one line per charged item, at that item's own rate, tied to it", () => {
+    const b = basket(lines, { serviceChargeBp: 1250 });
+    const extra = b.vatLines.filter((l) => l.index >= lines.length);
+    expect(extra.map((l) => l.rateBp)).toEqual([900, 2300, 900]);
+    expect(extra.map((l) => l.index)).toEqual([3, 4, 5]);
+    expect(extra.map((l) => l.serviceFor)).toEqual([0, 1, 2]);
+    expect(extra.map((l) => l.gross)).toEqual([375, 125, 125]);
+    expect(b.serviceChargeTotal).toBe(625); // 12.5% of 5000
+    expect(b.itemsTotal).toBe(5625);
+    expect(b.total).toBe(5625);
+    for (const l of extra) expect(l.net + l.vat).toBe(l.gross);
+  });
+  it("is charged after discounts and never on take-away or refunds", () => {
+    expect(
+      basket(lines, { serviceChargeBp: 1000, basketDiscount: { amount: 500 } }).serviceChargeTotal,
+    ).toBe(450);
+    expect(
+      basket([item(1000)], { serviceChargeBp: 1000, mode: "take_away" }).serviceChargeTotal,
+    ).toBe(0);
+    expect(basket([item(-1000)], { serviceChargeBp: 1000 }).serviceChargeTotal).toBe(0);
+  });
+  it("does nothing at 0 or when it rounds to nothing", () => {
+    expect(basket(lines).serviceChargeTotal).toBe(0);
+    expect(basket([item(0)], { serviceChargeBp: 1000 }).vatLines).toHaveLength(1);
+    expect(basket([item(1, "ZERO")], { serviceChargeBp: 100 }).vatLines).toHaveLength(1);
+  });
+});
+
+describe("a fixed service charge in the basket", () => {
+  const lines = [item(3000, "CATERING"), item(1000, "STANDARD")];
+  it("is shared over the eat-in lines by their gross, grouped by rate, and replaces the percentage", () => {
+    const b = basket(lines, { serviceChargeBp: 1250, serviceChargeCents: 101 });
+    expect(b.serviceChargeTotal).toBe(101);
+    expect(b.serviceChargeBase).toBe(4000);
+    expect(b.vatLines.filter((l) => l.index >= lines.length).map((l) => l.gross)).toEqual([76, 25]);
+    for (const l of b.vatLines) expect(l.net + l.vat).toBe(l.gross);
+  });
+  it("a fixed charge of 0 means none, even with a percentage", () => {
+    const b = basket(lines, { serviceChargeBp: 1250, serviceChargeCents: 0 });
+    expect(b.serviceChargeTotal).toBe(0);
+    expect(b.vatLines).toHaveLength(2);
+  });
+  it("charges nothing, and never throws, when there is nothing eat-in to charge on", () => {
+    const b = basket([item(1000)], { serviceChargeCents: 10, mode: "take_away" });
+    expect(b.serviceChargeTotal).toBe(0);
+    expect(b.serviceChargeBase).toBe(0);
+  });
+  it("the base is 0 without a charge", () => {
+    expect(basket(lines).serviceChargeBase).toBe(0);
   });
 });

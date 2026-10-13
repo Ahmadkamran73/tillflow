@@ -27,6 +27,7 @@ export async function completeSale(
     exchangeRefundId?: string;
     /** The customer rung up for, if one was picked. */
     customerId?: string;
+    tabId?: string;
     cart: Cart;
     tenders: LocalTender[];
     roundCash?: boolean;
@@ -50,6 +51,7 @@ export async function completeSale(
       approvalId: input.approvalId,
       shiftId: shift?.id,
       customerId: input.customerId,
+      tabId: input.tabId,
       receiptSeq: seq,
       completedAt: new Date().toISOString(),
       cart: input.cart,

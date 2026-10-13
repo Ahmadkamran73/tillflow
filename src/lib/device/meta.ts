@@ -90,3 +90,42 @@ const feedMeta = z.object({
 
 /** The shop header, the till itself, tax rates and the staff picker (ops.device_feed_meta). */
 export const parseFeedMeta = (raw: unknown) => feedMeta.parse(raw);
+
+const floorRow = z.object({ id: z.string(), name: z.string(), sort: z.int() });
+const tableRow = z.object({
+  id: z.string(),
+  floor_id: z.string(),
+  name: z.string(),
+  seats: z.int().min(1).max(30),
+  shape: z.enum(["square", "round", "rect"]),
+  x: z.int(),
+  y: z.int(),
+  w: z.int(),
+  h: z.int(),
+});
+
+/** The shop's service charge and this till's floor plan (ops.device_restaurant_meta). */
+export function parseRestaurantMeta(raw: unknown) {
+  const m = z
+    .object({
+      service_charge_bp: z.int().min(0).max(2500),
+      floors: z.array(floorRow),
+      tables: z.array(tableRow),
+    })
+    .parse(raw);
+  return {
+    serviceChargeBp: m.service_charge_bp,
+    floors: m.floors,
+    tables: m.tables.map((t) => ({
+      id: t.id,
+      floorId: t.floor_id,
+      name: t.name,
+      seats: t.seats,
+      shape: t.shape,
+      x: t.x,
+      y: t.y,
+      w: t.w,
+      h: t.h,
+    })),
+  };
+}

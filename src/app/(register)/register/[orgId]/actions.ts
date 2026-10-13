@@ -7,7 +7,7 @@ import { deviceFeedMeta, deviceSaleCatalogAsOf, deviceTenderTypes } from "@/lib/
 import { sendMail } from "@/lib/email";
 import { t } from "@/lib/i18n";
 import { rateLimit } from "@/lib/rate-limit";
-import { settleTenders } from "@/lib/money";
+import { serviceChargeWithin, settleTenders } from "@/lib/money";
 import { priceRows } from "@/lib/register/price-server";
 import { buildReceipt, receiptLabels, receiptText } from "@/lib/register/receipt";
 import { emailReceiptInput, SaleError } from "@/lib/register/sale-input";
@@ -71,6 +71,16 @@ export async function emailReceipt(orgId: string, raw: unknown): Promise<EmailRe
   } catch (e) {
     return { ok: false, reason: e instanceof SaleError ? "prices" : "failed" };
   }
+  // A part of a split bill names a fixed share of the charge: it must fit the percentage.
+  if (
+    data.serviceChargeCents !== undefined &&
+    !serviceChargeWithin(
+      priced.priced.basket.serviceChargeBase,
+      data.serviceChargeBp,
+      data.serviceChargeCents,
+    )
+  )
+    return { ok: false, reason: "prices" };
   // The payments must settle the server's total exactly as the till showed it.
   const settlement = settleTenders(
     priced.priced.basket.total,

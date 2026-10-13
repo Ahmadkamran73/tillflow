@@ -12,6 +12,7 @@ export {
   deviceFeedTable,
   deviceFindSale,
   deviceRefundMeta,
+  deviceRestaurantMeta,
   deviceRefundsKnown,
   deviceSaleCatalogAsOf,
   deviceSalesKnown,
@@ -24,5 +25,6 @@ export {
   pinAttemptFinish,
   recordRegisterEvents,
   recordShiftEvent,
+  recordTabEvent,
   type FeedTable,
 } from "@/lib/ops/db";

@@ -62,6 +62,10 @@ export const saleDetail = z.object({
 export type SaleDetail = z.infer<typeof saleDetail>;
 export type SaleDetailLine = SaleDetail["lines"][number];
 
+/** A service-charge line: an item line with no variant, named "Service charge ...". */
+export const isServiceLine = (l: { kind: string; variant_id: string | null; name: string }) =>
+  l.kind === "item" && l.variant_id === null && l.name.startsWith("Service charge");
+
 export const saleDetails = z.array(saleDetail);
 
 /**

@@ -66,6 +66,9 @@ export default async function ProductsPage({
               {t("modifiers.title")}
             </Link>
           ) : null}
+          <Link href={`/o/${orgId}/products/import`} className={pill}>
+            {t("import.link")}
+          </Link>
           <Link
             href={`/o/${orgId}/products/new`}
             className="bg-primary text-primary-foreground flex h-12 items-center rounded-full px-5 text-sm font-medium"

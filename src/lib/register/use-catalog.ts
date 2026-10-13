@@ -21,6 +21,8 @@ export type CatalogData = {
   modifiers: Feed["modifiers"];
   productGroups: Feed["productGroups"];
   parked: ParkedSale[];
+  floors: Feed["floors"];
+  tables: Feed["tables"];
 };
 
 /**
@@ -48,6 +50,7 @@ export function useCatalog(db: RegisterDb | null): CatalogData | null {
         staff,
         tenderTypes,
         registerId,
+        floorPlan,
       ] = await Promise.all([
         db.meta.get("org"),
         db.meta.get("taxRates"),
@@ -62,6 +65,7 @@ export function useCatalog(db: RegisterDb | null): CatalogData | null {
         db.meta.get("staff"),
         db.meta.get("tenderTypes"),
         db.meta.get("registerId"),
+        db.meta.get("floorPlan"),
       ]);
       return {
         org: org?.value as Feed["org"] | undefined,
@@ -77,6 +81,8 @@ export function useCatalog(db: RegisterDb | null): CatalogData | null {
         modifiers,
         productGroups,
         parked,
+        floors: (floorPlan?.value as { floors?: Feed["floors"] } | undefined)?.floors ?? [],
+        tables: (floorPlan?.value as { tables?: Feed["tables"] } | undefined)?.tables ?? [],
       };
     }).subscribe({ next: setData, error: () => setData(null) });
     return () => sub.unsubscribe();

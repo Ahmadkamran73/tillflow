@@ -1,9 +1,11 @@
 import { catalogEnIE } from "./catalog-en-IE";
 import { customersEnIE } from "./customers-en-IE";
+import { importEnIE } from "./import-en-IE";
 import { deviceEnIE } from "./device-en-IE";
 import { inventoryEnIE } from "./inventory-en-IE";
 import { refundsEnIE } from "./refunds-en-IE";
 import { registerEnIE } from "./register-en-IE";
+import { restaurantEnIE } from "./restaurant-en-IE";
 import { salesEnIE } from "./sales-en-IE";
 import { shiftsEnIE } from "./shifts-en-IE";
 import { tendersEnIE } from "./tenders-en-IE";
@@ -181,6 +183,8 @@ export const enIE = {
   ...tendersEnIE,
   ...refundsEnIE,
   ...customersEnIE,
+  ...importEnIE,
+  ...restaurantEnIE,
 } as const;
 
 export type MessageKey = keyof typeof enIE;

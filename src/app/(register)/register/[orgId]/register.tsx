@@ -3,8 +3,12 @@
 import {
   ArchiveIcon,
   CheckIcon,
+  ArrowLeftRightIcon,
   ClockIcon,
+  FlameIcon,
   LockIcon,
+  ReceiptTextIcon,
+  SendIcon,
   MinusIcon,
   ChefHatIcon,
   PauseIcon,
@@ -30,6 +34,7 @@ import { presets } from "@/config/business-type-presets";
 import { t } from "@/lib/i18n";
 import {
   discountNeedsOverride,
+  evenShares,
   formatCents,
   localDate,
   settleTenders,
@@ -59,9 +64,23 @@ import {
   type ExchangeDraft,
   type LocalRefund,
   type LocalSale,
+  type LocalTab,
   type LocalTender,
   type RegisterDb,
 } from "@/lib/register/db";
+import {
+  closeTab,
+  mergeTabs,
+  openTab,
+  openTabs,
+  pendingSend,
+  pruneTabs,
+  recordSend,
+  requestBill,
+  saveTabCart,
+  splitTab,
+  transferTab,
+} from "@/lib/register/tabs";
 import { completeExchange } from "@/lib/register/refund";
 import { buildRefundReceipt, refundReceiptText } from "@/lib/register/refund-receipt";
 import { saleIdOfCode } from "@/lib/register/refund";
@@ -127,12 +146,17 @@ import {
   XReportDialog,
 } from "./shift-dialogs";
 import { OverrideDialog } from "./override-dialog";
+import { TableMap } from "./table-map";
+import { CoversDialog, MoveDialog, SplitDialog, TabPicker } from "./tab-dialogs";
 
 /** Nobody touches the till for this long and it locks itself. */
 const IDLE_LOCK_MS = 5 * 60_000;
 
 /** What the manager is being asked to approve. */
-type OverrideAsk = { kind: "discount"; key: string; percent: string } | { kind: "noSale" };
+type OverrideAsk =
+  | { kind: "discount"; key: string; percent: string }
+  | { kind: "noSale" }
+  | { kind: "voidItem"; lineId: string };
 
 type Flow = {
   product: FeedProduct;
@@ -163,7 +187,11 @@ type Dialog =
   | { kind: "cashMove"; movement: "in" | "out" }
   | { kind: "xReport"; summary: ShiftSummary; status: string }
   | { kind: "closeShift"; summary: ShiftSummary }
-  | { kind: "shiftClosed"; closed: ClosedShift; status: string };
+  | { kind: "shiftClosed"; closed: ClosedShift; status: string }
+  | { kind: "covers"; table: { id: string; name: string; seats: number } }
+  | { kind: "tabPick"; table: { id: string; name: string } }
+  | { kind: "split" }
+  | { kind: "move" };
 
 /** A sale in progress older than this is dropped rather than restored. */
 const CART_KEEP_MS = 12 * 3_600_000;
@@ -269,8 +297,11 @@ export function Register({ orgId }: { orgId: string }) {
       live = false;
     };
   }, [db]);
+  // Set while a restaurant tab is open: the tab holds its own cart, so it is not also kept as the
+  // sale in progress (a reload would otherwise restore it into a quick sale).
+  const tabOpenRef = useRef(false);
   useEffect(() => {
-    if (!db || !cartRestored) return;
+    if (!db || !cartRestored || tabOpenRef.current) return;
     if (cart.lines.length === 0) void db.meta.delete("currentCart");
     else void db.meta.put({ key: "currentCart", value: { cart, savedAt: Date.now() } });
   }, [db, cart, cartRestored]);
@@ -324,6 +355,44 @@ export function Register({ orgId }: { orgId: string }) {
   const preset = data?.org ? presets[data.org.businessType] : null;
   // Cash is rounded to 5c only in shops whose preset says so.
   const roundCash = preset?.register.cashRounding5c ?? true;
+
+  // Table service (restaurants): tabs live in IndexedDB; the cart on screen is the open tab cart.
+  const tablePlan = !!preset?.register.tablePlan;
+  const [tabs, setTabs] = useState<LocalTab[]>([]);
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const [quick, setQuick] = useState(false);
+  // Send, Fire and Bill ignore a second tap while one is working (no duplicate kitchen tickets).
+  const tabBusy = useRef(false);
+  // "Release table" asks once more before it voids the tab.
+  const [confirmRelease, setConfirmRelease] = useState(false);
+  const [seat, setSeat] = useState(1);
+  const [course, setCourse] = useState(1);
+  const activeTab = tabs.find((x) => x.id === activeTabId) ?? null;
+  useEffect(() => {
+    tabOpenRef.current = !!activeTabId;
+  }, [activeTabId]);
+  const showMap = tablePlan && !activeTab && !quick;
+  useEffect(() => {
+    if (!db) return;
+    let live = true;
+    void pruneTabs(db)
+      .then(() => openTabs(db))
+      .then((rows) => live && setTabs(rows));
+    return () => {
+      live = false;
+    };
+  }, [db]);
+  // The open tab keeps the cart as it is edited (seats, courses, sent lines).
+  useEffect(() => {
+    if (!db || !activeTabId) return;
+    void saveTabCart(db, activeTabId, cart);
+  }, [db, activeTabId, cart]);
+  // A tab is charged the shop service charge; a quick sale never is.
+  const serviceBp = data?.org?.serviceChargeBp ?? 0;
+  useEffect(() => {
+    if (!tablePlan) return;
+    dispatch({ type: "service", bp: activeTabId ? serviceBp : 0 });
+  }, [tablePlan, activeTabId, serviceBp]);
 
   // Lookups over the local catalogue.
   const index = useMemo(() => {
@@ -428,6 +497,7 @@ export function Register({ orgId }: { orgId: string }) {
       serial: flow.serial,
       warrantyMonths: warrantyOf(variant.attributes),
       allergens: allergensOf(variant.attributes),
+      ...(activeTab ? { seat, course } : {}),
     };
     dispatch({ type: "add", line });
     say(t("register.added", { name: line.name }));
@@ -546,16 +616,30 @@ export function Register({ orgId }: { orgId: string }) {
    * printer prints nothing; a browser-mode or failed one goes to the browser print window.
    */
   async function printTickets(sale: LocalSale): Promise<string> {
-    if (!preset?.register.kitchenTickets || !data?.org) return "";
-    const tickets = buildTickets({
+    return printTicketSet({
       cart: sale.cart,
       number: receiptNo(tillName(sale.registerId), sale.receiptSeq),
+      at: sale.completedAt,
+    });
+  }
+
+  async function printTicketSet(args: {
+    cart: Cart;
+    number: string;
+    at: string;
+    heading?: string[];
+  }): Promise<string> {
+    if (!preset?.register.kitchenTickets || !data?.org) return "";
+    const tickets = buildTickets({
+      cart: args.cart,
+      number: args.number,
+      heading: args.heading,
       time: new Intl.DateTimeFormat("en-IE", {
         timeZone: data.org.timezone,
         hour: "2-digit",
         minute: "2-digit",
         hourCycle: "h23",
-      }).format(new Date(sale.completedAt)),
+      }).format(new Date(args.at)),
       colsOf: (s) => stationSetup.printers[s]?.cols ?? 42,
       stationOf: (l) =>
         stationSetup.categories[index.products.get(l.productId)?.categoryId ?? ""] ?? "kitchen",
@@ -565,6 +649,7 @@ export function Register({ orgId }: { orgId: string }) {
         takeAway: t("receipt.takeAway"),
         allergens: t("ticket.allergens"),
         allergen: allergenName,
+        seat: (n) => t("tab.ticketSeat", { n }),
       },
     });
     const fallback: string[] = [];
@@ -611,7 +696,11 @@ export function Register({ orgId }: { orgId: string }) {
   };
 
   /** Queues what a manager approved outside a sale (it becomes an audit row on the server). */
-  async function queueEvent(kind: "no_sale", approver: { userId: string; approvalId?: string }) {
+  async function queueEvent(
+    kind: "no_sale" | "void_item",
+    approver: { userId: string; approvalId?: string },
+    detail: Record<string, string | number | boolean> = {},
+  ) {
     if (!db || !cashier) return;
     await db.events.add({
       id: uuidv7(),
@@ -621,10 +710,36 @@ export function Register({ orgId }: { orgId: string }) {
       // Verified by the server when there is an approvalId; otherwise only a claim, logged as one.
       approvalId: approver.approvalId,
       claimedApprover: approver.approvalId ? undefined : approver.userId,
-      detail: {},
+      detail,
       syncState: "pending",
     });
     outbox.kick();
+  }
+
+  /**
+   * A manager approved taking a line already sent to the kitchen off the order: it leaves the
+   * order, an audit event is queued (verified when the server saw the PIN), and a cancellation
+   * ticket tells the kitchen or bar to stop making it.
+   */
+  async function voidSentLine(lineId: string, approver: { userId: string; approvalId?: string }) {
+    const tab = liveTab();
+    const line = tab?.cart.lines.find((l) => l.id === lineId);
+    if (!tab || !line) return;
+    dispatch({ type: "voidSent", id: lineId });
+    await queueEvent("void_item", approver, {
+      table: tab.tableName,
+      item: line.name.slice(0, 80),
+      qty: line.qty,
+      course: line.course ?? 1,
+    });
+    const printed = await printTicketSet({
+      cart: { ...tab.cart, lines: [line] },
+      number: t("tab.ticketTable", { name: tab.tableName }),
+      at: new Date().toISOString(),
+      heading: [t("tab.ticketCancel")],
+    });
+    say(`${t("tab.voided", { name: line.name })} ${printed}`.trim());
+    focusCart();
   }
 
   async function openDrawer(approver: { userId: string; approvalId?: string }) {
@@ -746,6 +861,7 @@ export function Register({ orgId }: { orgId: string }) {
       id: exchangeDraft?.saleId,
       exchangeRefundId: exchangeDraft?.refundId,
       customerId: customer?.id,
+      tabId: activeTab?.rootId,
       cart,
       tenders,
       roundCash,
@@ -779,8 +895,19 @@ export function Register({ orgId }: { orgId: string }) {
         exchangeRefund.legs.some((l) => l.method === "cash"),
       );
     }
-    // The tickets go first: the kitchen can start while the receipt prints.
-    const ticketStatus = await printTickets(sale);
+    // The tickets go first: the kitchen can start while the receipt prints. A tab sent its items
+    // as it went; anything still unsent when the bill is paid goes now, so nothing is missed.
+    if (activeTab) await closeTab(db, activeTab, { cashierUserId: cashier.userId });
+    const unsent = sale.cart.lines.filter((l) => !l.sentAt);
+    const ticketStatus = activeTab
+      ? unsent.length
+        ? await printTicketSet({
+            cart: { ...sale.cart, lines: unsent },
+            number: t("tab.ticketTable", { name: activeTab.tableName }),
+            at: sale.completedAt,
+          })
+        : ""
+      : await printTickets(sale);
     // The drawer opens with the receipt only when cash was taken.
     const status =
       `${t("register.saved")} ${await print(sale, { kick: tenders.some((x) => x.method === "cash") })} ${ticketStatus}`.trim();
@@ -854,7 +981,179 @@ export function Register({ orgId }: { orgId: string }) {
     dispatch({ type: "load", cart: emptyCart });
     setCustomer(null);
     setDialog(null);
+    setActiveTabId(null);
+    setQuick(false);
+    void reloadTabs();
     focusCart();
+  }
+
+  // ---- Table service ------------------------------------------------------------------------
+  async function reloadTabs() {
+    if (db) setTabs(await openTabs(db));
+  }
+
+  function enterTab(tab: LocalTab) {
+    setActiveTabId(tab.id);
+    dispatch({ type: "load", cart: tab.cart });
+    setSeat(1);
+    setCourse(Math.min(4, Math.max(1, tab.firedCourse + 1)));
+    setConfirmRelease(false);
+    say(
+      tab.part
+        ? t("tables.onTablePart", { name: tab.tableName, part: tab.part })
+        : t("tables.onTable", { name: tab.tableName, covers: tab.covers }),
+    );
+    setQuick(false);
+    setCustomer(null);
+    setDialog(null);
+    focusCart();
+  }
+
+  function leaveTab() {
+    setActiveTabId(null);
+    setQuick(false);
+    dispatch({ type: "load", cart: emptyCart });
+    setCustomer(null);
+    setConfirmRelease(false);
+    void reloadTabs();
+    // The table map takes the cart's place: focus its heading, not the cart's.
+    requestAnimationFrame(() => document.getElementById("tables-heading")?.focus());
+  }
+
+  const tablesById = new Map((data?.tables ?? []).map((x) => [x.id, x]));
+  const tabsAt = (tableId: string) =>
+    tabs.filter((x) => x.state === "open" && x.tableId === tableId);
+
+  /** What a tab comes to (for the list of bills at one table). */
+  function priceTab(tab: LocalTab): number {
+    if (!ctx) return 0;
+    try {
+      return priceCart(tab.cart, ctx).basket.total;
+    } catch {
+      return 0;
+    }
+  }
+
+  function tapTable(table: { id: string; name: string; seats: number }) {
+    const here = tabsAt(table.id);
+    if (here.length === 0) setDialog({ kind: "covers", table });
+    else if (here.length === 1) enterTab(here[0]!);
+    else setDialog({ kind: "tabPick", table });
+  }
+
+  async function openTable(table: { id: string; name: string }, covers: number) {
+    if (!db || !till || !cashier) return;
+    const tab = await openTab(db, {
+      registerId: till.id,
+      table,
+      covers,
+      serviceBp,
+      cashierUserId: cashier.userId,
+    });
+    await reloadTabs();
+    enterTab(tab);
+    outbox.kick();
+  }
+
+  /** The tab as it is now: the cart on screen is always the newest copy. */
+  const liveTab = (): LocalTab | null => (activeTab ? { ...activeTab, cart } : null);
+
+  async function sendCourse(fireNext: boolean) {
+    if (tabBusy.current) return;
+    tabBusy.current = true;
+    try {
+      await sendCourseNow(fireNext);
+    } finally {
+      tabBusy.current = false;
+    }
+  }
+
+  async function sendCourseNow(fireNext: boolean) {
+    const tab = liveTab();
+    if (!db || !tab || !cashier) return;
+    const next = pendingSend(tab, fireNext);
+    if (!next) return say(t(fireNext ? "tab.sent.noFireable" : "tab.sent.nothing"));
+    const saved = await recordSend(db, tab, {
+      cashierUserId: cashier.userId,
+      course: next.course,
+      lineIds: next.lines.map((l) => l.id),
+      fire: fireNext,
+    });
+    dispatch({ type: "load", cart: saved.cart });
+    void reloadTabs();
+    outbox.kick();
+    const printed = await printTicketSet({
+      cart: { ...saved.cart, lines: next.lines },
+      number: t("tab.ticketTable", { name: tab.tableName }),
+      at: new Date().toISOString(),
+      heading: [
+        t("tab.ticketCourse", { n: next.course }),
+        ...(fireNext ? [t("tab.ticketFire")] : []),
+      ],
+    });
+    say(
+      `${t("tab.sent.done", { count: next.lines.length, course: next.course })} ${printed}`.trim(),
+    );
+  }
+
+  async function billTab() {
+    if (tabBusy.current) return;
+    tabBusy.current = true;
+    try {
+      await billTabNow();
+    } finally {
+      tabBusy.current = false;
+    }
+  }
+
+  async function billTabNow() {
+    const tab = liveTab();
+    if (!db || !tab) return;
+    if (tab.cart.lines.length === 0) return say(t("tab.nothingToBill"));
+    await requestBill(db, tab.id);
+    void reloadTabs();
+    setDialog({ kind: "split" });
+  }
+
+  async function splitInto(carts: Cart[]) {
+    const tab = liveTab();
+    if (!db || !tab) return;
+    const children = await splitTab(db, tab, carts);
+    await reloadTabs();
+    enterTab(children[0]!);
+    say(t("split.done", { count: children.length }));
+  }
+
+  const splitLocked =
+    !!activeTab && (!!activeTab.splitFrom || tabsAt(activeTab.tableId ?? "").length > 1);
+
+  async function moveTo(tableId: string, merge: boolean) {
+    const tab = liveTab();
+    const target = tablesById.get(tableId);
+    if (!db || !tab || !target || !cashier) return;
+    if (merge) {
+      const other = tabsAt(tableId)[0];
+      if (!other) return;
+      const merged = await mergeTabs(db, tab, other, { cashierUserId: cashier.userId });
+      await reloadTabs();
+      enterTab(merged);
+      say(t("move.merged", { name: target.name }));
+    } else {
+      await transferTab(db, tab, target, { cashierUserId: cashier.userId });
+      await reloadTabs();
+      setDialog(null);
+      say(t("move.moved", { name: target.name }));
+    }
+    outbox.kick();
+  }
+
+  async function releaseTable() {
+    const tab = liveTab();
+    if (!db || !tab || !cashier || tab.cart.lines.length > 0) return;
+    await closeTab(db, tab, { cashierUserId: cashier.userId }, "void");
+    leaveTab();
+    say(t("tab.released"));
+    outbox.kick();
   }
 
   function pay() {
@@ -1000,6 +1299,77 @@ export function Register({ orgId }: { orgId: string }) {
             }))}
           />
         );
+      case "covers":
+        return (
+          <CoversDialog
+            tableName={dialog.table.name}
+            max={dialog.table.seats}
+            onClose={close}
+            onOpen={(covers) => void openTable(dialog.table, covers)}
+          />
+        );
+      case "tabPick":
+        return (
+          <TabPicker
+            tableName={dialog.table.name}
+            items={tabsAt(dialog.table.id).map((x) => ({
+              id: x.id,
+              part: x.part ?? 1,
+              totalCents: priceTab(x),
+            }))}
+            onClose={close}
+            onPick={(id) => {
+              const tab = tabs.find((x) => x.id === id);
+              if (tab) enterTab(tab);
+            }}
+          />
+        );
+      case "split":
+        return (
+          <SplitDialog
+            cart={cart}
+            whole={{
+              lineGross: priced ? cart.lines.map((_, i) => lineTotal(priced, priced.itemIndex[i]!)) : [],
+              serviceCents: priced?.basket.serviceChargeTotal ?? 0,
+            }}
+            totalCents={priced?.basket.total ?? 0}
+            onClose={close}
+            onSplit={(carts) => void splitInto(carts)}
+            onEven={(payers) => {
+              setDialog(null);
+              if (priced) {
+                const shares = evenShares(priced.basket.total, payers);
+                say(
+                  t("split.eachPays", {
+                    amount: formatCents(shares[0]!),
+                    last: formatCents(shares[shares.length - 1]!),
+                  }),
+                );
+              }
+              void openTender();
+            }}
+          />
+        );
+      case "move": {
+        const here = activeTab?.tableId;
+        const all = data?.tables ?? [];
+        return (
+          <MoveDialog
+            tableName={activeTab?.tableName ?? ""}
+            free={all
+              .filter((x) => tabsAt(x.id).length === 0)
+              .map((x) => ({ id: x.id, label: x.name }))}
+            busy={all
+              .filter(
+                (x) => x.id !== here && tabsAt(x.id).length === 1 && !tabsAt(x.id)[0]!.splitFrom,
+              )
+              .map((x) => ({ id: x.id, label: x.name }))}
+            onClose={close}
+            onTransfer={(id) => void moveTo(id, false)}
+            onMerge={(id) => void moveTo(id, true)}
+          />
+        );
+      }
       case "tender":
         return (
           <TenderDialog
@@ -1019,17 +1389,32 @@ export function Register({ orgId }: { orgId: string }) {
             reason={
               dialog.ask.kind === "discount"
                 ? t("override.discount", { percent: dialog.ask.percent })
-                : t("override.noSale")
+                : dialog.ask.kind === "voidItem"
+                  ? t("tab.voidReason", {
+                      name: cart.lines.find((l) => dialog.ask.kind === "voidItem" && l.id === dialog.ask.lineId)?.name ?? "",
+                    })
+                  : t("override.noSale")
             }
             staff={data?.staff ?? []}
             offline={!online}
-            verify={verify("override", dialog.ask.kind === "discount" ? "discount" : "no_sale")}
+            verify={verify(
+              "override",
+              dialog.ask.kind === "discount"
+                ? "discount"
+                : dialog.ask.kind === "voidItem"
+                  ? "void_item"
+                  : "no_sale",
+            )}
             onClose={close}
             onApproved={async ({ userId, name, approvalId }) => {
               if (dialog.ask.kind === "discount") {
                 setApproval({ userId, approvalId, key: dialog.ask.key });
                 say(t("override.approved", { name }));
                 void openTender();
+              } else if (dialog.ask.kind === "voidItem") {
+                const lineId = dialog.ask.lineId;
+                close();
+                await voidSentLine(lineId, { userId, approvalId });
               } else {
                 close();
                 await openDrawer({ userId, approvalId });
@@ -1268,7 +1653,7 @@ export function Register({ orgId }: { orgId: string }) {
               setDialog({ ...dialog, status: await print(sale, { asInvoice: !!sale.invoice }) })
             }
             onTickets={
-              preset?.register.kitchenTickets
+              preset?.register.kitchenTickets && !tablePlan
                 ? async () => setDialog({ ...dialog, status: await printTickets(sale) })
                 : undefined
             }
@@ -1301,6 +1686,8 @@ export function Register({ orgId }: { orgId: string }) {
                   })),
                   basketDiscount: sale.cart.discount,
                   mode: sale.cart.mode ?? "eat_in",
+                  serviceChargeBp: sale.cart.serviceBp ?? 0,
+                  serviceChargeCents: sale.cart.serviceCents,
                   expectedDueCents: settleTenders(
                     priceSale(sale).basket.total,
                     sale.tenders.map((x) => ({
@@ -1492,6 +1879,16 @@ export function Register({ orgId }: { orgId: string }) {
                 </p>
               )}
             </div>
+            {showMap ? (
+              <TableMap
+                floors={data?.floors ?? []}
+                tables={data?.tables ?? []}
+                tabs={tabs}
+                onTable={tapTable}
+                onQuickSale={() => setQuick(true)}
+              />
+            ) : (
+              <>
             <div className="relative">
               <SearchIcon
                 aria-hidden
@@ -1583,6 +1980,8 @@ export function Register({ orgId }: { orgId: string }) {
                 )}
               </>
             )}
+              </>
+            )}
           </>
         }
         cart={
@@ -1608,6 +2007,122 @@ export function Register({ orgId }: { orgId: string }) {
             >
               {t("register.cart")}
             </h2>
+            {/* Everything above the totals scrolls together, so the tab controls can never squeeze the lines out. */}
+            <div className="min-h-0 flex-1 overflow-y-auto">
+            {showMap && <p className="text-muted-foreground mb-3 text-sm">{t("tables.pickTable")}</p>}
+            {tablePlan && quick && !activeTab && (
+              <Button
+                size="touch"
+                variant="outline"
+                className="mb-3"
+                aria-disabled={cart.lines.length > 0}
+                onClick={() =>
+                  cart.lines.length > 0 ? say(t("register.cartNotEmpty")) : setQuick(false)
+                }
+              >
+                {t("tables.backToTables")}
+              </Button>
+            )}
+            {activeTab && (
+              <div className="mb-3 flex flex-col gap-2">
+                <p className="font-semibold">
+                  {activeTab.part
+                    ? t("tables.onTablePart", { name: activeTab.tableName, part: activeTab.part })
+                    : t("tables.onTable", { name: activeTab.tableName, covers: activeTab.covers })}
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span id="seat-label" className="text-sm font-medium">
+                    {t("tab.seat")}
+                  </span>
+                  <Button
+                    size="icon-touch"
+                    variant="outline"
+                    aria-label={t("tab.seatPrev")}
+                    onClick={() => {
+                      const n = Math.max(1, seat - 1);
+                      setSeat(n);
+                      say(t("tab.seatValue", { n }));
+                    }}
+                  >
+                    <MinusIcon aria-hidden />
+                  </Button>
+                  <span
+                    aria-labelledby="seat-label"
+                    className="min-w-8 text-center text-lg font-semibold tabular-nums"
+                  >
+                    {seat}
+                  </span>
+                  <Button
+                    size="icon-touch"
+                    variant="outline"
+                    aria-label={t("tab.seatNext")}
+                    onClick={() => {
+                      const n = Math.min(activeTab.covers, seat + 1);
+                      setSeat(n);
+                      say(t("tab.seatValue", { n }));
+                    }}
+                  >
+                    <PlusIcon aria-hidden />
+                  </Button>
+                </div>
+                <div role="group" aria-label={t("tab.course")} className="grid grid-cols-4 gap-2">
+                  {[1, 2, 3, 4].map((n) => (
+                    <Button
+                      key={n}
+                      size="touch"
+                      variant={course === n ? "default" : "outline"}
+                      aria-pressed={course === n}
+                      onClick={() => setCourse(n)}
+                    >
+                      {course === n && <CheckIcon aria-hidden />}
+                      {t("tab.courseValue", { n })}
+                    </Button>
+                  ))}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button size="touch" variant="outline" onClick={() => void sendCourse(false)}>
+                    <SendIcon aria-hidden /> {t("tab.send")}
+                  </Button>
+                  <Button size="touch" variant="outline" onClick={() => void sendCourse(true)}>
+                    <FlameIcon aria-hidden /> {t("tab.fireNext")}
+                  </Button>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <Button size="touch" variant="outline" onClick={() => void billTab()}>
+                    <ReceiptTextIcon aria-hidden /> {t("tab.bill")}
+                  </Button>
+                  <Button
+                    size="touch"
+                    variant="outline"
+                    aria-disabled={splitLocked}
+                    onClick={() =>
+                      splitLocked ? say(t("move.splitBlocked")) : setDialog({ kind: "move" })
+                    }
+                  >
+                    <ArrowLeftRightIcon aria-hidden /> {t("tab.move")}
+                  </Button>
+                  {cart.lines.length === 0 ? (
+                    <Button
+                      size="touch"
+                      variant={confirmRelease ? "default" : "outline"}
+                      onClick={() => {
+                        if (confirmRelease) void releaseTable();
+                        else {
+                          setConfirmRelease(true);
+                          say(t("tab.releaseConfirm", { name: activeTab.tableName }));
+                        }
+                      }}
+                    >
+                      {confirmRelease ? t("tab.releaseYes") : t("tab.release")}
+                    </Button>
+                  ) : (
+                    <Button size="touch" variant="outline" onClick={leaveTab}>
+                      {t("tables.backToTables")}
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
             {preset?.register.eatInToggle && (
               <div
                 role="group"
@@ -1650,7 +2165,7 @@ export function Register({ orgId }: { orgId: string }) {
                 </span>
               </div>
             )}
-            <div className="min-h-0 flex-1 overflow-y-auto">
+            <div>
               {cart.lines.length === 0 ? (
                 <p className="text-muted-foreground">{t("register.cartEmpty")}</p>
               ) : (
@@ -1670,9 +2185,17 @@ export function Register({ orgId }: { orgId: string }) {
                           {priced ? formatCents(lineTotal(priced, priced.itemIndex[i]!)) : ""}
                         </span>
                       </div>
-                      {(l.modifiers.length > 0 || l.serial || l.discount) && (
+                      {(l.modifiers.length > 0 || l.serial || l.discount || activeTab) && (
                         <p className="text-muted-foreground text-xs">
                           {[
+                            activeTab
+                              ? t("tab.lineInfo", { seat: l.seat ?? 1, course: l.course ?? 1 })
+                              : "",
+                            l.sentAt
+                              ? t("tab.sent")
+                              : activeTab && (l.course ?? 1) > Math.max(1, activeTab.firedCourse)
+                                ? t("tab.held")
+                                : "",
                             ...l.modifiers.map((m) => m.name),
                             l.serial ? `${t("register.serialTitle")}: ${l.serial}` : "",
                             l.discount ? t("register.line.discounted") : "",
@@ -1688,6 +2211,7 @@ export function Register({ orgId }: { orgId: string }) {
                           size="icon-touch"
                           variant="outline"
                           aria-label={t("register.decrease", { name: l.name })}
+                          aria-disabled={!!l.sentAt}
                           onClick={() => dispatch({ type: "qty", id: l.id, delta: -1 })}
                         >
                           <MinusIcon aria-hidden />
@@ -1702,6 +2226,7 @@ export function Register({ orgId }: { orgId: string }) {
                           size="icon-touch"
                           variant="outline"
                           aria-label={t("register.increase", { name: l.name })}
+                          aria-disabled={!!l.sentAt}
                           onClick={() => dispatch({ type: "qty", id: l.id, delta: 1 })}
                         >
                           <PlusIcon aria-hidden />
@@ -1715,23 +2240,37 @@ export function Register({ orgId }: { orgId: string }) {
                         >
                           <PercentIcon aria-hidden />
                         </Button>
-                        <Button
-                          size="icon-touch"
-                          variant="ghost"
-                          aria-label={t("register.remove", { name: l.name })}
-                          onClick={() => {
-                            dispatch({ type: "remove", id: l.id });
-                            say(t("register.removed", { name: l.name }));
-                            focusCart();
-                          }}
-                        >
-                          <Trash2Icon aria-hidden />
-                        </Button>
+                        {l.sentAt ? (
+                          <Button
+                            size="touch"
+                            variant="outline"
+                            aria-label={t("tab.voidLine", { name: l.name })}
+                            onClick={() =>
+                              setDialog({ kind: "override", ask: { kind: "voidItem", lineId: l.id } })
+                            }
+                          >
+                            <Trash2Icon aria-hidden /> {t("tab.void")}
+                          </Button>
+                        ) : (
+                          <Button
+                            size="icon-touch"
+                            variant="ghost"
+                            aria-label={t("register.remove", { name: l.name })}
+                            onClick={() => {
+                              dispatch({ type: "remove", id: l.id });
+                              say(t("register.removed", { name: l.name }));
+                              focusCart();
+                            }}
+                          >
+                            <Trash2Icon aria-hidden />
+                          </Button>
+                        )}
                       </div>
                     </li>
                   ))}
                 </ul>
               )}
+            </div>
             </div>
             <div className="mt-3 flex flex-col gap-3">
               {pricing === "error" && (
@@ -1748,6 +2287,12 @@ export function Register({ orgId }: { orgId: string }) {
                     <dd>{formatCents(r.vat)}</dd>
                   </div>
                 ))}
+                {priced && priced.basket.serviceChargeTotal > 0 && (
+                  <div className="text-muted-foreground flex justify-between">
+                    <dt>{t("tab.serviceCharge", { percent: ratePercent(cart.serviceBp ?? 0) })}</dt>
+                    <dd>{formatCents(priced.basket.serviceChargeTotal)}</dd>
+                  </div>
+                )}
                 {priced && priced.basket.nonVatTotal !== 0 && (
                   <div className="text-muted-foreground flex justify-between">
                     <dt>{t("register.deposit")}</dt>
