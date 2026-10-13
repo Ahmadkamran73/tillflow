@@ -3,6 +3,7 @@ import { config } from "dotenv";
 import postgres from "postgres";
 import {
   hydrated,
+  buttonHydrated,
   openDashboard,
   openTill,
   signUpAndEnrol,
@@ -68,7 +69,7 @@ test("table of four: two courses, split by seat, one pays card with a tip, one p
   await expect(page.getByRole("status")).toHaveText("Service charge saved.");
 
   await page.goto(`/o/${orgId}/settings/floor-plan`);
-  await page.waitForLoadState("networkidle"); // the editor has no form to wait on
+  await buttonHydrated(page, "Add table");
   await page.getByRole("button", { name: "Add table" }).click();
   await page.getByLabel("Table name").fill("T1");
   // Move it with the keyboard (no drag needed), then save.
@@ -266,7 +267,7 @@ test("a partial refund returns the service charge pro rata, at the item's rate",
   await page.getByRole("button", { name: "Save service charge" }).click();
   await expect(page.getByRole("status")).toHaveText("Service charge saved.");
   await page.goto(`/o/${orgId}/settings/floor-plan`);
-  await page.waitForLoadState("networkidle");
+  await buttonHydrated(page, "Add table");
   await page.getByRole("button", { name: "Add table" }).click();
   await page.getByLabel("Table name").fill("T1");
   await page.getByRole("button", { name: "Save floor plan" }).click();
