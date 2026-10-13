@@ -9,13 +9,14 @@ import { parseUpload, type ImportFileError, type Parsed } from "./parse";
 export { settingsProblem } from "./settings";
 import { buildItems, type RowError } from "./validate";
 import { buildCustomerItems } from "./validate-customers";
+import { buildSupplierItems } from "./validate-suppliers";
 import { buildStockItems } from "./validate-stock";
 
 export const mappingSchema = z.partialRecord(z.enum(FIELDS), z.string().max(200).nullable());
 export const settingsSchema = z.object({
   mapping: mappingSchema,
   mode: z.enum(["create", "upsert", "count", "received"]),
-  matchKey: z.enum(["sku", "barcode", "email"]),
+  matchKey: z.enum(["sku", "barcode", "email", "name"]),
 });
 export type Settings = z.infer<typeof settingsSchema>;
 
@@ -60,13 +61,20 @@ const CHUNK = 1000;
 async function existingKeys(
   supabase: SupabaseClient,
   orgId: string,
-  kind: "sku" | "barcode" | "email",
+  kind: "sku" | "barcode" | "email" | "name",
   keys: string[],
 ): Promise<Set<string>> {
   const found = new Set<string>();
   for (let i = 0; i < keys.length; i += CHUNK) {
     const part = keys.slice(i, i + CHUNK);
-    if (kind === "email") {
+    if (kind === "name") {
+      const { data, error } = await supabase.rpc("import_existing_supplier_names", {
+        p_org: orgId,
+        p_names: part,
+      });
+      if (error) throw error;
+      for (const e of z.array(z.string()).parse(data)) found.add(e);
+    } else if (kind === "email") {
       const { data, error } = await supabase.rpc("import_existing_emails", {
         p_org: orgId,
         p_emails: part,
@@ -169,6 +177,32 @@ export async function analyse(
       willCreate: 0,
       willUpdate: matched,
       willSkip: 0,
+    };
+  }
+
+  if (type.data === "suppliers") {
+    const built = buildSupplierItems(importId, parsed.rows, settings.mapping);
+    const existing = await existingKeys(
+      supabase,
+      orgId,
+      "name",
+      built.items.map((i) => i.key),
+    );
+    let willUpdate = 0;
+    let willSkip = 0;
+    for (const item of built.items) {
+      if (!existing.has(item.key)) continue;
+      if (settings.mode === "upsert") willUpdate += 1;
+      else willSkip += 1;
+    }
+    return {
+      parsed,
+      errors: built.errors,
+      readyRows: built.readyRows,
+      vatDefaulted: 0,
+      willCreate: built.readyRows - willUpdate - willSkip,
+      willUpdate,
+      willSkip,
     };
   }
 

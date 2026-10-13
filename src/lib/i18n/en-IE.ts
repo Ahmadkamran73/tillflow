@@ -1,6 +1,7 @@
 import { catalogEnIE } from "./catalog-en-IE";
 import { customersEnIE } from "./customers-en-IE";
 import { importEnIE } from "./import-en-IE";
+import { suppliersEnIE } from "./suppliers-en-IE";
 import { deviceEnIE } from "./device-en-IE";
 import { inventoryEnIE } from "./inventory-en-IE";
 import { refundsEnIE } from "./refunds-en-IE";
@@ -26,6 +27,7 @@ export const enIE = {
   "nav.products": "Products",
   "nav.inventory": "Inventory",
   "nav.customers": "Customers",
+  "nav.suppliers": "Suppliers",
   "nav.staff": "Staff",
   "nav.reports": "Reports",
   "nav.settings": "Settings",
@@ -183,6 +185,7 @@ export const enIE = {
   ...tendersEnIE,
   ...refundsEnIE,
   ...customersEnIE,
+  ...suppliersEnIE,
   ...importEnIE,
   ...restaurantEnIE,
 } as const;

@@ -197,6 +197,13 @@
       "when": 1791886733365,
       "tag": "0044_import_mapping_type",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1791905432853,
+      "tag": "0046_suppliers",
+      "breakpoints": true
     }
   ]
 }

@@ -14,19 +14,22 @@ const TITLE = {
   products: "import.title",
   stock: "import.title.stock",
   customers: "import.title.customers",
+  suppliers: "import.title.suppliers",
 } as const;
 const INTRO = {
   products: "import.intro",
   stock: "import.intro.stock",
   customers: "import.intro.customers",
+  suppliers: "import.intro.suppliers",
 } as const;
 const BACK = {
   products: "products",
   stock: "inventory",
   customers: "customers",
+  suppliers: "suppliers",
 } as const;
 
-/** /o/<org>/products/import?type=products|stock|customers (products when missing or unknown). */
+/** /o/<org>/products/import?type=products|stock|customers|suppliers (products when missing or unknown). */
 export default async function ImportPage({
   params,
   searchParams,

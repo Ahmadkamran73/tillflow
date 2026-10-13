@@ -294,10 +294,14 @@ export function ImportWizard({
       ? m === "count"
         ? "import.mode.count"
         : "import.mode.received"
-      : importType === "customers"
+      : importType === "customers" || importType === "suppliers"
         ? m === "create"
-          ? "import.mode.createCustomers"
-          : "import.mode.upsertCustomers"
+          ? importType === "customers"
+            ? "import.mode.createCustomers"
+            : "import.mode.createSuppliers"
+          : importType === "customers"
+            ? "import.mode.upsertCustomers"
+            : "import.mode.upsertSuppliers"
         : m === "create"
           ? "import.mode.create"
           : "import.mode.upsert";
@@ -349,8 +353,12 @@ export function ImportWizard({
             </label>
           ))}
         </fieldset>
-        {importType === "customers" ? (
-          <p className="text-sm font-medium">{t("import.customers.privacy")}</p>
+        {importType === "customers" || importType === "suppliers" ? (
+          <p className="text-sm font-medium">
+            {t(
+              importType === "customers" ? "import.customers.privacy" : "import.suppliers.privacy",
+            )}
+          </p>
         ) : null}
         <div className="flex flex-col gap-1">
           <label htmlFor="import-file" className="text-sm font-medium">
@@ -412,7 +420,8 @@ export function ImportWizard({
         {h2(t("import.step.map"))}
         <p className="text-muted-foreground text-sm">
           {t("import.map.intro")} {importType === "stock" ? t("import.map.introStock") : null}
-          {importType === "customers" ? t("import.map.introCustomers") : null}{" "}
+          {importType === "customers" ? t("import.map.introCustomers") : null}
+          {importType === "suppliers" ? t("import.map.introSuppliers") : null}{" "}
           {t("import.map.file", { name: up.fileName, rows: up.totalRows })}
         </p>
         <div className="grid gap-3 sm:grid-cols-2">
@@ -578,15 +587,23 @@ export function ImportWizard({
     return (
       <div className={card}>
         {h2(t("import.step.check"))}
-        {importType === "customers" ? (
-          <p className="text-sm font-medium">{t("import.customers.privacy")}</p>
+        {importType === "customers" || importType === "suppliers" ? (
+          <p className="text-sm font-medium">
+            {t(
+              importType === "customers" ? "import.customers.privacy" : "import.suppliers.privacy",
+            )}
+          </p>
         ) : null}
         <ul aria-live="polite" className="flex flex-col gap-1 text-sm">
           <li>{t("import.check.ready", { count: preview.readyRows })}</li>
           {preview.willCreate && importType !== "stock" ? (
             <li>
               {t(
-                importType === "customers" ? "import.check.customersCreate" : "import.check.create",
+                importType === "customers"
+                  ? "import.check.customersCreate"
+                  : importType === "suppliers"
+                    ? "import.check.suppliersCreate"
+                    : "import.check.create",
                 {
                   count: preview.willCreate,
                 },
@@ -600,16 +617,23 @@ export function ImportWizard({
                   ? "import.check.stock"
                   : importType === "customers"
                     ? "import.check.customersUpdate"
-                    : "import.check.update",
+                    : importType === "suppliers"
+                      ? "import.check.suppliersUpdate"
+                      : "import.check.update",
                 { count: preview.willUpdate },
               )}
             </li>
           ) : null}
           {preview.willSkip ? (
             <li>
-              {t(importType === "customers" ? "import.check.customersSkip" : "import.check.skip", {
-                count: preview.willSkip,
-              })}
+              {t(
+                importType === "customers"
+                  ? "import.check.customersSkip"
+                  : importType === "suppliers"
+                    ? "import.check.suppliersSkip"
+                    : "import.check.skip",
+                { count: preview.willSkip },
+              )}
             </li>
           ) : null}
           {preview.errorRows ? (
@@ -629,7 +653,9 @@ export function ImportWizard({
                 ? "import.mode.titleStock"
                 : importType === "customers"
                   ? "import.mode.titleCustomers"
-                  : "import.mode.title",
+                  : importType === "suppliers"
+                    ? "import.mode.titleSuppliers"
+                    : "import.mode.title",
             )}
           </legend>
           {MODES[importType].map((m) => (
@@ -645,7 +671,7 @@ export function ImportWizard({
             </label>
           ))}
         </fieldset>
-        {importType !== "customers" ? (
+        {importType === "products" || importType === "stock" ? (
           <fieldset className="flex flex-col">
             <legend className="text-sm font-medium">{t("import.match.title")}</legend>
             {(["sku", "barcode"] as const).map((k) => (

@@ -12,7 +12,7 @@ import {
 export type ImportSettings = {
   mapping: Mapping;
   mode: "create" | "upsert" | "count" | "received";
-  matchKey: "sku" | "barcode" | "email";
+  matchKey: "sku" | "barcode" | "email" | "name";
 };
 
 /** What each kind of import starts with. */
@@ -20,6 +20,7 @@ export const DEFAULTS: Record<ImportType, Pick<ImportSettings, "mode" | "matchKe
   products: { mode: "create", matchKey: "sku" },
   stock: { mode: "count", matchKey: "sku" },
   customers: { mode: "create", matchKey: "email" },
+  suppliers: { mode: "create", matchKey: "name" },
 };
 
 /**
@@ -37,7 +38,9 @@ export function settingsProblem(type: ImportType, s: ImportSettings): MessageKey
       ? null
       : "import.err.requiredStock";
   }
-  if (!mapped("name")) return "import.err.requiredCustomers";
+  if (!mapped("name"))
+    return type === "suppliers" ? "import.err.requiredSuppliers" : "import.err.requiredCustomers";
+  if (type === "suppliers") return null;
   if (s.mode === "upsert" && !mapped("email")) return "import.err.requiredEmail";
   return null;
 }

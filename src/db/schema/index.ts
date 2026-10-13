@@ -6,6 +6,7 @@ export * from "./products";
 export * from "./restaurant";
 export * from "./sales";
 export * from "./shifts";
+export * from "./suppliers";
 export * from "./tax";
 export * from "./tenancy";
 export * from "./tenders";

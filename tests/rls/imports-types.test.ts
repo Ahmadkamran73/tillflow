@@ -404,7 +404,7 @@ describe("settings and access for every type", () => {
           ctx.as(
             a.manager,
             () =>
-              ctx.sql`select public.create_import(${a.orgId}, ${randomUUID()}, 'f.csv', ${Buffer.from("A\n1")}, ${1}, ${"suppliers"})`,
+              ctx.sql`select public.create_import(${a.orgId}, ${randomUUID()}, 'f.csv', ${Buffer.from("A\n1")}, ${1}, ${"vendors"})`,
           ),
         ["22023"],
       );
@@ -573,7 +573,7 @@ describe("preview lookup, saved matches and file retention", () => {
       await save("products");
       await save("customers");
       await ctx.denied(() => save("customers"), ["23505"]);
-      await ctx.denied(() => save("suppliers"), ["23514"]);
+      await ctx.denied(() => save("vendors"), ["23514"]);
       const rows = await ctx.as(
         a.manager,
         () => ctx.sql`select type from import_mappings where org_id = ${a.orgId} order by type`,

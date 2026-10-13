@@ -21,8 +21,8 @@ import { buildStockItems } from "@/lib/import/validate-stock";
 const ID = "0197f3a0-0000-7000-8000-000000000001";
 
 describe("import types: fields, templates, auto match", () => {
-  it("has three kinds, each with its own columns, modes and match keys", () => {
-    expect([...IMPORT_TYPES]).toEqual(["products", "stock", "customers"]);
+  it("has four kinds, each with its own columns, modes and match keys", () => {
+    expect([...IMPORT_TYPES]).toEqual(["products", "stock", "customers", "suppliers"]);
     expect(importFieldsFor("stock", "general")).toEqual(["sku", "barcode", "quantity", "notes"]);
     expect(importFieldsFor("customers", "cafe")).toEqual([
       "name",
