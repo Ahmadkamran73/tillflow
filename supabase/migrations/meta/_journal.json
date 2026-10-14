@@ -204,6 +204,20 @@
       "when": 1791905432853,
       "tag": "0046_suppliers",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1791967204275,
+      "tag": "0048_report_summaries",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1791968521284,
+      "tag": "0050_account_exports",
+      "breakpoints": true
     }
   ]
 }

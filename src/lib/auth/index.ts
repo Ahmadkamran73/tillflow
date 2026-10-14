@@ -10,6 +10,6 @@ export {
 } from "./session";
 export type { ApiAuth, AuthUser, Membership } from "./session";
 export { createSupabaseServerClient } from "./server";
-export { isGoogleAuthEnabled } from "./config";
+export { appRedirect, isGoogleAuthEnabled } from "./config";
 export { roles } from "./schemas";
 export type { Role } from "./schemas";

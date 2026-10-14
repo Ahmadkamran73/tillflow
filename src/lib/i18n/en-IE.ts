@@ -1,6 +1,7 @@
 import { catalogEnIE } from "./catalog-en-IE";
 import { customersEnIE } from "./customers-en-IE";
 import { importEnIE } from "./import-en-IE";
+import { reportsEnIE } from "./reports-en-IE";
 import { suppliersEnIE } from "./suppliers-en-IE";
 import { deviceEnIE } from "./device-en-IE";
 import { inventoryEnIE } from "./inventory-en-IE";
@@ -188,6 +189,7 @@ export const enIE = {
   ...suppliersEnIE,
   ...importEnIE,
   ...restaurantEnIE,
+  ...reportsEnIE,
 } as const;
 
 export type MessageKey = keyof typeof enIE;
