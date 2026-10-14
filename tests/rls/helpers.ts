@@ -41,7 +41,7 @@ export type World = { a: Shop; b: Shop };
 class Rollback extends Error {}
 
 /** JWT session facts. Defaults to a fully verified (aal2) password session. */
-export type Session = { aal?: "aal1" | "aal2"; amr?: { method: string }[] };
+export type Session = { aal?: "aal1" | "aal2"; amr?: { method: string; timestamp?: number }[] };
 
 export type Ctx = ReturnType<typeof makeCtx>;
 

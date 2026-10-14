@@ -5,6 +5,9 @@ import { buttonVariants } from "@/components/ui/button";
 import { presets } from "@/config/business-type-presets";
 import { requireRole } from "@/lib/auth";
 import { getLocation } from "@/lib/catalog";
+import { DashboardTiles } from "@/components/reports/dashboard-tiles";
+import { localDate } from "@/lib/money";
+import { loadDashboard } from "@/lib/reports/dashboard";
 import { t } from "@/lib/i18n";
 import { listStock } from "@/lib/inventory";
 import { getOrganisation, listCategories } from "@/lib/org";
@@ -22,6 +25,14 @@ export default async function DashboardPage({ params }: { params: Promise<{ orgI
   const stock = location ? await listStock(orgId, location.id, { filter: "all", page: 1 }) : null;
   const lowProducts = stock?.lowProducts ?? 0;
   const tiles = presets[org.businessType].dashboardTiles;
+  const data = location
+    ? await loadDashboard(
+        orgId,
+        localDate(new Date(), location.timezone),
+        org.businessType,
+        tiles,
+      )
+    : null;
 
   return (
     <section className="flex max-w-5xl flex-col gap-6">
@@ -32,16 +43,15 @@ export default async function DashboardPage({ params }: { params: Promise<{ orgI
         </Link>
       </div>
 
-      <dl className="surface-panel divide-border grid divide-y sm:grid-cols-3 sm:divide-x sm:divide-y-0">
-        {tiles.map((tile) => (
-          <div key={tile} className="flex flex-col gap-1 p-5">
-            <dt className="text-muted-foreground font-mono text-xs tracking-wide">
-              {t(`tile.${tile}`)}
-            </dt>
-            <dd className="text-muted-foreground text-sm">{t("tile.empty")}</dd>
-          </div>
-        ))}
-      </dl>
+      {data && location ? (
+        <DashboardTiles
+          orgId={orgId}
+          tiles={tiles}
+          data={data}
+          timeZone={location.timezone}
+          lowProducts={lowProducts}
+        />
+      ) : null}
 
       {(attention.open > 0 ||
         attention.toReview > 0 ||
@@ -108,10 +118,12 @@ export default async function DashboardPage({ params }: { params: Promise<{ orgI
         )}
       </section>
 
-      <div className="surface-panel p-8 text-center">
-        <h2 className="font-display text-heading font-semibold">{t("dashboard.emptyTitle")}</h2>
-        <p className="text-muted-foreground mt-1 text-sm">{t("dashboard.emptyBody")}</p>
-      </div>
+      {data?.quiet ? (
+        <div className="surface-panel p-8 text-center">
+          <h2 className="font-display text-heading font-semibold">{t("dashboard.emptyTitle")}</h2>
+          <p className="text-muted-foreground mt-1 text-sm">{t("dashboard.emptyBody")}</p>
+        </div>
+      ) : null}
     </section>
   );
 }

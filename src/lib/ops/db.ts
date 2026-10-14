@@ -452,3 +452,82 @@ export async function importPurge(): Promise<number> {
   const [row] = await db()<{ n: number }[]>`select ops.import_purge() as n`;
   return row?.n ?? 0;
 }
+
+// ---------------------------------------------------------------- reports
+
+/**
+ * Rebuilds the report summary for days that had a sale or refund land (oldest first, at most
+ * `limit`). With `daysBack` it first marks every shop's last N days, the nightly safety net for
+ * renamed products and anything a trigger could have missed. Returns how many days were rebuilt.
+ */
+export async function rebuildDirtySummaries(limit = 200, daysBack = 0): Promise<number> {
+  const [row] = await db()<{ n: number }[]>`
+    select ops.rebuild_dirty_summaries(${limit}, ${daysBack}) as n`;
+  return row?.n ?? 0;
+}
+
+// ---------------------------------------------------------------- whole-account export
+
+export type AccountExportStart = { org_id: string; org_name: string };
+
+/** Marks the export running and names its shop; null when there is nothing to do. */
+export async function accountExportBegin(id: string): Promise<AccountExportStart | null> {
+  const [row] = await db()<{ r: AccountExportStart | null }[]>`
+    select ops.account_export_begin(${id}) as r`;
+  return row?.r ?? null;
+}
+
+/** One page of an allow-listed table of the export's shop (no secrets) as plain objects. */
+export async function accountExportRows(
+  id: string,
+  table: string,
+  offset: number,
+  limit: number,
+): Promise<Record<string, unknown>[]> {
+  const [row] = await db()<{ r: Record<string, unknown>[] }[]>`
+    select ops.account_export_rows(${id}, ${table}, ${offset}, ${limit}) as r`;
+  return row?.r ?? [];
+}
+
+export async function accountExportFinish(id: string, fileName: string, bytes: Buffer) {
+  await db()`select ops.account_export_finish(${id}, ${fileName}, ${bytes})`;
+}
+
+export async function accountExportFail(id: string, code: string) {
+  await db()`select ops.account_export_fail(${id}, ${code})`;
+}
+
+export type AccountExportMail = {
+  org_id: string;
+  org_name: string;
+  file_name: string;
+  size_bytes: number;
+  expires_at: string;
+  email: string | null;
+};
+
+export async function accountExportMailData(id: string): Promise<AccountExportMail | null> {
+  const [row] = await db()<{ r: AccountExportMail | null }[]>`
+    select ops.account_export_mail_data(${id}) as r`;
+  return row?.r ?? null;
+}
+
+/** Deletes finished export files after 7 days; returns how many. */
+export async function accountExportPurge(): Promise<number> {
+  const [row] = await db()<{ n: number }[]>`select ops.account_export_purge() as n`;
+  return row?.n ?? 0;
+}
+
+export type AccountExportOwners = {
+  org_id: string;
+  org_name: string;
+  requested_at: string;
+  emails: string[];
+};
+
+/** Every owner of the export's shop, to be told it was requested. */
+export async function accountExportOwnerEmails(id: string): Promise<AccountExportOwners | null> {
+  const [row] = await db()<{ r: AccountExportOwners | null }[]>`
+    select ops.account_export_owner_emails(${id}) as r`;
+  return row?.r ?? null;
+}

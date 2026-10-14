@@ -36,7 +36,7 @@ const nextConfig: NextConfig = {
     ];
   },
   // Loaded at runtime from node_modules, not bundled (pg and pino are external by default).
-  serverExternalPackages: ["pg-boss"],
+  serverExternalPackages: ["pg-boss", "@react-pdf/renderer"],
   // Off on Hostinger, so maps are never served. CI sets SOURCE_MAPS=true in the source-maps
   // workflow to keep a private copy per commit (docs/DEPLOY.md "Reading a browser stack trace").
   productionBrowserSourceMaps: process.env.SOURCE_MAPS === "true",

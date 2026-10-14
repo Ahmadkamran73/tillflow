@@ -23,6 +23,7 @@
   "dependencies": {
     "@base-ui/react": "^1.8.0",
     "@hookform/resolvers": "^5.9.1",
+    "@react-pdf/renderer": "4.3.0",
     "@serwist/next": "^9.5.13",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.117.2",

@@ -25,6 +25,7 @@ export const RATE_LIMITS = {
   "reset-ip": { limit: 10, windowSec: 3600, auth: true }, // per IP
   mfa: { limit: 5, windowSec: 60, auth: true }, // per user
   export: { limit: 5, windowSec: 3600, auth: false }, // per user
+  "report-export": { limit: 30, windowSec: 3600, auth: false }, // per user
   import: { limit: 5, windowSec: 3600, auth: false }, // per org
   // Preview and problem-file requests each re-read the stored upload (an Excel file starts a parser
   // process), so they are counted too.

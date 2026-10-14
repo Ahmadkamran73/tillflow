@@ -444,7 +444,7 @@ describe("no in-process Excel parsing", () => {
       return e.isDirectory() ? walk(full) : [full];
     });
 
-  it("only the template writer and the sandboxed reader import ExcelJS; the app's parser does not touch it", () => {
+  it("only the template and report writers and the sandboxed reader import ExcelJS; the app's parser does not touch it", () => {
     const users = walk(path.join(root, "src"))
       .filter((f) => /\.(ts|tsx|mjs|js)$/.test(f))
       .filter((f) =>
@@ -456,8 +456,12 @@ describe("no in-process Excel parsing", () => {
       .sort();
     expect(users).toEqual([
       "src/app/api/v1/imports/template/route.ts",
+      "src/lib/export/tabular.ts",
       "src/lib/import/sandbox/xlsx-read.mjs",
     ]);
+    // The report writer only writes workbooks it builds itself; it never opens a file.
+    const tabular = fs.readFileSync(path.join(root, "src/lib/export/tabular.ts"), "utf8");
+    expect(tabular).not.toMatch(/xlsx\.(load|read)|readFile/);
     const parse = fs.readFileSync(path.join(root, "src/lib/import/parse.ts"), "utf8");
     expect(parse).not.toMatch(/xlsx-read|xlsx-zip|exceljs/i);
   });
