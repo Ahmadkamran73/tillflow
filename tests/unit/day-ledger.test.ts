@@ -116,3 +116,17 @@ describe("shop-local days", () => {
     });
   });
 });
+
+describe("exact amount patterns", () => {
+  it("match the amount alone, not a longer number that contains it", async () => {
+    const { exact } = await import("../e2e/day/ledger");
+    expect(exact("€50.55").test("Sales today €50.55 Last Tuesday")).toBe(true);
+    expect(exact("€50.55").test("€50.557")).toBe(false);
+    expect(exact("€50.55").test("€150.55")).toBe(false);
+    expect(exact("€50.55").test("€1,50.55")).toBe(false);
+    expect(exact("3").test("Transactions 3")).toBe(true);
+    expect(exact("3").test("Transactions 13")).toBe(false);
+    expect(exact("3").test("Transactions 30")).toBe(false);
+    expect(exact("-€0.45").test("VAT due -€0.45")).toBe(true);
+  });
+});

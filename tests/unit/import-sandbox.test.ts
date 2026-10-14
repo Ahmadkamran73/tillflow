@@ -1,5 +1,6 @@
 // @vitest-environment node
 import fs from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import ExcelJS from "exceljs";
@@ -46,14 +47,45 @@ const linux = process.platform === "linux";
 const spawned: number[] = [];
 const track = <T extends { pid?: number }>(r: T): T => (r.pid && spawned.push(r.pid), r);
 
-/** True when the process is gone within a second. */
+/** The command line of a live process, or null when it cannot be read. */
+function commandLine(pid: number): string | null {
+  try {
+    if (process.platform === "win32") {
+      const r = spawnSync(
+        "powershell",
+        [
+          "-NoProfile",
+          "-Command",
+          `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`,
+        ],
+        { encoding: "utf8", timeout: 20_000 },
+      );
+      return r.status === 0 ? r.stdout.trim() : null;
+    }
+    return fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(/\0/g, " ");
+  } catch {
+    return null;
+  }
+}
+
+/** Every sandbox child is started with a heap limit and read permissions; nothing else here is. */
+const looksLikeSandboxChild = (cmd: string) => /--max-old-space-size=|--allow-fs-read=/.test(cmd);
+
+/**
+ * True when the process is gone within a second. A pid that is still "alive" after that is only an
+ * orphan if it really is a sandbox child: process ids are reused, and on a busy machine the id of a
+ * child that exited long ago can already belong to an unrelated process (seen: a cmd.exe started by
+ * the shell tool, 35 s after the child died). If the command line cannot be read, fail closed.
+ */
 async function goneSoon(pid: number | undefined) {
   if (!pid) return true;
   for (let i = 0; i < 20; i++) {
     if (!isAlive(pid)) return true;
     await new Promise((r) => setTimeout(r, 50));
   }
-  return false;
+  const cmd = commandLine(pid);
+  if (cmd === null) return false;
+  return !looksLikeSandboxChild(cmd);
 }
 
 afterAll(async () => {
@@ -464,6 +496,39 @@ describe("no in-process Excel parsing", () => {
     expect(tabular).not.toMatch(/xlsx\.(load|read)|readFile/);
     const parse = fs.readFileSync(path.join(root, "src/lib/import/parse.ts"), "utf8");
     expect(parse).not.toMatch(/xlsx-read|xlsx-zip|exceljs/i);
+  });
+});
+
+describe("the cleanup check does not mistake a reused process id for an orphan", () => {
+  const hold = ["-e", "setTimeout(() => {}, 60000)"];
+  const start = (args: string[]) => {
+    const child = spawn(process.execPath, args, { stdio: "ignore" });
+    return child;
+  };
+
+  it("a live process that looks like a sandbox child is reported alive (a real orphan still fails)", async () => {
+    const child = start(["--max-old-space-size=64", ...hold]);
+    try {
+      expect(child.pid).toBeTruthy();
+      expect(await goneSoon(child.pid)).toBe(false);
+    } finally {
+      child.kill("SIGKILL");
+    }
+  });
+
+  it("a live, unrelated process on that id is not an orphan", async () => {
+    const child = start(hold);
+    try {
+      expect(await goneSoon(child.pid)).toBe(true);
+    } finally {
+      child.kill("SIGKILL");
+    }
+  });
+
+  it("a process that has exited is gone", async () => {
+    const child = start(["-e", "0"]);
+    await new Promise((r) => child.on("exit", r));
+    expect(await goneSoon(child.pid)).toBe(true);
   });
 });
 

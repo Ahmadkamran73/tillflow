@@ -2,7 +2,7 @@ import { expect, test, type Browser, type Page } from "@playwright/test";
 import { config } from "dotenv";
 import postgres from "postgres";
 import { buttonHydrated, hydrated } from "./helpers";
-import { byDim, euro, expected, localParts, roundHalf, type Refund, type Sale } from "./day/ledger";
+import { byDim, euro, exact, expected, localParts, roundHalf, type Refund, type Sale } from "./day/ledger";
 import {
   FLOAT,
   addMatrixProduct,
@@ -89,7 +89,7 @@ async function closeAndCheck(page: Page, browser: Browser, d: Day) {
   await page.goto(`/o/${orgId}/shifts/${z.shift_id}`);
   const zpage = page.locator("main");
   for (const cents of [e.amountDue, e.vat, e.expectedCash, d.counted]) {
-    await expect(zpage).toContainText(euro(cents));
+    await expect(zpage).toContainText(exact(euro(cents)));
   }
 
   // Shop-local day: every sale falls on one local day that is NOT the UTC day of the first sale.
@@ -107,9 +107,9 @@ type Common = Awaited<ReturnType<typeof closeAndCheck>>;
 /** Tiles on the dashboard from the summary, against the ledger. */
 async function checkDashboard(page: Page, orgId: string, e: Expected) {
   await page.goto(`/o/${orgId}/dashboard`);
-  await expect(dashTile(page, "Sales today")).toContainText(euro(e.netTakings));
-  await expect(dashTile(page, "Transactions")).toContainText(String(e.count));
-  await expect(dashTile(page, "VAT collected")).toContainText(euro(e.vat - e.refunds.vat));
+  await expect(dashTile(page, "Sales today")).toContainText(exact(euro(e.netTakings)));
+  await expect(dashTile(page, "Transactions")).toContainText(exact(String(e.count)));
+  await expect(dashTile(page, "VAT collected")).toContainText(exact(euro(e.vat - e.refunds.vat)));
 }
 
 /** The general reports: sales by day, VAT by rate, payments, sales by hour; each exported and compared. */
@@ -481,7 +481,7 @@ test("electronics: serial numbers at the till, lookup by IMEI for a refund, seri
   ]);
 
   await checkDashboard(page, orgId, c.e);
-  await expect(dashTile(page, "Serials sold")).toContainText("3");
+  await expect(dashTile(page, "Serials sold")).toContainText(exact("3"));
   await checkGeneralReports(page, d, c, await hourMaps(d, c));
 
   await openReport(page, orgId, "serials", c.day);
@@ -735,7 +735,7 @@ test("café: required modifiers, eat-in and take-away VAT, card tip, refund, tip
   expect(modes.map((m) => m.mode)).toEqual(["take_away", "eat_in"]);
 
   await checkDashboard(page, orgId, c.e);
-  await expect(dashTile(page, "Tips")).toContainText(euro(c.e.tips));
+  await expect(dashTile(page, "Tips")).toContainText(exact(euro(c.e.tips)));
   await checkGeneralReports(page, d, c, await hourMaps(d, c));
 
   await openReport(page, orgId, "tips", c.day);
@@ -876,9 +876,9 @@ test("restaurant: table, covers, seats, split bill, service charge, card tip, re
   expect(perCover).toBe(1467); // 8,800 / 6 = 14.666...
 
   await checkDashboard(page, orgId, c.e);
-  await expect(dashTile(page, "Covers")).toContainText(String(covers));
-  await expect(dashTile(page, "Spend per cover")).toContainText(euro(perCover));
-  await expect(dashTile(page, "Tips")).toContainText(euro(c.e.tips));
+  await expect(dashTile(page, "Covers")).toContainText(exact(String(covers)));
+  await expect(dashTile(page, "Spend per cover")).toContainText(exact(euro(perCover)));
+  await expect(dashTile(page, "Tips")).toContainText(exact(euro(c.e.tips)));
   await checkGeneralReports(page, d, c, await hourMaps(d, c));
 
   await openReport(page, orgId, "covers", c.day);

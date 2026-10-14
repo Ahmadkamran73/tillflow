@@ -659,3 +659,99 @@ describe("serial and cover reports", () => {
       );
     }));
 });
+
+describe("days on a clock-change weekend (Europe/Dublin)", () => {
+  /** A 12.30 sale (VAT 2.30 at 23%) at an exact instant, inserted directly: the till refuses instants this far from now. */
+  async function rawSale(ctx: Ctx, shop: Shop, seq: number, at: string) {
+    const id = randomUUID();
+    await ctx.sql`
+      insert into sales (id, org_id, register_id, location_id, receipt_seq, mode, completed_at, received_at,
+                         priced_as_of, cashier_user_id, items_total_cents, vat_cents, non_vat_cents,
+                         cash_rounding_cents, amount_due_cents, client_due_cents)
+      values (${id}, ${shop.orgId}, ${shop.registerId}, ${shop.locationId}, ${seq}, 'eat_in', ${at}::timestamptz,
+              ${at}::timestamptz, ${at}::timestamptz, ${shop.cashier.userId}, 1230, 230, 0, 0, 1230, 1230)`;
+    await ctx.sql`
+      insert into sale_lines (id, org_id, sale_id, line_no, kind, name, qty, unit_price_cents, discount_cents,
+                              tax_category, tax_rate_bp, net_cents, vat_cents, gross_cents)
+      values (${randomUUID()}, ${shop.orgId}, ${id}, 1, 'item', 'Tea', 1, 1230, 0, 'STANDARD', 2300, 1000, 230, 1230)`;
+  }
+
+  /** What the browser's own time zone data says the local day and hour of an instant are. */
+  const intl = (at: string) => {
+    const p = Object.fromEntries(
+      new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Europe/Dublin",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        hourCycle: "h23",
+      })
+        .formatToParts(new Date(at))
+        .map((x) => [x.type, x.value]),
+    );
+    return { day: `${p.year}-${p.month}-${p.day}`, hour: String(p.hour) };
+  };
+
+  async function check(
+    ctx: Ctx,
+    instants: [string, string][], // [instant, expected local day]
+    days: Record<string, number>, // local day -> number of sales
+    hours: Record<string, number>, // hour bucket of the clock-change day -> number of sales
+    changeDay: string,
+  ) {
+    const a = ctx.world.a;
+    let seq = 1;
+    for (const [at, day] of instants) {
+      expect(intl(at).day, `Intl agrees about ${at}`).toBe(day); // the expectation is not the app's own
+      await rawSale(ctx, a, seq++, at);
+    }
+    for (const day of Object.keys(days)) await rebuild(ctx, a, day);
+    for (const [day, n] of Object.entries(days)) {
+      const [total] = await summary(ctx, a, day, "total");
+      expect({ day, sales: total?.sales_count, gross: total?.gross_cents }).toEqual({
+        day,
+        sales: n,
+        gross: n * 1230,
+      });
+    }
+    const rows = await summary(ctx, a, changeDay, "hour");
+    expect(Object.fromEntries(rows.map((r) => [r.key, r.sales_count]))).toEqual(hours);
+  }
+
+  it("spring forward (29 March 2026): a 23-hour day, no sale on the wrong side of either midnight", () =>
+    inWorld(async (ctx) => {
+      await check(
+        ctx,
+        [
+          ["2026-03-28T23:59:00Z", "2026-03-28"], // 23:59 GMT
+          ["2026-03-29T00:00:00Z", "2026-03-29"], // 00:00 GMT: first instant of the day
+          ["2026-03-29T00:59:00Z", "2026-03-29"], // 00:59 GMT
+          ["2026-03-29T01:00:00Z", "2026-03-29"], // 02:00 IST: the hour 01:00 does not exist
+          ["2026-03-29T22:59:00Z", "2026-03-29"], // 23:59 IST: last minute of the day
+          ["2026-03-29T23:00:00Z", "2026-03-30"], // 00:00 IST
+        ],
+        { "2026-03-28": 1, "2026-03-29": 4, "2026-03-30": 1 },
+        { "00": 2, "02": 1, "23": 1 },
+        "2026-03-29",
+      );
+    }));
+
+  it("fall back (25 October 2026): a 25-hour day; the repeated 01:00 hour is one bucket", () =>
+    inWorld(async (ctx) => {
+      await check(
+        ctx,
+        [
+          ["2026-10-24T22:59:00Z", "2026-10-24"], // 23:59 IST
+          ["2026-10-24T23:00:00Z", "2026-10-25"], // 00:00 IST: first instant of the day
+          ["2026-10-25T00:30:00Z", "2026-10-25"], // 01:30 IST
+          ["2026-10-25T01:30:00Z", "2026-10-25"], // 01:30 GMT: the same wall-clock time again
+          ["2026-10-25T23:59:00Z", "2026-10-25"], // 23:59 GMT: last minute of a 25-hour day
+          ["2026-10-26T00:00:00Z", "2026-10-26"], // 00:00 GMT
+        ],
+        { "2026-10-24": 1, "2026-10-25": 4, "2026-10-26": 1 },
+        { "00": 1, "01": 2, "23": 1 },
+        "2026-10-25",
+      );
+    }));
+});

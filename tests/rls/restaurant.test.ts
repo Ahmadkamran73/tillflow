@@ -485,3 +485,47 @@ describe("voiding a sent line", () => {
       );
     }));
 });
+
+describe("moving and merging a tab (tab events 'transfer' and 'merge')", () => {
+  it("records both, keeps only real table names and the merged tab's id, and is replay-safe", () =>
+    inWorld(async (ctx) => {
+      const a = ctx.world.a;
+      await savePlan(ctx, a.owner, a.orgId, plan([table(), table({ name: "T2", x: 3 })]));
+      const tab = randomUUID();
+      const merged = randomUUID();
+
+      const move = event(a, {
+        tab_id: tab,
+        kind: "transfer",
+        // "Nowhere" is not a table of this shop and "owner_note" is not an allowed fact: both dropped.
+        detail: { from: "T1", to: "T2", owner_note: "Joe Bloggs paid cash", extra: { a: 1 } },
+      });
+      expect((await record(ctx, a.tokenHash, move))[0]!.r).toBe("recorded");
+      expect((await record(ctx, a.tokenHash, move))[0]!.r).toBe("duplicate");
+
+      const merge = event(a, {
+        tab_id: tab,
+        kind: "merge",
+        detail: { from: "T2", to: "Nowhere", merged_tab: merged, covers: 6 },
+      });
+      expect((await record(ctx, a.tokenHash, merge))[0]!.r).toBe("recorded");
+
+      const rows = await ctx.sql`
+        select kind, detail from tab_events where org_id = ${a.orgId} and tab_id = ${tab} order by kind`;
+      expect(rows.map((r) => [r.kind, r.detail])).toEqual([
+        ["merge", { from: "T2", merged_tab: merged, covers: 6 }],
+        ["transfer", { from: "T1", to: "T2" }],
+      ]);
+
+      // A merged tab that is not a UUID, or absurd covers, is refused; so is another shop's till.
+      await ctx.denied(
+        () => record(ctx, a.tokenHash, event(a, { kind: "merge", detail: { merged_tab: "not-a-uuid" } })),
+        ["22P02"],
+      );
+      await ctx.denied(
+        () => record(ctx, a.tokenHash, event(a, { kind: "merge", detail: { covers: 999 } })),
+        ["22023"],
+      );
+      await ctx.denied(() => record(ctx, ctx.world.b.tokenHash, { ...move, id: randomUUID() }), ["23505", "42501", "22023"]);
+    }));
+});

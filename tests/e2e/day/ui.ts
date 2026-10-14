@@ -1,7 +1,7 @@
 import { expect, type Browser, type Page } from "@playwright/test";
 import ExcelJS from "exceljs";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type postgres from "postgres";
@@ -359,14 +359,18 @@ function parseCsv(text: string): string[][] {
 const pdfScript = join(__dirname, "pdf-text.mjs");
 
 /** Text of every page of a PDF (extracted in a child process: pdfjs is an ES module). */
-export function pdfText(bytes: Buffer): string {
+export function pdfText(bytes: Buffer, mode: "rows" | "flow" = "rows"): string {
   const dir = mkdtempSync(join(tmpdir(), "tillflow-pdf-"));
-  const file = join(dir, "export.pdf");
-  writeFileSync(file, bytes);
-  return execFileSync(process.execPath, [pdfScript, file], {
-    encoding: "utf8",
-    maxBuffer: 20_000_000,
-  });
+  try {
+    const file = join(dir, "export.pdf");
+    writeFileSync(file, bytes);
+    return execFileSync(process.execPath, [pdfScript, file, mode], {
+      encoding: "utf8",
+      maxBuffer: 20_000_000,
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 /**
@@ -417,11 +421,38 @@ export async function checkExports(page: Page, screen: Table) {
   // PDF: valid, and every value on screen is printed on it.
   const pdf = await (await get("PDF")).body();
   expect(pdf.subarray(0, 5).toString()).toBe("%PDF-");
-  // Compared without spaces: the PDF may split a value into pieces at a kerning pair ("4" "Y / Red").
-  const text = pdfText(Buffer.from(pdf)).replace(/\s+/g, "");
-  for (const r of want)
-    for (const c of r)
-      if (c !== "") expect(text, `pdf has "${c}"`).toContain(c.replace(/\s+/g, ""));
+  const raw = pdfText(Buffer.from(pdf)); // one printed row per line
+  const flowText = pdfText(Buffer.from(pdf), "flow"); // drawing order: wrapped headings stay readable
+  // The text really came out of the PDF: it has at least one page and a body.
+  expect(
+    Buffer.from(pdf)
+      .toString("latin1")
+      .match(/\/Type\s*\/Page(?![s\w])/g)?.length ?? 0,
+  ).toBeGreaterThan(0);
+  expect(raw.trim().length, "the PDF has text").toBeGreaterThan(50);
+  // It is THIS report: its title and every column heading are printed (headings may be hyphenated
+  // at a line end), then every row of the table, whole.
+  const squash = (x: string) => x.replace(/[\s-]+/g, "");
+  const title = (await page.getByRole("heading", { level: 1 }).first().innerText()).trim();
+  const flat = squash(flowText);
+  expect(flat, `pdf title "${title}"`).toContain(squash(title));
+  for (const h of screen.header) expect(flat, `pdf heading "${h}"`).toContain(squash(h));
+  // Every row on screen (and the totals) is printed as ONE row of the PDF, in the same order, with
+  // exactly the same text. A whole row is compared, not "contains": a value with a digit added
+  // ("€60.557" for "€60.55") or a sign lost must fail. Spaces are ignored (the PDF may split a value
+  // at a kerning pair, "4" "Y / Red"); signs, digits and currency are not.
+  const lines = raw.split("\n").map((l) => l.replace(/\s+/g, ""));
+  let from = 0;
+  for (const r of want) {
+    const wanted = r.join("").replace(/\s+/g, "");
+    const at = lines.indexOf(wanted, from);
+    expect(
+      at,
+      `pdf row "${r.join(" | ")}" (after row index ${from}) in:
+${raw}`,
+    ).toBeGreaterThanOrEqual(0);
+    from = at + 1;
+  }
 }
 
 // ---------------------------------------------------------------- isolation

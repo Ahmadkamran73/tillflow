@@ -192,13 +192,24 @@ export const euro = (cents: number) => {
   return `${sign}€${Math.trunc(abs / 100).toLocaleString("en-IE")}.${String(abs % 100).padStart(2, "0")}`;
 };
 
-export type DimRow = { qty: number; gross: number; vat: number; net: number; rQty: number; rGross: number };
+export type DimRow = {
+  qty: number;
+  gross: number;
+  vat: number;
+  net: number;
+  rQty: number;
+  rGross: number;
+};
 
 /**
  * Item lines grouped by one report dimension (product, brand, size/colour ...), sales side and
  * refund side, the way the line reports show them. Only lines that carry that dimension count.
  */
-export function byDim(sales: Sale[], refunds: Refund[], dim: "product" | "category" | "brand" | "sizeColour") {
+export function byDim(
+  sales: Sale[],
+  refunds: Refund[],
+  dim: "product" | "category" | "brand" | "sizeColour",
+) {
   const out = new Map<string, DimRow>();
   const row = (k: string) => {
     let r = out.get(k);
@@ -227,3 +238,10 @@ export function byDim(sales: Sale[], refunds: Refund[], dim: "product" | "catego
     }
   return out;
 }
+
+/**
+ * A pattern for exactly this amount or count: not part of a longer number ("€50.55" must not match
+ * "€50.557" or "€150.55"). Use with toContainText().
+ */
+export const exact = (text: string) =>
+  new RegExp(`(?<![\\d.,])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\d])`);
