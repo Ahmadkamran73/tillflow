@@ -30,29 +30,53 @@ type, and staging does not yet have the reports migrations. Nothing below turns 
 
 Required for each: open shift, sales, refunds, Z-report, exports, correct numbers.
 
-| Business type         | Status            | Local evidence only (not the gate)                                                                                                                                                |
-| --------------------- | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| General / convenience | BLOCKED (staging) | e2e: cash/card sales, receipt, refund and void, shift open/close with Z, reports + VAT + CSV/Excel/PDF exports (`reports.spec.ts`). Each piece passes, no single "whole day" test |
-| Electronics & phones  | BLOCKED (staging) | onboarding and product specs for the type; serial/IMEI prompt and serial lookup covered by unit and RLS tests only (`report_serials`), no till e2e of a serial sale               |
-| Clothing & footwear   | BLOCKED (staging) | exchange flow e2e (`register-refunds.spec.ts`); size/colour report by RLS and unit tests only, no till e2e                                                                        |
-| Café                  | BLOCKED (staging) | `register-cafe.spec.ts` (modifiers, take-away VAT, tickets, tips)                                                                                                                 |
-| Restaurant            | BLOCKED (staging) | `register-restaurant.spec.ts` (table, courses, split by seat, service charge, void, pro-rata refund)                                                                              |
+| Business type         | Staging day (the gate) | Automated whole day, local database (evidence, not the gate)          |
+| --------------------- | ---------------------- | --------------------------------------------------------------------- |
+| General / convenience | **BLOCKED**            | PASSED: `tests/e2e/trading-day.spec.ts` "general store" (43 s)        |
+| Electronics & phones  | **BLOCKED**            | PASSED: "electronics" (48 s)                                          |
+| Clothing & footwear   | **BLOCKED**            | PASSED: "clothing" (41 s)                                             |
+| Café                  | **BLOCKED**            | PASSED: "café" (44 s)                                                 |
+| Restaurant            | **BLOCKED**            | PASSED: "restaurant" (47 s)                                           |
 
-Why blocked: staging runs `develop` with migrations up to 0047; `0048`-`0051` are not applied (the owner asked
-that nothing be applied until PR #42 is reviewed), and the days themselves need a person at a tablet with the
-shop's real printer and card terminal setup. A local automated "trading day per type" does not exist; it
-would be evidence but not the gate.
+What each automated day does (all through the real screens, on the production build, in a shop whose
+time zone is NOT the UTC day): sign up and onboard as the type, create its products, pair a till and open
+a shift (100.00 float), sell, refund (and exchange for clothing), close the shift, then check against an
+independent calculator (`tests/e2e/day/ledger.ts`, shares no code with `src/lib/money`; itself unit
+tested in `tests/unit/day-ledger.test.ts`): the stored sales, the server's Z-report, the back-office Z page,
+the dashboard tiles, sales by day, VAT by rate (sales, refunds, VAT due), payments by type, sales by hour
+(hour read from the stored time with `Intl`), the line reports, each exported as CSV, Excel and PDF and
+compared cell by cell with the table on screen, and finally that a second business gets 404 on every page,
+export and download of the first and sees empty books of its own.
+
+| Type        | Specific coverage                                                                                                                                  |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| General     | barcode products at 23%, 13.5%, 0%; 10% line discount; Re-turn deposit outside VAT; 5c cash rounding (cash share only); split card + cash; card refund of one of two candles; stock (opening - sold + returned); Z over/short -0.05; product report |
+| Electronics | serial/IMEI prompt and bad-serial refusal; refund found by IMEI; serials sold report (receipt, returned flag, search by part of a serial, exported); brand report; no 5c rounding for cash |
+| Clothing    | size x colour matrix, variant picker at the till; exchange for a dearer jacket (credit 20.00 + 80.00 card); plain refund; exchange credit as its own payment row; size/colour report |
+| Café        | required modifier group (Large +0.50); eat-in 9% against take-away 0% sandwich; 23% cola; card tip 1.00; refund of one latte; tips report and tile |
+| Restaurant  | table with 4 guests, seats, split bill by seat, 10% service charge taxed at each item's rate, card tip 3.00, second table of 2 guests, refund of one steak with its service charge; covers (6), spend per cover (14.67), tips |
+
+**Not covered by these automated days** (some are covered by other specs): cash in/out and manager-PIN
+approvals, offline selling, kitchen/bar tickets and course firing, tab transfer/merge, void of a whole sale,
+gift receipts, warranty dates, customers, bulk import, daylight-saving days, a sale that straddles local
+midnight (the RLS suite has the UTC+14 23:30/00:30 case), discounts other than the general store's line
+discount, real printers and card terminals. The "tenant isolation" check is at the page/export/download
+level; the database level is `tests/rls`.
+
+Why the staging gate stays BLOCKED: staging runs `develop` with migrations up to 0047; `0048`-`0051` are not
+applied (nothing is applied until PR #42 is reviewed and merged), and the days themselves need a person at
+a tablet with the shop's own printer and card terminal. **The gate is NOT PASSED.**
 
 ## 3. Release-readiness of Step 2.9 (evidence for PR #42)
 
 | Check                                                              | Status                                                       | Evidence                                                                                                       |
 | ------------------------------------------------------------------ | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
 | Lint, typecheck, `check:imports`, `check:rls`, `db:generate` empty | PASSED                                                       | run 2026-10-14 on this branch                                                                                  |
-| Unit tests                                                         | PASSED                                                       | 1186 passed, 4 skipped, 1 todo                                                                                 |
+| Unit tests                                                         | PASSED                                                       | 1195 passed, 4 skipped, 1 todo (unit + RLS files together)                                                                                 |
 | RLS tests                                                          | PASSED                                                       | 358 passed (after `supabase db reset --local`; see note)                                                       |
 | Money coverage                                                     | PASSED                                                       | 100% statements and branches                                                                                   |
 | Production build                                                   | PASSED                                                       | `pnpm build`                                                                                                   |
-| Full Playwright suite                                              | PASSED (last full run before the final edits; see section 4) | log `pw-full` below                                                                                            |
+| Full Playwright suite | PASSED | final build, `CI=1 playwright test --workers=2`: 76 tests, 75 passed, 1 skipped (Excel import, off by design), 0 failed, 0 flaky, 9.6 min; exit code 0 read from a file written right after the command (no pipeline) |
 | `/security-review` on the branch                                   | PASSED, no finding at confidence 8+                          | two read-only passes, files read listed in the PR                                                              |
 | VAT report re-audit (vat-auditor)                                  | PASSED, fixes applied                                        | STATUS.md                                                                                                      |
 | Excel opens the exports                                            | PASSED (Excel 16.0 only)                                     | `docs/specs/reports.md` "Compatibility check"                                                                  |
