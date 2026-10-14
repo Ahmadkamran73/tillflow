@@ -8,7 +8,7 @@ export const EXPORT_FORMATS = ["csv", "xlsx", "pdf"] as const;
 export type ExportFormat = (typeof EXPORT_FORMATS)[number];
 
 /** What a file says about itself: the shop, the dates, when it was made. */
-export type ExportMeta = { shop: string; range: string; madeAt: string };
+export type ExportMeta = { shop: string; range: string; madeAt: string; note?: string };
 
 export const CONTENT_TYPES: Record<ExportFormat, string> = {
   csv: "text/csv; charset=utf-8",
@@ -74,6 +74,10 @@ export async function toXlsx(table: ReportTable, meta: ExportMeta): Promise<Buff
   table.columns.forEach((c, i) => {
     sheet.getColumn(i + 1).width = c.kind === "text" ? 28 : 16;
   });
+  if (meta.note) {
+    sheet.addRow([]);
+    sheet.addRow([safeText(meta.note)]);
+  }
   sheet.views = [{ state: "frozen", ySplit: 4 }];
   return Buffer.from(await wb.xlsx.writeBuffer());
 }

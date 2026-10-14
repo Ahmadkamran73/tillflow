@@ -344,6 +344,39 @@ describe("daily_sales_summary", () => {
         gross_cents: z.vat_by_rate[0]!.gross_cents,
       });
     }));
+  it("VAT rows add up to the day's VAT, and a refund sits in the period it was given", () =>
+    inWorld(async (ctx) => {
+      const a = ctx.world.a;
+      const old = new Date(Date.now() - 5 * DAY);
+      const s = await sell(ctx, a, { seq: 1, at: old }); // sold five days ago
+      await sell(ctx, a, { seq: 2, qty: 1 }); // sold today
+      await refundOne(ctx, a, s, 1); // refunded today
+      const soldDay = await localDay(ctx, old);
+      const today = await localDay(ctx, new Date());
+      await rebuild(ctx, a, soldDay);
+      await rebuild(ctx, a, today);
+
+      // The sale's day has no refund on it, today carries the refund of the old sale.
+      expect((await summary(ctx, a, soldDay, "vat_rate"))[0]).toMatchObject({
+        vat_cents: 131,
+        refund_vat_cents: 0,
+        refund_gross_cents: 0,
+      });
+      const [t] = await summary(ctx, a, today, "vat_rate");
+      expect(t).toMatchObject({ vat_cents: 65, refund_vat_cents: 66, refund_gross_cents: 350 });
+      // VAT due can be negative in a period (more refunded than sold).
+      expect(Number(t!.vat_cents) - Number(t!.refund_vat_cents)).toBe(-1);
+
+      // Every VAT cent is in exactly one rate row: rows add up to the total row, both days.
+      for (const day of [soldDay, today]) {
+        const rows = await summary(ctx, a, day, "vat_rate");
+        const [total] = await summary(ctx, a, day, "total");
+        const sum = (k: string) => rows.reduce((n, r) => n + Number(r[k]), 0);
+        expect(sum("vat_cents")).toBe(Number(total!.vat_cents));
+        expect(sum("refund_vat_cents")).toBe(Number(total!.refund_vat_cents));
+      }
+    }));
+
   it("an exchange counts the credit as returned, so takings after refunds are real money", () =>
     inWorld(async (ctx) => {
       const a = ctx.world.a;

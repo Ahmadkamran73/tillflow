@@ -17,6 +17,7 @@ const s = StyleSheet.create({
   },
   head: { borderBottomWidth: 1, borderBottomColor: "#111111", fontFamily: "Helvetica-Bold" },
   total: { fontFamily: "Helvetica-Bold", borderTopWidth: 1, borderTopColor: "#111111" },
+  note: { marginTop: 10, fontSize: 8, color: "#444444" },
   foot: { position: "absolute", bottom: 14, left: 28, right: 28, fontSize: 7, color: "#666666" },
 });
 
@@ -56,6 +57,7 @@ function ReportPdf({ table, meta }: { table: ReportTable; meta: ExportMeta }) {
             {r.map((v, i) => cell(v, i, `${ri}-${i}`))}
           </View>
         ))}
+        {meta.note ? <Text style={s.note}>{meta.note}</Text> : null}
         <Text
           style={s.foot}
           fixed

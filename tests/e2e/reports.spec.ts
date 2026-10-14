@@ -81,7 +81,7 @@ test("two cash sales show on the dashboard, the VAT report and the downloads", a
   expect(csv.headers()["content-type"]).toContain("text/csv");
   expect(csv.headers()["content-disposition"]).toContain("attachment");
   const csvText = await csv.text();
-  expect(csvText).toContain("VAT rate,Net (ex VAT),VAT");
+  expect(csvText).toContain("VAT rate,Net (ex VAT),Sales VAT");
   expect(csvText).toContain("23%,20.06,4.62,24.68");
   expect(csvText).toContain("Total,20.06,4.62,24.68");
 

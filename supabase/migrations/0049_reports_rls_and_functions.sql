@@ -35,7 +35,10 @@ begin
      where l.org_id = new.org_id and l.id = new.location_id;
     insert into public.report_dirty_days (org_id, location_id, day)
     values (new.org_id, new.location_id, (new.completed_at at time zone coalesce(v_tz, 'Europe/Dublin'))::date)
-    on conflict do nothing;
+    -- An update (not "do nothing") so the sale holds a lock on the mark until it commits: the
+    -- rebuild skips a locked mark and picks the day up on its next round, and a rebuild that has
+    -- already taken the mark makes the sale wait and then write a fresh one. No sale is missed.
+    on conflict (org_id, location_id, day) do update set marked_at = now();
   exception when others then
     null;
   end;

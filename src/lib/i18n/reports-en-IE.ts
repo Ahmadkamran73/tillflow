@@ -34,7 +34,7 @@ export const reportsEnIE = {
 
   "reports.note.truncated": "Showing the first {n} rows. Narrow the dates to see the rest.",
   "reports.note.vat":
-    "VAT from the amounts stored on each sale line, at the rate in force on the day. Refunds are counted on the day they were given. Check the layout with your accountant before filing.",
+    "VAT is added up from the amounts stored on each sale line, at the rate in force on the day. Refunds are counted on the day they were given. Deposits, tips and cash rounding are outside VAT and are not in this table, so its gross is lower than the takings in Payments. Check the layout with your accountant before filing.",
   "reports.note.refunds":
     "Refunds are counted on the day they were given, not the day of the sale.",
 
@@ -82,10 +82,12 @@ export const reportsEnIE = {
   "report.col.refundCount": "Refunds",
   "report.col.hour": "Hour",
   "report.col.rate": "VAT rate",
+  "report.col.salesVat": "Sales VAT",
+  "report.col.vatGross": "Gross (excl. deposits, tips, rounding)",
   "report.col.refundNet": "Refund net",
   "report.col.refundVat": "Refund VAT",
   "report.col.refundGross": "Refund gross",
-  "report.col.netVatDue": "VAT due",
+  "report.col.netVatDue": "Net VAT due (sales less refunds)",
   "report.col.paymentType": "Payment type",
   "report.col.payments": "Payments",
   "report.col.taken": "Taken",

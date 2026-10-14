@@ -255,8 +255,8 @@ export function buildTable(
       const columns = [
         col("report.col.rate", "text"),
         col("report.col.net", "money"),
-        col("report.col.vat", "money"),
-        col("report.col.gross", "money"),
+        col("report.col.salesVat", "money"),
+        col("report.col.vatGross", "money"),
         col("report.col.refundNet", "money"),
         col("report.col.refundVat", "money"),
         col("report.col.refundGross", "money"),

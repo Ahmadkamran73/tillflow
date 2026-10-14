@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { authorizeApi } from "@/lib/auth";
 import { getLocation } from "@/lib/catalog";
 import { reportError } from "@/lib/errors";
+import { t } from "@/lib/i18n";
 import {
   CONTENT_TYPES,
   EXPORT_FORMATS,
@@ -69,6 +70,7 @@ export async function GET(
         p.data.from === p.data.to
           ? dayLabel(p.data.from)
           : `${dayLabel(p.data.from)} - ${dayLabel(p.data.to)}`,
+      note: t(report === "vat" ? "reports.note.vat" : "reports.note.refunds"),
       madeAt: new Intl.DateTimeFormat("en-IE", {
         dateStyle: "medium",
         timeStyle: "short",
