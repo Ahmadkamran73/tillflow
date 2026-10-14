@@ -120,7 +120,8 @@ export const importEnIE = {
 
   "import.type.title": "What are you importing?",
   "import.type.products": "Products",
-  "import.type.productsHint": "New and existing products with prices, VAT, categories and opening stock.",
+  "import.type.productsHint":
+    "New and existing products with prices, VAT, categories and opening stock.",
   "import.type.stock": "Stock levels",
   "import.type.stockHint": "A stock count or a delivery, one line per SKU or barcode.",
   "import.type.customers": "Customers",
@@ -134,16 +135,20 @@ export const importEnIE = {
   "import.link.stock": "Import stock from a file",
   "import.link.customers": "Import customers from a file",
   "import.customers.privacy":
-    "These are people's personal details. Only owners and managers can see this import, and the uploaded file is deleted after 7 days. Marketing consent is never imported: imported customers start without it.",
+    "These are people's personal details. Only owners and managers can see this import, and the uploaded file is deleted after 24 hours. Marketing consent is never imported: imported customers start without it.",
   "import.map.introStock":
     "Match the column that holds the SKU or barcode and the column that holds the quantity.",
-  "import.map.introCustomers": "Match the Name column, and the Email column if you have one. Email is how existing customers are recognised.",
+  "import.map.introCustomers":
+    "Match the Name column, and the Email column if you have one. Email is how existing customers are recognised.",
   "import.mode.titleStock": "What do the quantities mean?",
-  "import.mode.count": "They are what is on the shelf now (a stock count). Set the stock to these numbers.",
+  "import.mode.count":
+    "They are what is on the shelf now (a stock count). Set the stock to these numbers.",
   "import.mode.received": "They are what arrived (a delivery). Add these numbers to my stock.",
   "import.mode.titleCustomers": "Customers you already have",
-  "import.mode.createCustomers": "Add new customers only. Skip any I already have (matched by email).",
-  "import.mode.upsertCustomers": "Add new customers and update ones I already have (matched by email).",
+  "import.mode.createCustomers":
+    "Add new customers only. Skip any I already have (matched by email).",
+  "import.mode.upsertCustomers":
+    "Add new customers and update ones I already have (matched by email).",
   "import.check.stock": "{count} products will have their stock changed.",
   "import.check.customersCreate": "{count} customers will be added.",
   "import.check.customersUpdate": "{count} existing customers will be updated.",
@@ -169,4 +174,25 @@ export const importEnIE = {
   "import.err.dbNotFound": "No product with this SKU or barcode in your shop.",
   "import.err.dbInvalid":
     "This row could not be applied. Check the product keeps stock and the quantity is valid.",
+  "import.type.suppliers": "Suppliers",
+  "import.type.suppliersHint": "Your supplier list: name, email, phone, VAT number, address.",
+  "import.title.suppliers": "Import suppliers",
+  "import.intro.suppliers":
+    "Add your suppliers from a file. Nothing changes until you press Start import, and you can undo it for 24 hours.",
+  "import.link.suppliers": "Import suppliers from a file",
+  "import.suppliers.privacy":
+    "Supplier details can include a person's name, phone or email. Only owners and managers can see this import, and the uploaded file is deleted after 24 hours.",
+  "import.map.introSuppliers":
+    "Match the Name column. The name is how existing suppliers are recognised (capital letters are ignored).",
+  "import.mode.titleSuppliers": "Suppliers you already have",
+  "import.mode.createSuppliers":
+    "Add new suppliers only. Skip any I already have (matched by name).",
+  "import.mode.upsertSuppliers":
+    "Add new suppliers and update ones I already have (matched by name).",
+  "import.check.suppliersCreate": "{count} suppliers will be added.",
+  "import.check.suppliersUpdate": "{count} existing suppliers will be updated.",
+  "import.check.suppliersSkip": "{count} already exist and will be left alone.",
+  "import.err.requiredSuppliers": "Match the Name column first.",
+  "import.err.dupName": "This name is already used on row {row} of the file.",
+  "import.err.dbNameTaken": "A supplier with this name already exists.",
 } as const;

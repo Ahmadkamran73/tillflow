@@ -55,13 +55,13 @@ export const importJobs = pgTable(
   (t) => [
     unique("import_jobs_org_id_id_key").on(t.orgId, t.id),
     index("import_jobs_org_created_idx").on(t.orgId, t.createdAt),
-    check("import_jobs_type", sql`${t.type} in ('products','stock','customers')`),
+    check("import_jobs_type", sql`${t.type} in ('products','stock','customers','suppliers')`),
     check(
       "import_jobs_status",
       sql`${t.status} in ('uploaded','queued','running','done','failed','undone')`,
     ),
     check("import_jobs_mode", sql`${t.mode} in ('create','upsert','count','received')`),
-    check("import_jobs_match_key", sql`${t.matchKey} in ('sku','barcode','email')`),
+    check("import_jobs_match_key", sql`${t.matchKey} in ('sku','barcode','email','name')`),
     check("import_jobs_rows", sql`${t.totalRows} between 0 and 50000`),
     check("import_jobs_file_name", sql`char_length(${t.fileName}) between 1 and 200`),
   ],
@@ -103,7 +103,7 @@ export const importMappings = pgTable(
   },
   (t) => [
     unique("import_mappings_org_type_name_key").on(t.orgId, t.type, t.name),
-    check("import_mappings_type", sql`${t.type} in ('products','stock','customers')`),
+    check("import_mappings_type", sql`${t.type} in ('products','stock','customers','suppliers')`),
     check("import_mappings_name", sql`char_length(btrim(${t.name})) between 1 and 60`),
     check("import_mappings_size", sql`octet_length(${t.mapping}::text) <= 8000`),
   ],

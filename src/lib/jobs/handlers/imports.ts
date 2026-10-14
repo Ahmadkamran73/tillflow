@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { BusinessType } from "@/config/business-type-presets";
 import { buildItems, type RowError } from "@/lib/import/validate";
 import { buildCustomerItems } from "@/lib/import/validate-customers";
+import { buildSupplierItems } from "@/lib/import/validate-suppliers";
 import { buildStockItems } from "@/lib/import/validate-stock";
 import { parseUpload } from "@/lib/import/parse";
 import { t } from "@/lib/i18n";
@@ -10,6 +11,7 @@ import { logger } from "@/lib/logger";
 import {
   importApplyBatch,
   importApplyCustomers,
+  importApplySuppliers,
   importApplyStock,
   importBegin,
   importFile,
@@ -25,7 +27,13 @@ const KEPT_ERRORS = 200; // the rest are rebuilt from the file for the download
 /** SQLSTATE the database answered with, to a sentence. Never includes the data itself. */
 const dbMessage = (type: string, code?: string) => {
   if (code === "23505")
-    return t(type === "customers" ? "import.err.dbEmailTaken" : "import.err.dbDuplicate");
+    return t(
+      type === "customers"
+        ? "import.err.dbEmailTaken"
+        : type === "suppliers"
+          ? "import.err.dbNameTaken"
+          : "import.err.dbDuplicate",
+    );
   if (code === "P0002") return t("import.err.dbNotFound");
   if (code === "22023" && type === "stock") return t("import.err.dbInvalid");
   return t("import.err.db");
@@ -80,6 +88,15 @@ export async function runImport(data: z.infer<typeof importPayload>): Promise<vo
       );
       errors.push(...built.errors);
       await applyAll(type, built.items, (items) => importApplyStock({ ...base, items }), errors);
+    } else if (type === "suppliers") {
+      const built = buildSupplierItems(data.import_id, parsed.rows, start.mapping);
+      errors.push(...built.errors);
+      await applyAll(
+        type,
+        built.items,
+        (items) => importApplySuppliers({ ...base, items }),
+        errors,
+      );
     } else if (type === "customers") {
       const built = buildCustomerItems(data.import_id, parsed.rows, start.mapping);
       errors.push(...built.errors);

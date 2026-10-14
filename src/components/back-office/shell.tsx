@@ -10,6 +10,7 @@ import {
   PackageIcon,
   ReceiptIcon,
   SettingsIcon,
+  TruckIcon,
   UserRoundIcon,
   UsersIcon,
 } from "lucide-react";
@@ -39,6 +40,7 @@ const items: { slug: string; label: MessageKey; Icon: typeof LayoutDashboardIcon
   { slug: "products", label: "nav.products", Icon: PackageIcon },
   { slug: "inventory", label: "nav.inventory", Icon: BoxesIcon },
   { slug: "customers", label: "nav.customers", Icon: UserRoundIcon },
+  { slug: "suppliers", label: "nav.suppliers", Icon: TruckIcon },
   { slug: "staff", label: "nav.staff", Icon: UsersIcon },
   { slug: "reports", label: "nav.reports", Icon: BarChart3Icon },
   { slug: "settings", label: "nav.settings", Icon: SettingsIcon },

@@ -18,7 +18,7 @@ export async function putImportFile(
     fileName: string;
     bytes: Buffer;
     totalRows: number;
-    type: "products" | "stock" | "customers";
+    type: "products" | "stock" | "customers" | "suppliers";
   },
 ) {
   return supabase.rpc("create_import", {

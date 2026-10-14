@@ -1,7 +1,7 @@
 import { presets, type BusinessType } from "@/config/business-type-presets";
 
 /** What an import file holds. The pipeline (upload, mapping, preview, job, undo) is shared. */
-export const IMPORT_TYPES = ["products", "stock", "customers"] as const;
+export const IMPORT_TYPES = ["products", "stock", "customers", "suppliers"] as const;
 export type ImportType = (typeof IMPORT_TYPES)[number];
 
 /** Columns an import file can fill, across all import types. */
@@ -46,15 +46,16 @@ export const REQUIRED: Field[] = ["name", "price"];
 /** Columns that must be mapped, per import type (stock also needs the SKU or barcode column, see matchKeys). */
 export function requiredFor(type: ImportType): Field[] {
   if (type === "stock") return ["quantity"];
-  if (type === "customers") return ["name"];
+  if (type === "customers" || type === "suppliers") return ["name"];
   return REQUIRED;
 }
 
 /** Which column identifies the row to change, and what the shop may choose between. */
-export const MATCH_KEYS: Record<ImportType, readonly ("sku" | "barcode" | "email")[]> = {
+export const MATCH_KEYS: Record<ImportType, readonly ("sku" | "barcode" | "email" | "name")[]> = {
   products: ["sku", "barcode"],
   stock: ["sku", "barcode"],
   customers: ["email"],
+  suppliers: ["name"],
 };
 
 /** What to do with rows that match something that exists. */
@@ -62,6 +63,7 @@ export const MODES: Record<ImportType, readonly ("create" | "upsert" | "count" |
   products: ["create", "upsert"],
   stock: ["count", "received"],
   customers: ["create", "upsert"],
+  suppliers: ["create", "upsert"],
 };
 
 /** Which fields a business type uses for PRODUCTS (the rest are ignored, like the product form hides them). */
@@ -89,7 +91,8 @@ export function fieldsFor(type: BusinessType): Field[] {
 /** The columns an import of this type can fill, in the order the mapping screen and templates show them. */
 export function importFieldsFor(type: ImportType, business: BusinessType): Field[] {
   if (type === "stock") return ["sku", "barcode", "quantity", "notes"];
-  if (type === "customers") return ["name", "email", "phone", "vatNumber", "address", "notes"];
+  if (type === "customers" || type === "suppliers")
+    return ["name", "email", "phone", "vatNumber", "address", "notes"];
   return fieldsFor(business);
 }
 
@@ -179,7 +182,7 @@ const EXAMPLE: Partial<Record<BusinessType, Partial<Record<Field, string>>>> = {
   },
 };
 
-const EXAMPLE_OTHER: Record<"stock" | "customers", Partial<Record<Field, string>>> = {
+const EXAMPLE_OTHER: Record<"stock" | "customers" | "suppliers", Partial<Record<Field, string>>> = {
   stock: { sku: "BRD-1", barcode: "", quantity: "24", notes: "Friday delivery" },
   customers: {
     name: "Mary Byrne",
@@ -188,6 +191,14 @@ const EXAMPLE_OTHER: Record<"stock" | "customers", Partial<Record<Field, string>
     vatNumber: "",
     address: "1 Main St, Cork",
     notes: "Prefers email",
+  },
+  suppliers: {
+    name: "Dairy Direct Ltd",
+    email: "orders@dairydirect.example",
+    phone: "021 123 4567",
+    vatNumber: "IE6388047V",
+    address: "Unit 4, Industrial Estate, Cork",
+    notes: "Deliveries Tuesday and Friday",
   },
 };
 
