@@ -109,8 +109,13 @@ refund_net_cents, refund_vat_cents, built_at)`, PK `(org, location, day, dim, ke
 - **Service-charge lines** have no product: they appear as "Other (no product)" with a quantity.
 - **Deposits and cash rounding** are in takings (Payments, total) but not in the VAT report gross, which
   is item lines only.
-- **ZIP:** built in memory, up to 150 MB, so a download can briefly hold a few hundred MB; ids and
-  paging order by id; a shop trading while it is built can differ by a row (portability snapshot, not a ledger).
+- **ZIP size and memory:** each table is deflated as it is read (CSV compresses about 10 to 1), so the
+  150 MB cap applies to the compressed file and memory holds the compressed file plus one page. Measured
+  locally on 150,000 sales / 450,000 lines / 20,000 customers: 54.3 MB ZIP, peak process memory 320 MB,
+  70 s to build, 6 s to store. Before deflating, the same shop failed with "too large" (stored ZIP over
+  150 MB). The download route still holds the file as a hex string plus a Buffer (about 3x the file) and
+  was not measured; a shop at the cap (150 MB) would need about 450 MB for a moment. Paging orders by id
+  (offset paging), so a shop trading while it is built can differ by a row.
 - **Fresh sign-in for the ZIP (owner decision 2026-10-14):** requesting AND downloading need a sign-in
   proof from the last 10 minutes, checked in the database (`app.recent_auth`): an authenticator code
   for owners with two-step verification, the password typed again for owners without it (a magic
@@ -141,3 +146,58 @@ route and in SQL. No report or export path logs row contents.
 - VAT3 layout (sales / refunds / VAT due side by side): accountant to confirm.
 - Tips by hour or per staff member (Tips and Gratuities Act sharing report): not built.
 - Whether the nightly rebuild should also cover older days after a product rename (today: 3 days).
+
+## Compatibility check (Excel and LibreOffice)
+
+Generate sample files (no database needed):
+
+```
+SAMPLE_EXPORT_DIR=./sample-exports pnpm exec vitest run tests/unit/sample-exports.test.ts
+```
+
+It writes `vat`, `products-hostile` and `days` as `.csv`, `.xlsx` and `.pdf`. Open each `.xlsx` and `.csv`
+in the program and check:
+
+1. Totals row equals the sum of the rows above it (VAT file: Net 17,849.12, Sales VAT 3,363.30,
+   Net VAT due 2,890.30).
+2. Money cells are numbers with a euro format; a negative shows as -€45.00 (red in Excel).
+3. The header row is bold, the sheet name is the report title, the basis note is under the table.
+4. `products-hostile`: the cells starting `=`, `+`, `-`, `@` show as text with a leading apostrophe and
+   do NOT calculate, open a link or ask to enable anything. The shop name in the title row too.
+5. Accents, euro sign and the quotes in "Café crème, "large" € ü" read correctly (CSV: opens with a BOM).
+6. `days`: dates read 12/10/2026 (they are text, not Excel dates).
+
+**Done on 2026-10-14 (Microsoft Excel 16.0, Office 2024, on the developer's PC, opened read-only through
+automation):** all six checks passed for the `.xlsx` files (0 formula cells; values, totals, euro format,
+bold header, notes as expected) and for the `.csv` files (UTF-8 accents correct; a rate label such as
+`13.5%` is turned into a number by Excel's CSV reader, cosmetic). **LibreOffice is not installed on that
+PC and was NOT tested**, nor Google Sheets, Numbers or Excel for Mac. Dates in the Date column are text.
+
+## Large export
+
+`scripts/large-export-check.ts` seeds a large shop (default 100,000 sales with 3 lines and a payment each,
+20,000 products, customers and variants) and runs the account export the way the job does, then checks the
+ZIP (every entry's CRC, row counts against the database, stored size) and prints time and peak memory.
+Local or staging databases only (it refuses others; the data it writes cannot be deleted).
+
+```
+pnpm exec tsx scripts/large-export-check.ts --sales 150000
+pnpm exec tsx scripts/large-export-check.ts --sales 150000 --org <staging-shop-uuid> --url-env STAGING_DIRECT_URL --allow-remote
+```
+
+**To test on Hostinger (NOT done):** seed a staging test shop with `--org`, sign in as that shop's owner on
+the staging app, Settings > Export all my data > Prepare my export (confirm the code or password), note when
+the email arrives, then download. Record: time to ready, the file size, whether the host's Node process
+restarted or was killed (Hostinger panel > memory/restarts during the run), the downloaded file's integrity
+(unzip it, compare `manifest.json` row counts with the database), that a second owner of the same shop
+and a different shop's owner both get 404, that the link stops working after 7 days (or set `expires_at`
+in the past on staging), and that the app stays responsive while the download runs.
+
+## Assistive technology
+
+Checked in the browser's accessibility tree with Playwright (`tests/e2e/reports-a11y.spec.ts`): roles,
+accessible names, states, focus moves and live regions of the dashboard, the report filters, the tables,
+the date error, the download-failure message and the export status. **This is not a run with a screen
+reader.** A pass with NVDA (Windows) or VoiceOver (iPad/Mac) on the dashboard, a report with a date error,
+and the export page is still to be done by a person; the script to follow is the list above (what each
+heading, table header, error and status should announce).

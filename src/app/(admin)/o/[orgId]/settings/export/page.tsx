@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { FocusMessage } from "@/components/back-office/focus-message";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -57,14 +58,7 @@ export default async function AccountExportPage({
       <p className="max-w-prose text-sm">{t("accountExport.warning")}</p>
       <p className="text-muted-foreground max-w-prose text-sm">{t("accountExport.emailNote")}</p>
 
-      {message ? (
-        <p
-          role={message.ok ? "status" : "alert"}
-          className={message.ok ? "rounded-lg border p-3 text-sm" : "text-destructive text-sm"}
-        >
-          {t(message.key)}
-        </p>
-      ) : null}
+      <FocusMessage message={message ? t(message.key) : ""} urgent={!!message && !message.ok} />
 
       <form action={requestAccountExportAction}>
         <input type="hidden" name="orgId" value={orgId} />
@@ -136,6 +130,7 @@ export default async function AccountExportPage({
                           className="inline-flex min-h-12 items-center font-medium underline"
                         >
                           {t("accountExport.download")}
+                          <span className="sr-only"> ({when.format(new Date(e.requested_at as string))})</span>
                         </a>
                       ) : null}
                     </TableCell>

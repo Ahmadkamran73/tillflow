@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { DownloadIcon } from "lucide-react";
+import { FocusMessage } from "@/components/back-office/focus-message";
 import { Button } from "@/components/ui/button";
 import { ReportTableView } from "@/components/reports/report-table";
 import { requireRole } from "@/lib/auth";
@@ -128,17 +129,18 @@ export default async function ReportPage({
           {t("reports.filter.show")}
         </Button>
       </form>
-      {invalid ? (
-        <p id="range-error" role="alert" className="text-destructive text-sm">
-          {t("reports.filter.invalid")}
-        </p>
-      ) : null}
+      <FocusMessage id="range-error" message={invalid ? t("reports.filter.invalid") : ""} urgent />
 
-      {exportFlag === "limit" || exportFlag === "failed" ? (
-        <p role="alert" className="text-destructive text-sm">
-          {t(exportFlag === "limit" ? "reports.export.limit" : "reports.export.failed")}
-        </p>
-      ) : null}
+      <FocusMessage
+        message={
+          exportFlag === "limit"
+            ? t("reports.export.limit")
+            : exportFlag === "failed"
+              ? t("reports.export.failed")
+              : ""
+        }
+        urgent
+      />
 
       <nav aria-label={t("reports.preset.label")} className="flex flex-wrap gap-2">
         {quickKeys.map((k) => (

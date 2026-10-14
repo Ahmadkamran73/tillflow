@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { randomBytes } from "node:crypto";
 import { inflateRawSync } from "node:zlib";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -85,15 +86,32 @@ describe("account ZIP", () => {
     expect(calls).toEqual([0, 5000]);
   });
 
-  it("stops rather than build a file the database would refuse", async () => {
+  it("stops rather than build a file the database would refuse (compressed size)", async () => {
+    // Random text does not compress, so it exceeds a 1 KB cap even deflated.
+    const noise = randomBytes(2000).toString("hex");
     await expect(
       buildAccountZip(
-        async (table, offset) =>
-          table === "products" && offset === 0 ? [{ id: "x".repeat(500) }] : [],
+        async (table, offset) => (table === "products" && offset === 0 ? [{ id: noise }] : []),
         meta,
         1000,
       ),
     ).rejects.toBeInstanceOf(ExportTooLarge);
+  });
+
+  it("deflates: repetitive CSV is far smaller than its text, and still reads back exactly", async () => {
+    const rows = Array.from({ length: 4000 }, (_, i) => ({
+      id: `id-${i}`,
+      amount_cents: 1230,
+      note: "same",
+    }));
+    const zip = await buildAccountZip(
+      async (table, offset) => (table === "sales" && offset === 0 ? rows : []),
+      meta,
+    );
+    const files = unzip(zip);
+    expect(files["sales.csv"]!.split("\r\n")).toHaveLength(4002); // header + rows + trailing blank
+    expect(files["sales.csv"]).toContain("id-3999,1230,same");
+    expect(zip.length).toBeLessThan(files["sales.csv"]!.length / 3);
   });
 });
 
@@ -127,7 +145,9 @@ describe("account export job", () => {
     expect(name).toMatch(/^tillflow-data-\d{4}-\d{2}-\d{2}\.zip$/);
     expect((bytes as Buffer).subarray(0, 2).toString()).toBe("PK");
     // Two notices to the owners first, then the "ready" email to the person who asked.
-    const sent = sendMail.mock.calls.map((c) => c[0] as { to: string; subject: string; text: string });
+    const sent = sendMail.mock.calls.map(
+      (c) => c[0] as { to: string; subject: string; text: string },
+    );
     expect(sent.map((m) => m.to)).toEqual([
       "owner@example.com",
       "second@example.com",

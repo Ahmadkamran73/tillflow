@@ -14,7 +14,8 @@ export const reportsEnIE = {
   "reports.filter.to": "To",
   "reports.filter.search": "Search serial",
   "reports.filter.show": "Show report",
-  "reports.filter.invalid": "Choose real dates, with From on or before To and at most 366 days.",
+  "reports.filter.invalid":
+    "Choose real dates, with From on or before To and at most 366 days. The last 30 days are shown instead.",
   "reports.preset.label": "Quick ranges",
   "reports.preset.today": "Today",
   "reports.preset.last7": "Last 7 days",

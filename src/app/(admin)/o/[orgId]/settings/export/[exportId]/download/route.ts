@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { z } from "zod";
-import { authorizeApi, createSupabaseServerClient } from "@/lib/auth";
+import { appRedirect, authorizeApi, createSupabaseServerClient } from "@/lib/auth";
 import { reportError } from "@/lib/errors";
 import { rateLimit } from "@/lib/rate-limit";
 
@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
  * the status and the 7-day expiry again and writes an audit row for every download.
  */
 export async function GET(
-  request: NextRequest,
+  _request: NextRequest,
   { params }: { params: Promise<{ orgId: string; exportId: string }> },
 ) {
   const { orgId, exportId } = await params;
@@ -36,10 +36,7 @@ export async function GET(
   if (error?.code === "TF003") {
     // The sign-in proof is older than 10 minutes: confirm again, then come back to the list.
     const page = `/o/${orgId}/settings/export`;
-    return Response.redirect(
-      new URL(`${page}/confirm?next=${encodeURIComponent(page)}`, request.url),
-      303,
-    );
+    return appRedirect(`${page}/confirm?next=${encodeURIComponent(page)}`);
   }
   if (error || typeof data !== "string") {
     if (error && error.code !== "22023") {

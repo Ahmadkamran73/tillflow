@@ -141,7 +141,10 @@ export function DashboardTiles({
   };
 
   return (
-    <div className="flex flex-col gap-2">
+    <section aria-labelledby="dash-today" className="flex flex-col gap-2">
+      <h2 id="dash-today" className="sr-only">
+        {t("dash.today")}
+      </h2>
       <dl className="surface-panel divide-border grid divide-y sm:grid-cols-3 sm:divide-x sm:divide-y-0">
         {tiles.map((tile) => (
           <div key={tile} className="flex flex-col gap-1 p-5">
@@ -158,6 +161,6 @@ export function DashboardTiles({
           {t("dash.allReports")}
         </Link>
       </p>
-    </div>
+    </section>
   );
 }

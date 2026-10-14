@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { authorizeApi } from "@/lib/auth";
+import { appRedirect, authorizeApi } from "@/lib/auth";
 import { getLocation } from "@/lib/catalog";
 import { reportError } from "@/lib/errors";
 import { t } from "@/lib/i18n";
@@ -53,12 +53,8 @@ export async function GET(
   const limit = await rateLimit("report-export", auth.user.id);
   // A failed download is sent back to the report with a message, not saved as a text file.
   const back = (flag: "limit" | "failed") =>
-    Response.redirect(
-      new URL(
-        `/o/${orgId}/reports/${report}?${new URLSearchParams({ from: p.data.from, to: p.data.to, export: flag })}`,
-        request.url,
-      ),
-      303,
+    appRedirect(
+      `/o/${orgId}/reports/${report}?${new URLSearchParams({ from: p.data.from, to: p.data.to, export: flag })}`,
     );
   if (!limit.allowed) return back("limit");
 
