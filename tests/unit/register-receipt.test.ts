@@ -7,6 +7,7 @@ import { invoiceInput } from "@/lib/register/invoice";
 import {
   addMonths,
   buildReceipt,
+  giftReceiptText,
   receiptLabels,
   receiptText,
   type ReceiptHeader,
@@ -363,5 +364,23 @@ describe("discounts and service mode", () => {
     const lines = [{ variantId: "v1", qty: 1, modifierIds: [] }];
     expect(buildServerCart({ lines, mode: "take_away" }, rows).mode).toBe("take_away");
     expect(buildServerCart({ lines }, rows).mode).toBeUndefined();
+  });
+});
+
+describe("giftReceiptText", () => {
+  it("is on only for clothing and shows no money", () => {
+    expect(presets.clothing.receipt.giftReceipt).toBe(true);
+    expect(presets.general.receipt.giftReceipt).toBe(false);
+    const r = build(
+      saleOf([line({ name: "Blue shirt M", qty: 2, serial: "SN-9" })], { tenders: [cash(2460)] }),
+    );
+    const lines = giftReceiptText(r, 42, receiptLabels());
+    const text = lines.join("\n");
+    expect(text).toContain("GIFT RECEIPT");
+    expect(text).toContain("2 x Blue shirt M");
+    expect(text).toContain(r.number);
+    expect(text).not.toMatch(/\d+\.\d{2}/);
+    expect(text).not.toMatch(/b(VAT|Cash|Total|Change)b|SN-9/i);
+    expect(lines.every((l) => l.length <= 42)).toBe(true);
   });
 });

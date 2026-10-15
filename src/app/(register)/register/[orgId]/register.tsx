@@ -98,7 +98,7 @@ import {
   type PrinterSettings,
   type StationSetup,
 } from "@/lib/register/print";
-import { buildReceipt, receiptLabels, receiptText } from "@/lib/register/receipt";
+import { buildReceipt, giftReceiptText, receiptLabels, receiptText } from "@/lib/register/receipt";
 import { allergenListLines, buildTickets, type Station } from "@/lib/register/ticket";
 import { AllergenBadge, AllergenListDialog, allergenName, StationsDialog } from "./cafe-dialogs";
 import { completeSale, receiptNo, setInvoice } from "@/lib/register/sale";
@@ -600,11 +600,15 @@ export function Register({ orgId }: { orgId: string }) {
   /** Prints on the configured printer; browser mode or a failure opens the browser print window. */
   async function print(
     sale: LocalSale,
-    opts: { asInvoice?: boolean; kick?: boolean } = {},
+    opts: { asInvoice?: boolean; kick?: boolean; gift?: boolean } = {},
   ): Promise<string> {
     const receipt = receiptOf(sale, opts.asInvoice);
     if (!receipt) return "";
-    const lines = receiptText(receipt, printer.cols, receiptLabels());
+    const lines = (opts.gift ? giftReceiptText : receiptText)(
+      receipt,
+      printer.cols,
+      receiptLabels(),
+    );
     const result = await printLines(printer, lines, opts.kick ?? false);
     if (result === "printed") return t("register.printed");
     setPrintJob((j) => ({ n: (j?.n ?? 0) + 1, lines }));
@@ -1329,7 +1333,9 @@ export function Register({ orgId }: { orgId: string }) {
           <SplitDialog
             cart={cart}
             whole={{
-              lineGross: priced ? cart.lines.map((_, i) => lineTotal(priced, priced.itemIndex[i]!)) : [],
+              lineGross: priced
+                ? cart.lines.map((_, i) => lineTotal(priced, priced.itemIndex[i]!))
+                : [],
               serviceCents: priced?.basket.serviceChargeTotal ?? 0,
             }}
             totalCents={priced?.basket.total ?? 0}
@@ -1391,7 +1397,10 @@ export function Register({ orgId }: { orgId: string }) {
                 ? t("override.discount", { percent: dialog.ask.percent })
                 : dialog.ask.kind === "voidItem"
                   ? t("tab.voidReason", {
-                      name: cart.lines.find((l) => dialog.ask.kind === "voidItem" && l.id === dialog.ask.lineId)?.name ?? "",
+                      name:
+                        cart.lines.find(
+                          (l) => dialog.ask.kind === "voidItem" && l.id === dialog.ask.lineId,
+                        )?.name ?? "",
                     })
                   : t("override.noSale")
             }
@@ -1659,6 +1668,11 @@ export function Register({ orgId }: { orgId: string }) {
             }
             onEmail={() => setDialog({ kind: "email", sale, status: "", sending: false })}
             onInvoice={() => setDialog({ kind: "invoice", sale })}
+            onGift={
+              preset?.receipt.giftReceipt
+                ? async () => setDialog({ ...dialog, status: await print(sale, { gift: true }) })
+                : undefined
+            }
           />
         );
       }
@@ -1889,97 +1903,101 @@ export function Register({ orgId }: { orgId: string }) {
               />
             ) : (
               <>
-            <div className="relative">
-              <SearchIcon
-                aria-hidden
-                className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-5 -translate-y-1/2"
-              />
-              <Input
-                type="search"
-                aria-label={t("register.search")}
-                placeholder={t("register.search")}
-                autoComplete="off"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                className="h-12 pl-10 text-base md:text-base"
-              />
-            </div>
-            {!data ? (
-              <p>{t("register.loading")}</p>
-            ) : !data.org ? (
-              <p role="status">{sync.failed ? t("register.noCatalogue") : t("register.loading")}</p>
-            ) : (
-              <>
-                <div
-                  role="group"
-                  aria-label={t("register.categories")}
-                  className="flex flex-wrap gap-2"
-                >
-                  <Button
-                    size="touch"
-                    variant={categoryId === null ? "default" : "outline"}
-                    aria-pressed={categoryId === null}
-                    onClick={() => setCategoryId(null)}
-                  >
-                    {categoryId === null && <CheckIcon aria-hidden />}
-                    {t("register.all")}
-                  </Button>
-                  {[...data.categories]
-                    .sort((a, b) => a.sort - b.sort)
-                    .map((c) => (
-                      <Button
-                        key={c.id}
-                        size="touch"
-                        variant={categoryId === c.id ? "default" : "outline"}
-                        aria-pressed={categoryId === c.id}
-                        onClick={() => setCategoryId(c.id)}
-                      >
-                        {categoryId === c.id && <CheckIcon aria-hidden />}
-                        {c.name}
-                      </Button>
-                    ))}
+                <div className="relative">
+                  <SearchIcon
+                    aria-hidden
+                    className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-5 -translate-y-1/2"
+                  />
+                  <Input
+                    type="search"
+                    aria-label={t("register.search")}
+                    placeholder={t("register.search")}
+                    autoComplete="off"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    className="h-12 pl-10 text-base md:text-base"
+                  />
                 </div>
-                {tiles.length === 0 ? (
-                  <p>{t("register.noProducts")}</p>
+                {!data ? (
+                  <p>{t("register.loading")}</p>
+                ) : !data.org ? (
+                  <p role="status">
+                    {sync.failed ? t("register.noCatalogue") : t("register.loading")}
+                  </p>
                 ) : (
-                  <ul
-                    aria-label={t("register.products")}
-                    className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4"
-                  >
-                    {tiles.map((p) => {
-                      const vs = index.variantsOf.get(p.id) ?? [];
-                      const prices = vs.map((v) => v.priceCents);
-                      const low = prices.length ? Math.min(...prices) : null;
-                      return (
-                        <li key={p.id}>
-                          <button
-                            type="button"
-                            onClick={() => tapProduct(p)}
-                            className="till-key flex min-h-24 w-full flex-col items-start justify-between rounded-xl p-3 text-left"
+                  <>
+                    <div
+                      role="group"
+                      aria-label={t("register.categories")}
+                      className="flex flex-wrap gap-2"
+                    >
+                      <Button
+                        size="touch"
+                        variant={categoryId === null ? "default" : "outline"}
+                        aria-pressed={categoryId === null}
+                        onClick={() => setCategoryId(null)}
+                      >
+                        {categoryId === null && <CheckIcon aria-hidden />}
+                        {t("register.all")}
+                      </Button>
+                      {[...data.categories]
+                        .sort((a, b) => a.sort - b.sort)
+                        .map((c) => (
+                          <Button
+                            key={c.id}
+                            size="touch"
+                            variant={categoryId === c.id ? "default" : "outline"}
+                            aria-pressed={categoryId === c.id}
+                            onClick={() => setCategoryId(c.id)}
                           >
-                            <span className="font-display leading-tight font-semibold">
-                              {p.name}
-                            </span>
-                            {preset?.receipt.allergens && (
-                              <AllergenBadge
-                                codes={[...new Set(vs.flatMap((v) => allergensOf(v.attributes)))]}
-                              />
-                            )}
-                            {low !== null && (
-                              <span className="font-mono text-sm tabular-nums">
-                                {vs.length > 1
-                                  ? t("register.from", { price: formatCents(low) })
-                                  : formatCents(low)}
-                              </span>
-                            )}
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
+                            {categoryId === c.id && <CheckIcon aria-hidden />}
+                            {c.name}
+                          </Button>
+                        ))}
+                    </div>
+                    {tiles.length === 0 ? (
+                      <p>{t("register.noProducts")}</p>
+                    ) : (
+                      <ul
+                        aria-label={t("register.products")}
+                        className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4"
+                      >
+                        {tiles.map((p) => {
+                          const vs = index.variantsOf.get(p.id) ?? [];
+                          const prices = vs.map((v) => v.priceCents);
+                          const low = prices.length ? Math.min(...prices) : null;
+                          return (
+                            <li key={p.id}>
+                              <button
+                                type="button"
+                                onClick={() => tapProduct(p)}
+                                className="till-key flex min-h-24 w-full flex-col items-start justify-between rounded-xl p-3 text-left"
+                              >
+                                <span className="font-display leading-tight font-semibold">
+                                  {p.name}
+                                </span>
+                                {preset?.receipt.allergens && (
+                                  <AllergenBadge
+                                    codes={[
+                                      ...new Set(vs.flatMap((v) => allergensOf(v.attributes))),
+                                    ]}
+                                  />
+                                )}
+                                {low !== null && (
+                                  <span className="font-mono text-sm tabular-nums">
+                                    {vs.length > 1
+                                      ? t("register.from", { price: formatCents(low) })
+                                      : formatCents(low)}
+                                  </span>
+                                )}
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </>
                 )}
-              </>
-            )}
               </>
             )}
           </>
@@ -2009,268 +2027,276 @@ export function Register({ orgId }: { orgId: string }) {
             </h2>
             {/* Everything above the totals scrolls together, so the tab controls can never squeeze the lines out. */}
             <div className="min-h-0 flex-1 overflow-y-auto">
-            {showMap && <p className="text-muted-foreground mb-3 text-sm">{t("tables.pickTable")}</p>}
-            {tablePlan && quick && !activeTab && (
-              <Button
-                size="touch"
-                variant="outline"
-                className="mb-3"
-                aria-disabled={cart.lines.length > 0}
-                onClick={() =>
-                  cart.lines.length > 0 ? say(t("register.cartNotEmpty")) : setQuick(false)
-                }
-              >
-                {t("tables.backToTables")}
-              </Button>
-            )}
-            {activeTab && (
-              <div className="mb-3 flex flex-col gap-2">
-                <p className="font-semibold">
-                  {activeTab.part
-                    ? t("tables.onTablePart", { name: activeTab.tableName, part: activeTab.part })
-                    : t("tables.onTable", { name: activeTab.tableName, covers: activeTab.covers })}
-                </p>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span id="seat-label" className="text-sm font-medium">
-                    {t("tab.seat")}
-                  </span>
-                  <Button
-                    size="icon-touch"
-                    variant="outline"
-                    aria-label={t("tab.seatPrev")}
-                    onClick={() => {
-                      const n = Math.max(1, seat - 1);
-                      setSeat(n);
-                      say(t("tab.seatValue", { n }));
-                    }}
-                  >
-                    <MinusIcon aria-hidden />
-                  </Button>
-                  <span
-                    aria-labelledby="seat-label"
-                    className="min-w-8 text-center text-lg font-semibold tabular-nums"
-                  >
-                    {seat}
-                  </span>
-                  <Button
-                    size="icon-touch"
-                    variant="outline"
-                    aria-label={t("tab.seatNext")}
-                    onClick={() => {
-                      const n = Math.min(activeTab.covers, seat + 1);
-                      setSeat(n);
-                      say(t("tab.seatValue", { n }));
-                    }}
-                  >
-                    <PlusIcon aria-hidden />
-                  </Button>
-                </div>
-                <div role="group" aria-label={t("tab.course")} className="grid grid-cols-4 gap-2">
-                  {[1, 2, 3, 4].map((n) => (
+              {showMap && (
+                <p className="text-muted-foreground mb-3 text-sm">{t("tables.pickTable")}</p>
+              )}
+              {tablePlan && quick && !activeTab && (
+                <Button
+                  size="touch"
+                  variant="outline"
+                  className="mb-3"
+                  aria-disabled={cart.lines.length > 0}
+                  onClick={() =>
+                    cart.lines.length > 0 ? say(t("register.cartNotEmpty")) : setQuick(false)
+                  }
+                >
+                  {t("tables.backToTables")}
+                </Button>
+              )}
+              {activeTab && (
+                <div className="mb-3 flex flex-col gap-2">
+                  <p className="font-semibold">
+                    {activeTab.part
+                      ? t("tables.onTablePart", { name: activeTab.tableName, part: activeTab.part })
+                      : t("tables.onTable", {
+                          name: activeTab.tableName,
+                          covers: activeTab.covers,
+                        })}
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span id="seat-label" className="text-sm font-medium">
+                      {t("tab.seat")}
+                    </span>
                     <Button
-                      key={n}
-                      size="touch"
-                      variant={course === n ? "default" : "outline"}
-                      aria-pressed={course === n}
-                      onClick={() => setCourse(n)}
-                    >
-                      {course === n && <CheckIcon aria-hidden />}
-                      {t("tab.courseValue", { n })}
-                    </Button>
-                  ))}
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <Button size="touch" variant="outline" onClick={() => void sendCourse(false)}>
-                    <SendIcon aria-hidden /> {t("tab.send")}
-                  </Button>
-                  <Button size="touch" variant="outline" onClick={() => void sendCourse(true)}>
-                    <FlameIcon aria-hidden /> {t("tab.fireNext")}
-                  </Button>
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  <Button size="touch" variant="outline" onClick={() => void billTab()}>
-                    <ReceiptTextIcon aria-hidden /> {t("tab.bill")}
-                  </Button>
-                  <Button
-                    size="touch"
-                    variant="outline"
-                    aria-disabled={splitLocked}
-                    onClick={() =>
-                      splitLocked ? say(t("move.splitBlocked")) : setDialog({ kind: "move" })
-                    }
-                  >
-                    <ArrowLeftRightIcon aria-hidden /> {t("tab.move")}
-                  </Button>
-                  {cart.lines.length === 0 ? (
-                    <Button
-                      size="touch"
-                      variant={confirmRelease ? "default" : "outline"}
+                      size="icon-touch"
+                      variant="outline"
+                      aria-label={t("tab.seatPrev")}
                       onClick={() => {
-                        if (confirmRelease) void releaseTable();
-                        else {
-                          setConfirmRelease(true);
-                          say(t("tab.releaseConfirm", { name: activeTab.tableName }));
-                        }
+                        const n = Math.max(1, seat - 1);
+                        setSeat(n);
+                        say(t("tab.seatValue", { n }));
                       }}
                     >
-                      {confirmRelease ? t("tab.releaseYes") : t("tab.release")}
+                      <MinusIcon aria-hidden />
                     </Button>
-                  ) : (
-                    <Button size="touch" variant="outline" onClick={leaveTab}>
-                      {t("tables.backToTables")}
-                    </Button>
-                  )}
-                </div>
-              </div>
-            )}
-            {preset?.register.eatInToggle && (
-              <div
-                role="group"
-                aria-label={t("register.serviceMode")}
-                className="mb-3 grid grid-cols-2 gap-2"
-              >
-                {(["eat_in", "take_away"] as const).map((m) => {
-                  const on = (cart.mode ?? "eat_in") === m;
-                  return (
+                    <span
+                      aria-labelledby="seat-label"
+                      className="min-w-8 text-center text-lg font-semibold tabular-nums"
+                    >
+                      {seat}
+                    </span>
                     <Button
-                      key={m}
-                      size="touch"
-                      variant={on ? "default" : "outline"}
-                      aria-pressed={on}
-                      onClick={() => dispatch({ type: "mode", mode: m })}
+                      size="icon-touch"
+                      variant="outline"
+                      aria-label={t("tab.seatNext")}
+                      onClick={() => {
+                        const n = Math.min(activeTab.covers, seat + 1);
+                        setSeat(n);
+                        say(t("tab.seatValue", { n }));
+                      }}
                     >
-                      {on && <CheckIcon aria-hidden />}
-                      {t(m === "eat_in" ? "register.eatIn" : "register.takeAway")}
+                      <PlusIcon aria-hidden />
                     </Button>
-                  );
-                })}
-              </div>
-            )}
-            {preset?.register.orderName && (
-              <div className="mb-3 flex flex-col gap-1 text-sm">
-                <label htmlFor="order-name" className="font-medium">
-                  {t("register.orderName")}
-                </label>
-                <Input
-                  id="order-name"
-                  className="h-12"
-                  maxLength={ORDER_NAME_MAX}
-                  autoComplete="off"
-                  aria-describedby="order-name-hint"
-                  value={cart.orderName ?? ""}
-                  onChange={(e) => dispatch({ type: "orderName", name: e.target.value })}
-                />
-                <span id="order-name-hint" className="text-muted-foreground text-xs">
-                  {t("register.orderNameHint")}
-                </span>
-              </div>
-            )}
-            <div>
-              {cart.lines.length === 0 ? (
-                <p className="text-muted-foreground">{t("register.cartEmpty")}</p>
-              ) : (
-                <ul className="bg-paper receipt-edge border-input rounded-t-xl border border-b-0 font-mono">
-                  {cart.lines.map((l, i) => (
-                    <li
-                      key={l.id}
-                      className="border-border flex flex-col gap-2 border-dashed p-3 not-last:border-b-2"
+                  </div>
+                  <div role="group" aria-label={t("tab.course")} className="grid grid-cols-4 gap-2">
+                    {[1, 2, 3, 4].map((n) => (
+                      <Button
+                        key={n}
+                        size="touch"
+                        variant={course === n ? "default" : "outline"}
+                        aria-pressed={course === n}
+                        onClick={() => setCourse(n)}
+                      >
+                        {course === n && <CheckIcon aria-hidden />}
+                        {t("tab.courseValue", { n })}
+                      </Button>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button size="touch" variant="outline" onClick={() => void sendCourse(false)}>
+                      <SendIcon aria-hidden /> {t("tab.send")}
+                    </Button>
+                    <Button size="touch" variant="outline" onClick={() => void sendCourse(true)}>
+                      <FlameIcon aria-hidden /> {t("tab.fireNext")}
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <Button size="touch" variant="outline" onClick={() => void billTab()}>
+                      <ReceiptTextIcon aria-hidden /> {t("tab.bill")}
+                    </Button>
+                    <Button
+                      size="touch"
+                      variant="outline"
+                      aria-disabled={splitLocked}
+                      onClick={() =>
+                        splitLocked ? say(t("move.splitBlocked")) : setDialog({ kind: "move" })
+                      }
                     >
-                      <div className="flex items-baseline gap-2">
-                        <span className="font-medium">{l.name}</span>
-                        <span
-                          aria-hidden
-                          className="border-muted-foreground/60 flex-1 border-b-2 border-dotted"
-                        />
-                        <span className="font-semibold tabular-nums">
-                          {priced ? formatCents(lineTotal(priced, priced.itemIndex[i]!)) : ""}
-                        </span>
-                      </div>
-                      {(l.modifiers.length > 0 || l.serial || l.discount || activeTab) && (
-                        <p className="text-muted-foreground text-xs">
-                          {[
-                            activeTab
-                              ? t("tab.lineInfo", { seat: l.seat ?? 1, course: l.course ?? 1 })
-                              : "",
-                            l.sentAt
-                              ? t("tab.sent")
-                              : activeTab && (l.course ?? 1) > Math.max(1, activeTab.firedCourse)
-                                ? t("tab.held")
-                                : "",
-                            ...l.modifiers.map((m) => m.name),
-                            l.serial ? `${t("register.serialTitle")}: ${l.serial}` : "",
-                            l.discount ? t("register.line.discounted") : "",
-                            l.qty > 1 ? `${l.qty} × ${formatCents(unitWithModifiers(l))}` : "",
-                          ]
-                            .filter(Boolean)
-                            .join(" · ")}
-                        </p>
-                      )}
-                      <AllergenBadge codes={l.allergens ?? []} />
-                      <div className="flex items-center gap-2">
-                        <Button
-                          size="icon-touch"
-                          variant="outline"
-                          aria-label={t("register.decrease", { name: l.name })}
-                          aria-disabled={!!l.sentAt}
-                          onClick={() => dispatch({ type: "qty", id: l.id, delta: -1 })}
-                        >
-                          <MinusIcon aria-hidden />
-                        </Button>
-                        <span className="min-w-8 text-center text-lg font-semibold tabular-nums">
-                          <span aria-hidden>{l.qty}</span>
-                          <span className="sr-only">
-                            {t("register.qty", { name: l.name })} {l.qty}
+                      <ArrowLeftRightIcon aria-hidden /> {t("tab.move")}
+                    </Button>
+                    {cart.lines.length === 0 ? (
+                      <Button
+                        size="touch"
+                        variant={confirmRelease ? "default" : "outline"}
+                        onClick={() => {
+                          if (confirmRelease) void releaseTable();
+                          else {
+                            setConfirmRelease(true);
+                            say(t("tab.releaseConfirm", { name: activeTab.tableName }));
+                          }
+                        }}
+                      >
+                        {confirmRelease ? t("tab.releaseYes") : t("tab.release")}
+                      </Button>
+                    ) : (
+                      <Button size="touch" variant="outline" onClick={leaveTab}>
+                        {t("tables.backToTables")}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )}
+              {preset?.register.eatInToggle && (
+                <div
+                  role="group"
+                  aria-label={t("register.serviceMode")}
+                  className="mb-3 grid grid-cols-2 gap-2"
+                >
+                  {(["eat_in", "take_away"] as const).map((m) => {
+                    const on = (cart.mode ?? "eat_in") === m;
+                    return (
+                      <Button
+                        key={m}
+                        size="touch"
+                        variant={on ? "default" : "outline"}
+                        aria-pressed={on}
+                        onClick={() => dispatch({ type: "mode", mode: m })}
+                      >
+                        {on && <CheckIcon aria-hidden />}
+                        {t(m === "eat_in" ? "register.eatIn" : "register.takeAway")}
+                      </Button>
+                    );
+                  })}
+                </div>
+              )}
+              {preset?.register.orderName && (
+                <div className="mb-3 flex flex-col gap-1 text-sm">
+                  <label htmlFor="order-name" className="font-medium">
+                    {t("register.orderName")}
+                  </label>
+                  <Input
+                    id="order-name"
+                    className="h-12"
+                    maxLength={ORDER_NAME_MAX}
+                    autoComplete="off"
+                    aria-describedby="order-name-hint"
+                    value={cart.orderName ?? ""}
+                    onChange={(e) => dispatch({ type: "orderName", name: e.target.value })}
+                  />
+                  <span id="order-name-hint" className="text-muted-foreground text-xs">
+                    {t("register.orderNameHint")}
+                  </span>
+                </div>
+              )}
+              <div>
+                {cart.lines.length === 0 ? (
+                  <p className="text-muted-foreground">{t("register.cartEmpty")}</p>
+                ) : (
+                  <ul className="bg-paper receipt-edge border-input rounded-t-xl border border-b-0 font-mono">
+                    {cart.lines.map((l, i) => (
+                      <li
+                        key={l.id}
+                        className="border-border flex flex-col gap-2 border-dashed p-3 not-last:border-b-2"
+                      >
+                        <div className="flex items-baseline gap-2">
+                          <span className="font-medium">{l.name}</span>
+                          <span
+                            aria-hidden
+                            className="border-muted-foreground/60 flex-1 border-b-2 border-dotted"
+                          />
+                          <span className="font-semibold tabular-nums">
+                            {priced ? formatCents(lineTotal(priced, priced.itemIndex[i]!)) : ""}
                           </span>
-                        </span>
-                        <Button
-                          size="icon-touch"
-                          variant="outline"
-                          aria-label={t("register.increase", { name: l.name })}
-                          aria-disabled={!!l.sentAt}
-                          onClick={() => dispatch({ type: "qty", id: l.id, delta: 1 })}
-                        >
-                          <PlusIcon aria-hidden />
-                        </Button>
-                        <Button
-                          size="icon-touch"
-                          variant="outline"
-                          className="ml-auto"
-                          aria-label={t("register.discountLine", { name: l.name })}
-                          onClick={() => setDialog({ kind: "discount", target: l.id })}
-                        >
-                          <PercentIcon aria-hidden />
-                        </Button>
-                        {l.sentAt ? (
-                          <Button
-                            size="touch"
-                            variant="outline"
-                            aria-label={t("tab.voidLine", { name: l.name })}
-                            onClick={() =>
-                              setDialog({ kind: "override", ask: { kind: "voidItem", lineId: l.id } })
-                            }
-                          >
-                            <Trash2Icon aria-hidden /> {t("tab.void")}
-                          </Button>
-                        ) : (
+                        </div>
+                        {(l.modifiers.length > 0 || l.serial || l.discount || activeTab) && (
+                          <p className="text-muted-foreground text-xs">
+                            {[
+                              activeTab
+                                ? t("tab.lineInfo", { seat: l.seat ?? 1, course: l.course ?? 1 })
+                                : "",
+                              l.sentAt
+                                ? t("tab.sent")
+                                : activeTab && (l.course ?? 1) > Math.max(1, activeTab.firedCourse)
+                                  ? t("tab.held")
+                                  : "",
+                              ...l.modifiers.map((m) => m.name),
+                              l.serial ? `${t("register.serialTitle")}: ${l.serial}` : "",
+                              l.discount ? t("register.line.discounted") : "",
+                              l.qty > 1 ? `${l.qty} × ${formatCents(unitWithModifiers(l))}` : "",
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </p>
+                        )}
+                        <AllergenBadge codes={l.allergens ?? []} />
+                        <div className="flex items-center gap-2">
                           <Button
                             size="icon-touch"
-                            variant="ghost"
-                            aria-label={t("register.remove", { name: l.name })}
-                            onClick={() => {
-                              dispatch({ type: "remove", id: l.id });
-                              say(t("register.removed", { name: l.name }));
-                              focusCart();
-                            }}
+                            variant="outline"
+                            aria-label={t("register.decrease", { name: l.name })}
+                            aria-disabled={!!l.sentAt}
+                            onClick={() => dispatch({ type: "qty", id: l.id, delta: -1 })}
                           >
-                            <Trash2Icon aria-hidden />
+                            <MinusIcon aria-hidden />
                           </Button>
-                        )}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+                          <span className="min-w-8 text-center text-lg font-semibold tabular-nums">
+                            <span aria-hidden>{l.qty}</span>
+                            <span className="sr-only">
+                              {t("register.qty", { name: l.name })} {l.qty}
+                            </span>
+                          </span>
+                          <Button
+                            size="icon-touch"
+                            variant="outline"
+                            aria-label={t("register.increase", { name: l.name })}
+                            aria-disabled={!!l.sentAt}
+                            onClick={() => dispatch({ type: "qty", id: l.id, delta: 1 })}
+                          >
+                            <PlusIcon aria-hidden />
+                          </Button>
+                          <Button
+                            size="icon-touch"
+                            variant="outline"
+                            className="ml-auto"
+                            aria-label={t("register.discountLine", { name: l.name })}
+                            onClick={() => setDialog({ kind: "discount", target: l.id })}
+                          >
+                            <PercentIcon aria-hidden />
+                          </Button>
+                          {l.sentAt ? (
+                            <Button
+                              size="touch"
+                              variant="outline"
+                              aria-label={t("tab.voidLine", { name: l.name })}
+                              onClick={() =>
+                                setDialog({
+                                  kind: "override",
+                                  ask: { kind: "voidItem", lineId: l.id },
+                                })
+                              }
+                            >
+                              <Trash2Icon aria-hidden /> {t("tab.void")}
+                            </Button>
+                          ) : (
+                            <Button
+                              size="icon-touch"
+                              variant="ghost"
+                              aria-label={t("register.remove", { name: l.name })}
+                              onClick={() => {
+                                dispatch({ type: "remove", id: l.id });
+                                say(t("register.removed", { name: l.name }));
+                                focusCart();
+                              }}
+                            >
+                              <Trash2Icon aria-hidden />
+                            </Button>
+                          )}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </div>
             <div className="mt-3 flex flex-col gap-3">
               {pricing === "error" && (

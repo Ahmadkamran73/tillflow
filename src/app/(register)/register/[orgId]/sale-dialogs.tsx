@@ -1,6 +1,6 @@
 "use client";
 
-import { MailIcon, PrinterIcon, ReceiptTextIcon } from "lucide-react";
+import { GiftIcon, MailIcon, PrinterIcon, ReceiptTextIcon } from "lucide-react";
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,6 +20,7 @@ export function DoneDialog({
   onTickets,
   onEmail,
   onInvoice,
+  onGift,
   onNewSale,
 }: {
   change: number;
@@ -30,6 +31,8 @@ export function DoneDialog({
   onTickets?: () => Promise<void> | void;
   onEmail: () => void;
   onInvoice: () => void;
+  /** Clothing: print a copy with no prices. */
+  onGift?: () => void;
   onNewSale: () => void;
 }) {
   const [busy, setBusy] = useState(false);
@@ -70,6 +73,11 @@ export function DoneDialog({
           <ReceiptTextIcon aria-hidden /> {t("register.vatInvoice")}
           {invoiceIssued ? ` (${t("register.invoiceIssued")})` : ""}
         </Button>
+        {onGift && (
+          <Button type="button" size="touch" variant="outline" onClick={onGift}>
+            <GiftIcon aria-hidden /> {t("register.giftReceipt")}
+          </Button>
+        )}
       </div>
       <Button type="button" size="pay" autoFocus onClick={onNewSale}>
         {t("register.newSale")}

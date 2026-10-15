@@ -54,3 +54,6 @@ next-env.d.ts
 /public/sw.js
 /public/sw.js.map
 /public/swe-worker-*.js
+
+# Sample exports written by tests/unit/sample-exports.test.ts when SAMPLE_EXPORT_DIR is set here
+/sample-exports/
