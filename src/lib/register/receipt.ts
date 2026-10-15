@@ -200,6 +200,32 @@ export function buildReceipt(args: {
   };
 }
 
+/**
+ * Gift receipt: what was bought, with no price, VAT, payment or code that could be used to
+ * refund it. Built from the same receipt data, so nothing is recalculated.
+ */
+export function giftReceiptText(r: Receipt, cols: 32 | 42 | 48, labels: ReceiptLabels): string[] {
+  const out: string[] = [];
+  const centre = (s: string) =>
+    out.push(s.length >= cols ? s.slice(0, cols) : s.padStart((cols + s.length) >> 1));
+  const rule = () => out.push("-".repeat(cols));
+  centre(r.business.name);
+  r.business.address.forEach((a) => centre(a));
+  rule();
+  out.push(labels.giftReceipt.toUpperCase());
+  out.push(`${labels.receiptNo} ${r.number}`);
+  out.push(r.dateTime);
+  rule();
+  for (const l of r.lines) {
+    out.push((l.qty > 1 ? `${l.qty} x ${l.name}` : l.name).slice(0, cols));
+    l.detail.filter((d) => !d.startsWith("S/N ")).forEach((d) => out.push(`  ${d}`.slice(0, cols)));
+    if (l.warrantyEnds) out.push(`  ${labels.warrantyUntil} ${l.warrantyEnds}`.slice(0, cols));
+  }
+  rule();
+  out.push(labels.giftNote.slice(0, cols));
+  return out;
+}
+
 const pct = (bp: number) => `${bp / 100}%`; // display only
 
 /** Plain-text receipt, one string per printed line, none longer than `cols`. */
@@ -302,6 +328,8 @@ export type ReceiptLabels = {
   takeAway: string;
   orderName: string;
   discount: string;
+  giftReceipt: string;
+  giftNote: string;
 };
 
 export const receiptLabels = (): ReceiptLabels => ({
@@ -322,4 +350,6 @@ export const receiptLabels = (): ReceiptLabels => ({
   takeAway: t("receipt.takeAway"),
   orderName: t("receipt.orderName"),
   discount: t("receipt.discount"),
+  giftReceipt: t("receipt.giftReceipt"),
+  giftNote: t("receipt.giftNote"),
 });
