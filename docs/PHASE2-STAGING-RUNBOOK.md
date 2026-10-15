@@ -28,6 +28,22 @@ For each run check, and tick:
 5. A second shop (another account) cannot open any URL of the first (404).
 6. Card total equals what the shop's own terminal report says (use any figure; this is the recorded-tender control).
 
+### Automated staging run (screens only, no database access)
+
+`pnpm exec playwright test -c playwright.staging.config.ts` signs in to staging with the account in `.env.local`
+(`STAGING_E2E_EMAIL` / `_PASSWORD` for the general store; `STAGING_E2E_<TYPE>_EMAIL` / `_PASSWORD` for the others),
+creates its own tagged products, pairs a till, trades the general-store day above, closes the shift and checks the
+Z page, Sales by day, VAT by rate and Payments against the independent calculator, then the CSV, Excel and PDF
+exports against the screen. It refuses to run against any host that is not `staging.*` or localhost. Only the
+general-store day exists so far; the other four need their own staging account (one per business type).
+
+**Staging run 2026-10-15 (general store, commit `9ac1a02`):** open shift, 3 sales, 1 refund, Z (including over/short
+-0.05), Sales by day, VAT by rate, Payments and the CSV and Excel exports all matched. **The PDF export FAILED on
+staging** (redirect with `export=failed`; staging error log: `Cannot find module .../pdfkit/js/standard-fonts/Helvetica.cjs`):
+the deployed bundle lacked pdfkit's `.cjs` font files because file tracing only saw the `.mjs` ones (the
+`@react-pdf/renderer` 4.9.0 bump from Dependabot PR #44). Fixed in `next.config.ts`
+(`outputFileTracingIncludes` for the export route; checked in the local build trace). Re-run after the fix is deployed.
+
 ## B. Large export on Hostinger
 
 Procedure: `docs/specs/reports.md` ("Large export"). Needs a staging shop with a large history; seed it with

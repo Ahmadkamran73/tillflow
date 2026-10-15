@@ -37,6 +37,15 @@ const nextConfig: NextConfig = {
   },
   // Loaded at runtime from node_modules, not bundled (pg and pino are external by default).
   serverExternalPackages: ["pg-boss", "@react-pdf/renderer"],
+  // pdfkit loads its standard fonts with a runtime require of the .cjs files, which file tracing
+  // does not see (it only finds the .mjs ones), so the PDF export failed on the deployed host with
+  // "Cannot find module .../pdfkit/js/standard-fonts/Helvetica.cjs".
+  outputFileTracingIncludes: {
+    "/o/\\[orgId\\]/reports/\\[report\\]/export": [
+      "./node_modules/.pnpm/pdfkit@*/node_modules/pdfkit/js/**/*",
+      "./node_modules/pdfkit/js/**/*",
+    ],
+  },
   // Off on Hostinger, so maps are never served. CI sets SOURCE_MAPS=true in the source-maps
   // workflow to keep a private copy per commit (docs/DEPLOY.md "Reading a browser stack trace").
   productionBrowserSourceMaps: process.env.SOURCE_MAPS === "true",
