@@ -161,7 +161,7 @@ Notes:
    report and the payments report; record the results in `docs/STATUS.md`. First confirm what staging runs
    (checked 2026-10-15: staging `/api/health` ok, database and jobs ok, commit `c086be9`, so the app and migrations 0048-0051 are in place). Procedure and result tables: `docs/PHASE2-STAGING-RUNBOOK.md`.
 3. A large-account export on the Hostinger staging app (procedure in `docs/specs/reports.md`).
-4. A screen-reader pass by a person; a LibreOffice check.
+4. A screen-reader pass by a person. (LibreOffice 26.x checked 2026-10-15: the sample XLSX and CSV exports open with 0 formula cells, hostile names shown as text, accents and totals intact; the VAT XLSX converts to PDF. Only the file contents were checked, not the on-screen look.)
 5. The accountant's answer on the VAT3 layout (`docs/specs/vat3-layout-proposal.md`).
 6. (Done 2026-10-15: gift receipts built; try one on a real printer.)
 7. Accountant items already open in STATUS.md: hot take-away rate, service-charge VAT, Budget 2027 rates.
