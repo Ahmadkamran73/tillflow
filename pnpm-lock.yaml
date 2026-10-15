@@ -63,8 +63,8 @@ importers:
         specifier: 5.7.0
         version: 5.7.0
       pg-boss:
-        specifier: 12.37.1
-        version: 12.37.1(@opentelemetry/api@1.9.1)
+        specifier: 12.35.0
+        version: 12.35.0
       pino:
         specifier: ^10.4.0
         version: 10.4.0
@@ -4041,12 +4041,10 @@ packages:
   pdfkit@0.20.1:
     resolution: {integrity: sha512-1rRXK6x5o8I/3dBrBzXfxibpHpkfCnIA7EBAES7pEpGFc/65inMLlA8SalGWpJfal7BGekxeLf6A30IOpQpc5Q==}
 
-  pg-boss@12.37.1:
-    resolution: {integrity: sha512-LghWeOIbMCiLcTY3+8MInXaJ0wk0AOkbeUZ8oE+cGO0uoheGSW3GK57eDqEbrDGpwTIpX9BVphvdvWEDYTcJ9A==}
+  pg-boss@12.35.0:
+    resolution: {integrity: sha512-4dHoJcbeTVdUHZiCkJDMSAgoCuxbXRCeG+Ik98IqXwXNIMNnEu7MbzgwuEj9IfbYCAeovE4EOdpFRv9K6RLM8g==}
     engines: {node: '>=22.12.0'}
     hasBin: true
-    peerDependencies:
-      '@opentelemetry/api': ^1.9.0
 
   pg-cloudflare@1.4.1:
     resolution: {integrity: sha512-6PQbsFWZcp9EmJEwy5cGQ2La+AMWpP46lgbb8X+U/XsHIUweYDNCpeuKck5RxL2MdVFi7krbbEi5nX4Zh7JhrQ==}
@@ -5923,7 +5921,8 @@ snapshots:
 
   '@nolyfill/is-core-module@1.0.39': {}
 
-  '@opentelemetry/api@1.9.1': {}
+  '@opentelemetry/api@1.9.1':
+    optional: true
 
   '@oxc-project/types@0.153.0': {}
 
@@ -8744,9 +8743,8 @@ snapshots:
       linebreak: 1.1.0
       png-js: 2.0.0
 
-  pg-boss@12.37.1(@opentelemetry/api@1.9.1):
+  pg-boss@12.35.0:
     dependencies:
-      '@opentelemetry/api': 1.9.1
       cron-parser: 5.10.2
       pg: 8.23.1
       rrule-temporal: 2.2.8
