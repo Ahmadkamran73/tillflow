@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { config } from "dotenv";
-import { hydrated, makePairingCode, setMyPin, unlockTill } from "../e2e/helpers";
+import { buttonHydrated, hydrated, makePairingCode, setMyPin, unlockTill } from "../e2e/helpers";
 import { byDim, euro, exact, expected, type Refund, type Sale } from "../e2e/day/ledger";
 import {
   FLOAT,
@@ -647,4 +647,243 @@ test("staging · clothing: variants, exchange, plain refund, size/colour report,
     ["sales-by-size-colour", "sizeColour"],
     ["sales-by-product", "product"],
   ]);
+});
+// ---------------------------------------------------------------- café
+
+test("staging · café: required modifiers, eat-in and take-away VAT, card tip, refund, tips report, exports", async ({
+  page,
+}) => {
+  const d = await startDay(page, "cafe");
+  const { orgId, tag } = d;
+  const N = {
+    latte: `Latte ${tag}`,
+    ham: `Ham sandwich ${tag}`,
+    cola: `Cola ${tag}`,
+  };
+  const group = `Size ${tag}`;
+  await page.goto(`/o/${orgId}/products/modifiers/new`);
+  await hydrated(page);
+  await page.getByLabel("Group name").fill(group);
+  await page.getByLabel("Minimum choices").fill("1");
+  await page.getByLabel("Maximum choices").fill("1");
+  await page.getByLabel("Option name").fill("Small");
+  await page.getByRole("button", { name: "Add option" }).click();
+  await page.getByLabel("Option name").nth(1).fill("Large");
+  await page.getByLabel("Extra price (can be negative)").nth(1).fill("0.50");
+  await page.getByRole("button", { name: "Save group" }).click();
+  await expect(page.getByRole("status")).toHaveText("Group saved.");
+  await addProduct(page, orgId, {
+    name: N.latte,
+    price: "4.50",
+    vat: "CATERING",
+    group,
+  });
+  await addProduct(page, orgId, {
+    name: N.ham,
+    price: "5.00",
+    vat: "CATERING",
+    takeaway: "ZERO",
+  });
+  await addProduct(page, orgId, {
+    name: N.cola,
+    price: "2.50",
+    vat: "STANDARD",
+  });
+  await openTillOnStaging(page, orgId);
+
+  const latte = async (size: "Small" | "Large") => {
+    await tile(page, N.latte).click();
+    await page.getByRole("button", { name: new RegExp(`^${size}`) }).click();
+    await dialog(page).getByRole("button", { name: /^Add/ }).click();
+  };
+  // S1: two large lattes, a sandwich and a cola, TAKE AWAY, on the card with a 1.00 tip.
+  await latte("Large");
+  await latte("Large");
+  await tile(page, N.ham).click();
+  await tile(page, N.cola).click();
+  await page.getByRole("button", { name: "Take away", exact: true }).click();
+  await payCard(page, 1750, { tip: "1.00" });
+  // S2: a small latte and a sandwich eaten in, paid in cash.
+  await latte("Small");
+  await tile(page, N.ham).click();
+  await payCash(page, 950, 2000);
+  // Refund one large latte of S1 (the second newest sale).
+  await openRefund(page);
+  await pickRecent(page, 1);
+  await returnToCard(page, new RegExp(N.latte));
+
+  const sales: Sale[] = [
+    {
+      key: "s1",
+      lines: [
+        { name: N.latte, gross: 500, rateBp: 900, product: N.latte },
+        { name: N.latte, gross: 500, rateBp: 900, product: N.latte },
+        { name: N.ham, gross: 500, rateBp: 0, product: N.ham }, // take-away: 0%
+        { name: N.cola, gross: 250, rateBp: 2300, product: N.cola },
+      ],
+      pays: [{ method: "card", amount: 1750, tip: 100 }],
+    },
+    {
+      key: "s2",
+      lines: [
+        { name: N.latte, gross: 450, rateBp: 900, product: N.latte },
+        { name: N.ham, gross: 500, rateBp: 900, product: N.ham }, // eat-in: 9%
+      ],
+      pays: [{ method: "cash", amount: 950 }],
+    },
+  ];
+  const refunds: Refund[] = [
+    {
+      sale: "s1",
+      lines: [{ sale: "s1", line: 0, units: 1, of: 1 }],
+      legs: [{ method: "card", amount: 500 }],
+    },
+  ];
+  await endDay(page, d, sales, refunds, 10950, [["sales-by-product", "product"]]);
+
+  const e = expected(sales, refunds, { float: FLOAT, counted: 10950 });
+  await openReport(page, orgId, "tips", d.day);
+  const t = await readTable(page);
+  if (!d.baseline) {
+    expect(t.rows).toHaveLength(1);
+    expectRow(t.rows[0]!, [e.count, e.tips], [false, true]);
+  }
+  await checkExports(page, t);
+});
+
+// ---------------------------------------------------------------- restaurant
+
+test("staging · restaurant: table, covers, split bill, service charge, card tip, refund, covers report, exports", async ({
+  page,
+}) => {
+  const d = await startDay(page, "restaurant");
+  const { orgId, tag } = d;
+  const N = { soup: `Soup ${tag}`, steak: `Steak ${tag}`, wine: `Wine ${tag}` };
+  const table = `T${tag}`;
+  await addProduct(page, orgId, {
+    name: N.soup,
+    price: "6.00",
+    vat: "CATERING",
+  });
+  await addProduct(page, orgId, {
+    name: N.steak,
+    price: "20.00",
+    vat: "CATERING",
+  });
+  await addProduct(page, orgId, {
+    name: N.wine,
+    price: "8.00",
+    vat: "STANDARD",
+  });
+  await page.goto(`/o/${orgId}/settings/service-charge`);
+  await hydrated(page);
+  await page.getByLabel(/^Service charge/).fill("10");
+  await page.getByRole("button", { name: "Save service charge" }).click();
+  await expect(page.getByRole("status")).toHaveText("Service charge saved.");
+  await page.goto(`/o/${orgId}/settings/floor-plan`);
+  await buttonHydrated(page, "Add table");
+  await page.getByRole("button", { name: "Add table" }).click();
+  await page.getByLabel("Table name").fill(table);
+  await page.getByRole("button", { name: "Save floor plan" }).click();
+  await expect(page.getByRole("status")).toHaveText("Floor plan saved.");
+  await openTillOnStaging(page, orgId);
+
+  const t1 = () => page.getByRole("button", { name: new RegExp(`^Table ${table}`) });
+  const add = (name: string) => tile(page, name).click();
+  // Four guests: seat 1 soup + steak, seat 2 soup + wine; split by seat.
+  await t1().click();
+  await page.getByLabel("How many guests?").fill("4");
+  await page.getByRole("button", { name: "Open table", exact: true }).click();
+  await add(N.soup);
+  await add(N.steak);
+  await page.getByRole("button", { name: "Next seat" }).click();
+  await add(N.soup);
+  await add(N.wine);
+  await expect(page.getByRole("button", { name: "Pay €44.00" }).first()).toBeVisible(); // 40.00 + 10% service
+  await page.getByRole("button", { name: "Bill", exact: true }).click();
+  await page.getByRole("button", { name: "Split into 2 bills" }).click();
+  await payCard(page, 2860, { tip: "3.00" }); // seat 1: 26.00 + 2.60 service
+  await expect(page.getByRole("heading", { name: "Tables" })).toBeVisible();
+  await t1().click();
+  await payCash(page, 1540, "exact"); // seat 2: 14.00 + 1.40 service
+  await expect(t1()).toContainText("Free");
+  // Same table again, two guests, two steaks on one card payment.
+  await t1().click();
+  await page.getByLabel("How many guests?").fill("2");
+  await page.getByRole("button", { name: "Open table", exact: true }).click();
+  await add(N.steak);
+  await add(N.steak);
+  await payCard(page, 4400);
+  // Return one steak; the service charge on it goes back with it.
+  await openRefund(page);
+  await pickRecent(page, 0);
+  await returnToCard(page, N.steak);
+
+  const svc = (name: string, gross: number, rateBp: number, qty = 1) => ({
+    name: `Service charge ${name}`,
+    gross,
+    rateBp,
+    qty,
+    product: "Other (no product)",
+  });
+  const sales: Sale[] = [
+    {
+      key: "bill1",
+      lines: [
+        { name: N.soup, gross: 600, rateBp: 900, product: N.soup },
+        { name: N.steak, gross: 2000, rateBp: 900, product: N.steak },
+        svc("soup", 60, 900),
+        svc("steak", 200, 900),
+      ],
+      pays: [{ method: "card", amount: 2860, tip: 300 }],
+      fromTab: true,
+    },
+    {
+      key: "bill2",
+      lines: [
+        { name: N.soup, gross: 600, rateBp: 900, product: N.soup },
+        { name: N.wine, gross: 800, rateBp: 2300, product: N.wine },
+        svc("soup", 60, 900),
+        svc("wine", 80, 2300),
+      ],
+      pays: [{ method: "cash", amount: 1540 }],
+      fromTab: true,
+    },
+    {
+      key: "t2",
+      lines: [
+        { name: N.steak, gross: 4000, rateBp: 900, qty: 2, product: N.steak },
+        svc("steaks", 400, 900, 2),
+      ],
+      pays: [{ method: "card", amount: 4400 }],
+      fromTab: true,
+    },
+  ];
+  const refunds: Refund[] = [
+    {
+      sale: "t2",
+      lines: [
+        { sale: "t2", line: 0, units: 1, of: 2 },
+        { sale: "t2", line: 1, units: 1, of: 2 },
+      ],
+      legs: [{ method: "card", amount: 2200 }],
+    },
+  ];
+  await endDay(page, d, sales, refunds, 11540, [["sales-by-product", "product"]]);
+
+  const e = expected(sales, refunds, { float: FLOAT, counted: 11540 });
+  const covers = 4 + 2;
+  const perCover = Math.round(e.amountDue / covers);
+  await openReport(page, orgId, "covers", d.day);
+  let t = await readTable(page);
+  if (!d.baseline) {
+    expect(t.rows).toHaveLength(1);
+    expect(perCover).toBe(1467); // 8,800 / 6 = 14.666...
+    expectRow(t.rows[0]!, [2, covers, e.amountDue, perCover], [false, false, true, true]);
+  }
+  await checkExports(page, t);
+  await openReport(page, orgId, "tips", d.day);
+  t = await readTable(page);
+  if (!d.baseline) expectRow(t.rows[0]!, [e.count, e.tips], [false, true]);
+  await checkExports(page, t);
 });
