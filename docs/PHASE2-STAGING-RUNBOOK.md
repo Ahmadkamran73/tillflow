@@ -49,15 +49,15 @@ page), register (pay, refund, shift close). Note anything unlabelled, any focus 
 
 ## Results (fill in; leave blank until done)
 
-| Item                        | Date | Run by | Result (pass/fail + notes) |
-| --------------------------- | ---- | ------ | -------------------------- |
-| Day: general                |      |        |                            |
-| Day: electronics            |      |        |                            |
-| Day: clothing               |      |        |                            |
-| Day: café                   |      |        |                            |
-| Day: restaurant             |      |        |                            |
-| Hostinger large export      |      |        |                            |
-| Screen reader               |      |        |                            |
-| LibreOffice opens samples   |      |        |                            |
-| Accountant answers          |      |        |                            |
-| Owner review of 0049 / 0051 |      |        |                            |
+| Item                        | Date       | Run by                    | Result (pass/fail + notes)                                                        |
+| --------------------------- | ---------- | ------------------------- | --------------------------------------------------------------------------------- |
+| Day: general                |            |                           |                                                                                   |
+| Day: electronics            |            |                           |                                                                                   |
+| Day: clothing               |            |                           |                                                                                   |
+| Day: café                   |            |                           |                                                                                   |
+| Day: restaurant             |            |                           |                                                                                   |
+| Hostinger large export      |            |                           |                                                                                   |
+| Screen reader               |            |                           |                                                                                   |
+| LibreOffice opens samples   | 2026-10-15 | Claude (headless convert) | pass: 0 formula cells in xlsx and csv, text and accents intact; not viewed by eye |
+| Accountant answers          |            |                           |                                                                                   |
+| Owner review of 0049 / 0051 |            |                           |                                                                                   |
