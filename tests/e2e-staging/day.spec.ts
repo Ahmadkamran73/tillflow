@@ -1,9 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
 import { config } from "dotenv";
 import { hydrated, makePairingCode, setMyPin, unlockTill } from "../e2e/helpers";
-import { euro, exact, expected, type Refund, type Sale } from "../e2e/day/ledger";
+import { byDim, euro, exact, expected, type Refund, type Sale } from "../e2e/day/ledger";
 import {
   FLOAT,
+  addMatrixProduct,
   addProduct,
   checkExports,
   dialog,
@@ -276,4 +277,374 @@ test("staging · general store: open shift, sales, refund, Z-report, reports and
     await openReport(page, orgId, report, day);
     await checkExports(page, await readTable(page));
   }
+});
+// ---------------------------------------------------------------- shared end of day (other types)
+
+type Dim = "product" | "brand" | "sizeColour";
+
+async function startDay(page: Page, type: string) {
+  const { email, password } = creds(type);
+  test.skip(
+    !email || !password,
+    `no STAGING_E2E_${type.toUpperCase()}_EMAIL / _PASSWORD in .env.local`,
+  );
+  const orgId = await signIn(page, email!, password!);
+  const day = dublinDay();
+  const before = await dayRow(page, orgId, day);
+  return {
+    orgId,
+    day,
+    before,
+    baseline: before.r !== null,
+    tag: Date.now().toString(36).slice(-4).toUpperCase(),
+  };
+}
+
+/** Close the shift, then compare Z, sales by day, VAT, payments and the line reports with the ledger. */
+async function endDay(
+  page: Page,
+  d: Awaited<ReturnType<typeof startDay>>,
+  sales: Sale[],
+  refunds: Refund[],
+  counted: number,
+  lineReports: [string, Dim][],
+) {
+  const { orgId, day, before, baseline } = d;
+  const label = day.split("-").reverse().join("/");
+  const e = expected(sales, refunds, { float: FLOAT, counted });
+  const zpage = await closeShiftOnScreen(page, orgId, counted);
+  for (const cents of [e.amountDue, e.vat, e.expectedCash, counted]) {
+    await expect(zpage).toContainText(exact(euro(cents)));
+  }
+  await expect
+    .poll(
+      async () => {
+        const { r } = await dayRow(page, orgId, day);
+        return r ? Number(r[1]) : 0;
+      },
+      { timeout: 600_000, intervals: [30_000] },
+    )
+    .toBe((baseline ? Number(before.r![1]) : 0) + e.count);
+
+  if (!baseline) {
+    const { t } = await dayRow(page, orgId, day);
+    expectRow(
+      row(t!, label),
+      [e.count, e.amountDue, e.vat, e.discount, e.refunds.value, e.netTakings],
+      [false, true, true, true, true, true],
+    );
+    await openReport(page, orgId, "vat", day);
+    const v = await readTable(page);
+    for (const bp of new Set([...e.byRate.keys(), ...e.refByRate.keys()])) {
+      const s = e.byRate.get(bp) ?? { gross: 0, vat: 0, net: 0 };
+      const r = e.refByRate.get(bp) ?? { gross: 0, vat: 0, net: 0 };
+      const cols = [s.net, s.vat, s.gross, r.net, r.vat, r.gross, s.vat - r.vat];
+      expectRow(
+        row(v, `${bp / 100}%`),
+        cols,
+        cols.map(() => true),
+      );
+    }
+    await openReport(page, orgId, "payments", day);
+    const p = await readTable(page);
+    const names = {
+      cash: "Cash",
+      card: "Card",
+      exchange: "Exchange credit",
+    } as const;
+    for (const m of ["cash", "card", "exchange"] as const) {
+      if (!(e.tenderCount[m]! + e.refTenderCount[m]!)) continue;
+      expectRow(
+        row(p, names[m]),
+        [
+          e.tenderCount[m]!,
+          e.tender[m]!,
+          e.tipsBy[m]!,
+          e.refTenderCount[m]!,
+          e.refTender[m]!,
+          e.tender[m]! - e.refTender[m]!,
+        ],
+        [false, true, true, false, true, true],
+      );
+    }
+    for (const [report, dim] of lineReports) {
+      await openReport(page, orgId, report, day);
+      const t2 = await readTable(page);
+      const want = byDim(sales, refunds, dim);
+      expect(t2.rows).toHaveLength(want.size);
+      for (const [k, r] of want) {
+        expectRow(
+          row(t2, k),
+          [r.qty, r.gross, r.net, r.vat, r.rQty, r.rGross, r.gross - r.rGross],
+          [false, true, true, true, false, true, true],
+        );
+      }
+    }
+  }
+  for (const report of ["sales-by-day", "vat", "payments", ...lineReports.map((l) => l[0])]) {
+    await openReport(page, orgId, report, day);
+    await checkExports(page, await readTable(page));
+  }
+}
+
+// ---------------------------------------------------------------- electronics
+
+test("staging · electronics: serials at the till, refund by IMEI, serials sold, brand report, exports", async ({
+  page,
+}) => {
+  const d = await startDay(page, "electronics");
+  const { orgId, tag } = d;
+  const N = {
+    x: `Phone X ${tag}`,
+    z: `Phone Z ${tag}`,
+    case: `Phone case ${tag}`,
+  };
+  const B = { acme: `Acme ${tag}`, zeta: `Zeta ${tag}` };
+  const imei = (n: number) => `IMEI-${tag}-000${n}`;
+  await addProduct(page, orgId, {
+    name: N.x,
+    price: "599",
+    brand: B.acme,
+    serial: true,
+    stock: "5",
+  });
+  await addProduct(page, orgId, {
+    name: N.z,
+    price: "299",
+    brand: B.zeta,
+    serial: true,
+    stock: "3",
+  });
+  await addProduct(page, orgId, {
+    name: N.case,
+    price: "19.99",
+    brand: B.acme,
+    stock: "20",
+  });
+  await openTillOnStaging(page, orgId);
+
+  const sell = async (name: string, serial?: string) => {
+    await tile(page, name).click();
+    if (serial) {
+      await page.getByLabel("Serial number / IMEI").fill(serial);
+      await page.getByRole("button", { name: "Add to sale" }).click();
+    }
+  };
+  await sell(N.x, imei(1));
+  await sell(N.case);
+  await payCard(page, 61899);
+  await sell(N.z, imei(2));
+  await payCash(page, 29900, "exact");
+  await sell(N.x, imei(3));
+  await payCard(page, 59900);
+
+  await openRefund(page);
+  await dialog(page).getByLabel("Serial / IMEI").fill(imei(1));
+  await dialog(page).getByLabel("Serial / IMEI").press("Enter");
+  await dialog(page)
+    .getByRole("list", { name: "Find the sale" })
+    .getByRole("button")
+    .first()
+    .click();
+  await expect(dialog(page).getByText(`S/N ${imei(1)}`)).toBeVisible();
+  await returnToCard(page, N.x);
+
+  const line = (name: string, gross: number, brand: string) => ({
+    name,
+    gross,
+    rateBp: 2300,
+    product: name,
+    brand,
+  });
+  const sales: Sale[] = [
+    {
+      key: "s1",
+      lines: [line(N.x, 59900, B.acme), line(N.case, 1999, B.acme)],
+      pays: [{ method: "card", amount: 61899 }],
+    },
+    {
+      key: "s2",
+      lines: [line(N.z, 29900, B.zeta)],
+      pays: [{ method: "cash", amount: 29900 }],
+    },
+    {
+      key: "s3",
+      lines: [line(N.x, 59900, B.acme)],
+      pays: [{ method: "card", amount: 59900 }],
+    },
+  ];
+  const refunds: Refund[] = [
+    {
+      sale: "s1",
+      lines: [{ sale: "s1", line: 0, units: 1, of: 1 }],
+      legs: [{ method: "card", amount: 59900 }],
+    },
+  ];
+  await endDay(page, d, sales, refunds, 39900, [
+    ["sales-by-brand", "brand"],
+    ["sales-by-product", "product"],
+  ]);
+
+  // Serials sold: one row per unit, the returned unit flagged; searching narrows it.
+  await openReport(page, orgId, "serials", d.day);
+  const t = await readTable(page);
+  if (!d.baseline) {
+    expect(t.rows).toHaveLength(3);
+    for (const [n, item, returned] of [
+      [1, N.x, "Yes"],
+      [2, N.z, ""],
+      [3, N.x, ""],
+    ] as const) {
+      const r = t.rows.find((x) => x[1] === imei(n))!;
+      expect([r[2], r[4]]).toEqual([item, returned]);
+    }
+  }
+  await checkExports(page, t);
+  await page.goto(`/o/${orgId}/reports/serials?from=${d.day}&to=${d.day}&q=${imei(2)}`);
+  const narrow = await readTable(page);
+  expect(narrow.rows.map((r) => r[1])).toEqual([imei(2)]);
+  await checkExports(page, narrow);
+});
+
+// ---------------------------------------------------------------- clothing
+
+test("staging · clothing: variants, exchange, plain refund, size/colour report, gift receipt, exports", async ({
+  page,
+}) => {
+  const d = await startDay(page, "clothing");
+  const { orgId, tag } = d;
+  const N = {
+    tee: `Tee ${tag}`,
+    kids: `Kids Tee ${tag}`,
+    jacket: `Jacket ${tag}`,
+  };
+  await addMatrixProduct(page, orgId, {
+    name: N.tee,
+    sizes: ["S", "M"],
+    colours: ["Black", "White"],
+    price: "20",
+    stock: {
+      "S / Black": "5",
+      "S / White": "5",
+      "M / Black": "5",
+      "M / White": "5",
+    },
+  });
+  await addMatrixProduct(page, orgId, {
+    name: N.kids,
+    sizes: ["4Y"],
+    colours: ["Red"],
+    price: "15",
+    vat: "ZERO",
+    stock: { "4Y / Red": "5" },
+  });
+  await addMatrixProduct(page, orgId, {
+    name: N.jacket,
+    sizes: ["L"],
+    colours: ["Navy"],
+    price: "100",
+    stock: { "L / Navy": "3" },
+  });
+  await openTillOnStaging(page, orgId);
+
+  const pick = async (name: string, variant: string) => {
+    await tile(page, name).click();
+    await dialog(page)
+      .getByRole("button", {
+        name: new RegExp(`^${variant.replace(/[/]/g, "\\/")}`),
+      })
+      .click();
+  };
+  await pick(N.tee, "M / Black");
+  await pick(N.tee, "S / White");
+  await payCard(page, 4000);
+  await tile(page, N.kids).click();
+  await payCash(page, 1500, "exact");
+  await tile(page, N.jacket).click();
+  await payCard(page, 10000);
+
+  // Exchange: the M / Black tee comes back as credit towards a jacket (dearer; the rest on the card).
+  await tile(page, N.jacket).click();
+  await openRefund(page);
+  await pickRecent(page, 2);
+  await page
+    .getByRole("button", { name: /Return one more .*M \/ Black/ })
+    .first()
+    .click();
+  await page.getByRole("button", { name: "Exchange for other items" }).click();
+  await dialog(page).getByLabel("Reason").selectOption("wrong_item");
+  await page.getByRole("button", { name: "Next: pay back" }).click();
+  await expect(dialog(page).getByText("Exchange credit: €20.00")).toBeVisible();
+  await page.getByRole("button", { name: "Complete exchange" }).click();
+  await expect(page.getByRole("heading", { name: "Take payment" })).toBeVisible();
+  await page.getByRole("button", { name: "Card", exact: true }).click();
+  await expect(page.getByLabel("Card amount")).toHaveValue("80.00");
+  await page.getByRole("button", { name: "Approved on terminal" }).click();
+  await page.getByRole("button", { name: "Complete sale" }).click();
+  await expect(page.getByRole("heading", { name: "Sale complete" })).toBeVisible();
+  // Clothing offers a gift receipt on the sale-complete dialog.
+  await expect(page.getByRole("button", { name: "Gift receipt" })).toBeVisible();
+  await page.getByRole("button", { name: "New sale" }).click();
+  await openRefund(page);
+  await pickRecent(page, 3);
+  await returnToCard(page, /.*S \/ White/);
+
+  const sc = (
+    name: string,
+    gross: number,
+    rateBp: number,
+    product: string,
+    sizeColour: string,
+  ) => ({
+    name,
+    gross,
+    rateBp,
+    product,
+    sizeColour,
+  });
+  const sales: Sale[] = [
+    {
+      key: "s1",
+      lines: [
+        sc(`${N.tee} M / Black`, 2000, 2300, N.tee, "M / Black"),
+        sc(`${N.tee} S / White`, 2000, 2300, N.tee, "S / White"),
+      ],
+      pays: [{ method: "card", amount: 4000 }],
+    },
+    {
+      key: "s2",
+      lines: [sc(N.kids, 1500, 0, N.kids, "4Y / Red")],
+      pays: [{ method: "cash", amount: 1500 }],
+    },
+    {
+      key: "s3",
+      lines: [sc(N.jacket, 10000, 2300, N.jacket, "L / Navy")],
+      pays: [{ method: "card", amount: 10000 }],
+    },
+    {
+      key: "s4",
+      lines: [sc(N.jacket, 10000, 2300, N.jacket, "L / Navy")],
+      pays: [
+        { method: "exchange", amount: 2000 },
+        { method: "card", amount: 8000 },
+      ],
+    },
+  ];
+  const refunds: Refund[] = [
+    {
+      sale: "s1",
+      lines: [{ sale: "s1", line: 0, units: 1, of: 1 }],
+      legs: [],
+      credit: 2000,
+    },
+    {
+      sale: "s1",
+      lines: [{ sale: "s1", line: 1, units: 1, of: 1 }],
+      legs: [{ method: "card", amount: 2000 }],
+    },
+  ];
+  await endDay(page, d, sales, refunds, 11500, [
+    ["sales-by-size-colour", "sizeColour"],
+    ["sales-by-product", "product"],
+  ]);
 });
