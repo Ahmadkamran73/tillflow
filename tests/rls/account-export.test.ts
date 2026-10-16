@@ -123,7 +123,10 @@ describe("fresh authentication", () => {
           }),
         NOT_FRESH,
       );
-      await ctx.denied(() => request(ctx, a, a.owner, randomUUID(), { aal: "aal2", amr: [] }), NOT_FRESH);
+      await ctx.denied(
+        () => request(ctx, a, a.owner, randomUUID(), { aal: "aal2", amr: [] }),
+        NOT_FRESH,
+      );
       await request(ctx, a, a.owner, randomUUID(), {
         aal: "aal2",
         amr: [{ method: "totp", timestamp: justNow }],
@@ -133,9 +136,13 @@ describe("fresh authentication", () => {
   it("without two-step verification: the password must have been typed in the last 10 minutes", () =>
     inWorld(async (ctx) => {
       const a = ctx.world.a;
-      const aal1 = (amr: { method: string; timestamp?: number }[]) => ({ aal: "aal1" as const, amr });
+      const aal1 = (amr: { method: string; timestamp?: number }[]) => ({
+        aal: "aal1" as const,
+        amr,
+      });
       await ctx.denied(
-        () => request(ctx, a, a.owner, randomUUID(), aal1([{ method: "password", timestamp: old }])),
+        () =>
+          request(ctx, a, a.owner, randomUUID(), aal1([{ method: "password", timestamp: old }])),
         NOT_FRESH,
       );
       // A magic link or Google sign-in, however recent, is not a password.
@@ -144,15 +151,32 @@ describe("fresh authentication", () => {
         NOT_FRESH,
       );
       await ctx.denied(
-        () => request(ctx, a, a.owner, randomUUID(), aal1([{ method: "oauth", timestamp: justNow }])),
+        () =>
+          request(ctx, a, a.owner, randomUUID(), aal1([{ method: "oauth", timestamp: justNow }])),
         NOT_FRESH,
       );
-      await ctx.denied(() => request(ctx, a, a.owner, randomUUID(), aal1([{ method: "password" }])), NOT_FRESH);
       await ctx.denied(
-        () => request(ctx, a, a.owner, randomUUID(), aal1([{ method: "password", timestamp: nowSec() + 0 - 601 }])),
+        () => request(ctx, a, a.owner, randomUUID(), aal1([{ method: "password" }])),
         NOT_FRESH,
       );
-      await request(ctx, a, a.owner, randomUUID(), aal1([{ method: "password", timestamp: justNow }]));
+      await ctx.denied(
+        () =>
+          request(
+            ctx,
+            a,
+            a.owner,
+            randomUUID(),
+            aal1([{ method: "password", timestamp: nowSec() + 0 - 601 }]),
+          ),
+        NOT_FRESH,
+      );
+      await request(
+        ctx,
+        a,
+        a.owner,
+        randomUUID(),
+        aal1([{ method: "password", timestamp: justNow }]),
+      );
     }));
 
   it("the download needs the same proof, even for a finished export", () =>
@@ -161,7 +185,11 @@ describe("fresh authentication", () => {
       const id = await request(ctx, a);
       await runJob(ctx, id);
       const get = (session: Parameters<Ctx["as"]>[2]) =>
-        ctx.as(a.owner, () => ctx.sql`select public.get_account_export(${a.orgId}, ${id})`, session);
+        ctx.as(
+          a.owner,
+          () => ctx.sql`select public.get_account_export(${a.orgId}, ${id})`,
+          session,
+        );
       await ctx.denied(() => get(stale), NOT_FRESH);
       await ctx.denied(() => get({ aal: "aal2", amr: [] }), NOT_FRESH);
       await get(FRESH);
@@ -177,7 +205,11 @@ describe("fresh authentication", () => {
     inWorld(async (ctx) => {
       const a = ctx.world.a;
       await ctx.denied(() => request(ctx, a, a.owner, randomUUID(), stale), NOT_FRESH);
-      expect((await ctx.sql`select count(*)::int as n from account_exports where org_id = ${a.orgId}`)[0]!.n).toBe(0);
+      expect(
+        (
+          await ctx.sql`select count(*)::int as n from account_exports where org_id = ${a.orgId}`
+        )[0]!.n,
+      ).toBe(0);
     }));
 
   it("every owner of the shop can be found to be told, and nobody else", () =>
@@ -190,7 +222,9 @@ describe("fresh authentication", () => {
       };
       expect(info.org_id).toBe(a.orgId);
       expect(Array.isArray(info.emails)).toBe(true);
-      await ctx.denied(() => ctx.as(a.owner, () => ctx.sql`select ops.account_export_owner_emails(${id})`));
+      await ctx.denied(() =>
+        ctx.as(a.owner, () => ctx.sql`select ops.account_export_owner_emails(${id})`),
+      );
     }));
 });
 
@@ -327,5 +361,107 @@ describe("downloading", () => {
         (await ctx.sql`select status, error_code from account_exports where id = ${id}`)[0],
       ).toMatchObject({ status: "failed", error_code: "too_large" });
       await request(ctx, a); // a failed request does not count against the day
+    }));
+
+  it("the file is served in slices that add up to the whole file, and only the first is audited", () =>
+    inWorld(async (ctx) => {
+      const a = ctx.world.a;
+      const id = await request(ctx, a);
+      const bytes = Buffer.from(Array.from({ length: 5000 }, (_, i) => i % 251));
+      await runJob(ctx, id, bytes);
+      const chunk = (
+        offset: number,
+        length: number,
+        who = a.owner,
+        org = a.orgId,
+        session = FRESH,
+      ) =>
+        ctx.as(
+          who,
+          () =>
+            ctx.sql`select public.get_account_export_chunk(${org}, ${id}, ${offset}, ${length}) as c`,
+          session,
+        );
+      const parts: Buffer[] = [];
+      for (let offset = 0; offset < bytes.length; offset += 2048) {
+        const [row] = await chunk(offset, 2048);
+        parts.push(Buffer.from(row!.c as Buffer));
+      }
+      expect(Buffer.concat(parts).equals(bytes)).toBe(true);
+      expect(parts.map((p) => p.length)).toEqual([2048, 2048, 904]);
+      expect(
+        (
+          await ctx.sql`select count(*)::int as n from audit_log where org_id = ${a.orgId} and action = 'account.export_downloaded'`
+        )[0]!.n,
+      ).toBe(1);
+      // Past the end there is nothing to give.
+      await ctx.denied(() => chunk(5000, 100), ["22023"]);
+    }));
+
+  it("a slice is refused for bad sizes, other shops, managers, anon and a stale sign-in", () =>
+    inWorld(async (ctx) => {
+      const a = ctx.world.a;
+      const id = await request(ctx, a);
+      await runJob(ctx, id);
+      const chunk = (
+        who: Parameters<Ctx["as"]>[0],
+        org: string,
+        offset = 0,
+        length = 10,
+        session = FRESH,
+      ) =>
+        ctx.as(
+          who,
+          () =>
+            ctx.sql`select public.get_account_export_chunk(${org}, ${id}, ${offset}, ${length})`,
+          session,
+        );
+      await ctx.denied(() => chunk(a.owner, a.orgId, -1), ["22023"]);
+      await ctx.denied(() => chunk(a.owner, a.orgId, 0, 0), ["22023"]);
+      await ctx.denied(() => chunk(a.owner, a.orgId, 0, 2097153), ["22023"]);
+      await ctx.denied(() => chunk(a.owner, a.orgId, 2147483647), ["22023"]);
+      await ctx.denied(() =>
+        ctx.as(
+          null,
+          () => ctx.sql`select public.get_account_export_chunk(${a.orgId}, ${id}, 0, 10)`,
+        ),
+      );
+      await ctx.denied(() => chunk(ctx.world.b.owner, a.orgId), NOT_ALLOWED);
+      await ctx.denied(() => chunk(ctx.world.b.owner, ctx.world.b.orgId), ["22023"]); // not their export
+      await ctx.denied(() => chunk(a.manager, a.orgId), NOT_ALLOWED);
+      await ctx.denied(
+        () =>
+          chunk(a.owner, a.orgId, 0, 10, {
+            aal: "aal2",
+            amr: [{ method: "totp", timestamp: nowSec() - 3600 }],
+          }),
+        NOT_FRESH,
+      );
+      expect(
+        (
+          await ctx.sql`select count(*)::int as n from audit_log where org_id = ${a.orgId} and action = 'account.export_downloaded'`
+        )[0]!.n,
+      ).toBe(0);
+    }));
+
+  it("skipping the first slice does not skip the audit row, and repeats do not flood it", () =>
+    inWorld(async (ctx) => {
+      const a = ctx.world.a;
+      const id = await request(ctx, a);
+      await runJob(ctx, id, Buffer.from("x".repeat(100)));
+      const get = (offset: number) =>
+        ctx.as(
+          a.owner,
+          () => ctx.sql`select public.get_account_export_chunk(${a.orgId}, ${id}, ${offset}, 10)`,
+          FRESH,
+        );
+      await get(50);
+      await get(0);
+      await get(10);
+      expect(
+        (
+          await ctx.sql`select count(*)::int as n from audit_log where org_id = ${a.orgId} and action = 'account.export_downloaded'`
+        )[0]!.n,
+      ).toBe(1);
     }));
 });
