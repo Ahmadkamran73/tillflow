@@ -11,9 +11,13 @@ Source: `docs/PLAN.md` section 2 and `docs/PROMPTS_v1.md` (end of Part D):
 > In staging, run one full trading day for each of the 5 business types (open shift → sales → refunds →
 > Z-report → exports) with correct numbers. Update `docs/STATUS.md`.
 
-**Gate status: NOT PASSED.** No trading day has been run on staging for any business type. The automated
-tests below run on a local database and are evidence for the release, not the sign-off. Nothing here turns
-the gate into a pass.
+**Gate status (2026-10-16): all five staging trading days PASSED; Hostinger large export still to do.**
+Owner decision 2026-10-16: hardware testing (printer, drawer, card terminal, gift-receipt print), the
+screen-reader pass and the accountant's answers (VAT3 layout, hot take-away rate, service-charge VAT, refund
+dating, Budget 2027) are **moved to the end of Phase 3** and are no longer blockers for closing Phase 2; they
+are hard requirements before the Phase 3 pilot gate. The owner's review of migrations `0049`/`0051` is done.
+The staging days were driven through the screens only (`playwright.staging.config.ts`,
+`tests/e2e-staging/day.spec.ts`, no database access) and compared with the independent calculator.
 
 **Repository and staging state (read this first):**
 
@@ -47,11 +51,11 @@ Required for each: open shift, sales, refunds, Z-report, exports, correct number
 
 | Business type         | Staging day (the gate) | Automated whole day, local database (evidence, not the gate) |
 | --------------------- | ---------------------- | ------------------------------------------------------------ |
-| General / convenience | **NOT RUN**            | PASSED: `tests/e2e/trading-day.spec.ts` "general store"      |
-| Electronics & phones  | **NOT RUN**            | PASSED: "electronics"                                        |
-| Clothing & footwear   | **NOT RUN**            | PASSED: "clothing"                                           |
-| Café                  | **NOT RUN**            | PASSED: "café"                                               |
-| Restaurant            | **NOT RUN**            | PASSED: "restaurant"                                         |
+| General / convenience | PASSED 2026-10-15 (re-run after the PDF fix, PR #43)            | PASSED: `tests/e2e/trading-day.spec.ts` "general store"      |
+| Electronics & phones  | PASSED 2026-10-15 (account already had a day: counts and exports checked, row figures against the earlier totals)            | PASSED: "electronics"                                        |
+| Clothing & footwear   | PASSED 2026-10-15 (same note as electronics)            | PASSED: "clothing"                                           |
+| Café                  | PASSED 2026-10-15 (own account, full figure checks)            | PASSED: "café"                                               |
+| Restaurant            | PASSED 2026-10-16 (own account, full figure checks)            | PASSED: "restaurant"                                         |
 
 What each automated day does (through the real screens, on the production build, in a shop whose time zone is
 NOT the UTC day): sign up and onboard as the type, create its products, pair a till and open a shift (100.00

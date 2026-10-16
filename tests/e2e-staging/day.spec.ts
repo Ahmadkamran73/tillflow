@@ -282,13 +282,44 @@ test("staging · general store: open shift, sales, refund, Z-report, reports and
 
 type Dim = "product" | "brand" | "sizeColour";
 
+const TYPE_LABEL: Record<string, string> = {
+  electronics: "Electronics & phones",
+  clothing: "Clothing & footwear",
+  cafe: "Café (counter service)",
+  restaurant: "Restaurant (table service)",
+};
+let restoreType: (() => Promise<void>) | null = null;
+test.afterEach(async () => {
+  const r = restoreType;
+  restoreType = null;
+  await r?.();
+});
+
+async function setBusinessType(page: Page, orgId: string, label: string) {
+  await page.goto(`/o/${orgId}/settings/business-type`);
+  await hydrated(page);
+  await page.getByText(label, { exact: true }).click();
+  await page.getByRole("button", { name: "Save business type" }).click();
+  await expect(page.getByRole("status")).toHaveText("Business type saved.");
+}
+
+/** Signs in with the type's own account; for café/restaurant without one, borrows the electronics
+ * account, switches its business type in Settings, and switches it back after the test. */
 async function startDay(page: Page, type: string) {
-  const { email, password } = creds(type);
-  test.skip(
-    !email || !password,
-    `no STAGING_E2E_${type.toUpperCase()}_EMAIL / _PASSWORD in .env.local`,
-  );
+  let { email, password } = creds(type);
+  let borrowed = false;
+  if ((!email || !password) && (type === "cafe" || type === "restaurant")) {
+    ({ email, password } = creds("electronics"));
+    borrowed = true;
+  }
+  test.skip(!email || !password, `no STAGING_E2E_${type.toUpperCase()} account in .env.local`);
   const orgId = await signIn(page, email!, password!);
+  if (borrowed) {
+    await setBusinessType(page, orgId, TYPE_LABEL[type]!);
+    restoreType = async () => {
+      await setBusinessType(page, orgId, TYPE_LABEL.electronics!);
+    };
+  }
   const day = dublinDay();
   const before = await dayRow(page, orgId, day);
   return {
