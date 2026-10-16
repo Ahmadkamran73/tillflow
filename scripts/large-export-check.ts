@@ -28,7 +28,15 @@ const arg = (name: string) => {
 const flag = (name: string) => process.argv.includes(`--${name}`);
 
 const urlEnv = arg("url-env") ?? "DIRECT_URL";
-const url = process.env[urlEnv];
+// --staging: build the session-pooler URL of the STAGING project from SUPABASE_STAGING_DB_PASSWORD in
+// .env.local (nothing is printed). Refuses any project other than staging.
+const STAGING_REF = "kbtpydpigscfmvtqmkfy";
+const stagingUrl = () => {
+  const pw = process.env.SUPABASE_STAGING_DB_PASSWORD;
+  if (!pw) throw new Error("SUPABASE_STAGING_DB_PASSWORD is not set in .env.local");
+  return `postgresql://postgres.${STAGING_REF}:${encodeURIComponent(pw)}@aws-1-eu-west-1.pooler.supabase.com:5432/postgres`;
+};
+const url = flag("staging") ? stagingUrl() : process.env[urlEnv];
 if (!url) {
   console.error(`${urlEnv} is not set`);
   process.exit(1);
@@ -137,7 +145,12 @@ function checkZip(zip: Buffer) {
 async function main() {
   const t0 = Date.now();
   const { org } = flag("no-seed") && arg("org") ? { org: arg("org")! } : await seed();
-  console.error(`seeded in ${Math.round((Date.now() - t0) / 1000)}s; exporting ...`);
+  console.error(`seeded in ${Math.round((Date.now() - t0) / 1000)}s`);
+  if (flag("seed-only")) {
+    console.log(JSON.stringify({ org, seeded: SALES }));
+    return; // the export is then requested from the app itself (for example on the staging host)
+  }
+  console.error("exporting ...");
 
   const exportId = randomUUID();
   await sql`insert into account_exports (id, org_id, requested_by, status) values (${exportId}, ${org}, ${randomUUID()}, 'running')`;
