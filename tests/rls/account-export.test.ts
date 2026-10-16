@@ -464,4 +464,43 @@ describe("downloading", () => {
         )[0]!.n,
       ).toBe(1);
     }));
+
+  it("an owner can delete a finished export; it still counts for the day; others cannot", () =>
+    inWorld(async (ctx) => {
+      const a = ctx.world.a;
+      const id = await request(ctx, a);
+      await runJob(ctx, id);
+      const del = (who: Parameters<Ctx["as"]>[0], org = a.orgId, target = id) =>
+        ctx.as(who, () => ctx.sql`select public.delete_account_export(${org}, ${target})`, FRESH);
+      await ctx.denied(() => del(ctx.world.b.owner), NOT_ALLOWED);
+      await ctx.denied(() => del(a.manager), NOT_ALLOWED);
+      await ctx.denied(() => del(null), NOT_ALLOWED);
+      await ctx.denied(() => del(a.owner, a.orgId, randomUUID()), ["22023"]);
+      await del(a.owner);
+      expect(
+        (
+          await ctx.sql`select count(*)::int as n from account_export_files where export_id = ${id}`
+        )[0]!.n,
+      ).toBe(0);
+      expect(
+        (await ctx.sql`select status, error_code from account_exports where id = ${id}`)[0],
+      ).toMatchObject({ status: "failed", error_code: "deleted" });
+      expect(
+        (
+          await ctx.sql`select count(*)::int as n from audit_log where org_id = ${a.orgId} and action = 'account.export_deleted'`
+        )[0]!.n,
+      ).toBe(1);
+      // Gone for good: no download, no second delete, and no new request the same day.
+      await ctx.denied(
+        () =>
+          ctx.as(
+            a.owner,
+            () => ctx.sql`select public.get_account_export_chunk(${a.orgId}, ${id}, 0, 10)`,
+            FRESH,
+          ),
+        ["22023"],
+      );
+      await ctx.denied(() => del(a.owner), ["22023"]);
+      await ctx.denied(() => request(ctx, a), LIMIT);
+    }));
 });

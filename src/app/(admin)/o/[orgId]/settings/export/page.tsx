@@ -10,7 +10,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { createSupabaseServerClient, requireRole } from "@/lib/auth";
-import { requestAccountExportAction } from "@/lib/account-export/actions";
+import {
+  deleteAccountExportAction,
+  requestAccountExportAction,
+} from "@/lib/account-export/actions";
 import { getLocation } from "@/lib/catalog";
 import { t, type MessageKey } from "@/lib/i18n";
 
@@ -21,6 +24,8 @@ const messages: Record<string, { key: MessageKey; ok: boolean }> = {
   limit: { key: "accountExport.limit", ok: false },
   error: { key: "accountExport.failed", ok: false },
   gone: { key: "accountExport.downloadFailed", ok: false },
+  deleted: { key: "accountExport.deleted", ok: true },
+  deleteFailed: { key: "accountExport.deleteFailed", ok: false },
 };
 
 /** Owners ask for the whole-account ZIP and download it here. */
@@ -57,6 +62,8 @@ export default async function AccountExportPage({
       <p className="text-muted-foreground max-w-prose text-sm">{t("accountExport.intro")}</p>
       <p className="max-w-prose text-sm">{t("accountExport.warning")}</p>
       <p className="text-muted-foreground max-w-prose text-sm">{t("accountExport.emailNote")}</p>
+
+      <p className="max-w-prose text-sm font-medium">{t("accountExport.spaceNote")}</p>
 
       <FocusMessage message={message ? t(message.key) : ""} urgent={!!message && !message.ok} />
 
@@ -106,8 +113,10 @@ export default async function AccountExportPage({
                         <span className="text-muted-foreground block text-sm">
                           {t(
                             `accountExport.error.${
-                              ["too_large", "expired", "stuck"].includes(e.error_code as string)
-                                ? (e.error_code as "too_large" | "expired" | "stuck")
+                              ["too_large", "expired", "stuck", "deleted"].includes(
+                                e.error_code as string,
+                              )
+                                ? (e.error_code as "too_large" | "expired" | "stuck" | "deleted")
                                 : "failed"
                             }`,
                           )}
@@ -124,14 +133,30 @@ export default async function AccountExportPage({
                     </TableCell>
                     <TableCell>
                       {ready ? (
-                        <a
-                          href={`/o/${orgId}/settings/export/${e.id}/download`}
-                          download
-                          className="inline-flex min-h-12 items-center font-medium underline"
-                        >
-                          {t("accountExport.download")}
-                          <span className="sr-only"> ({when.format(new Date(e.requested_at as string))})</span>
-                        </a>
+                        <div className="flex flex-wrap items-center gap-4">
+                          <a
+                            href={`/o/${orgId}/settings/export/${e.id}/download`}
+                            download
+                            className="inline-flex min-h-12 items-center font-medium underline"
+                          >
+                            {t("accountExport.download")}
+                            <span className="sr-only">
+                              {" "}
+                              ({when.format(new Date(e.requested_at as string))})
+                            </span>
+                          </a>
+                          <form action={deleteAccountExportAction}>
+                            <input type="hidden" name="orgId" value={orgId} />
+                            <input type="hidden" name="exportId" value={e.id as string} />
+                            <Button type="submit" variant="outline" className="h-12 px-5">
+                              {t("accountExport.delete")}
+                              <span className="sr-only">
+                                {" "}
+                                ({when.format(new Date(e.requested_at as string))})
+                              </span>
+                            </Button>
+                          </form>
+                        </div>
                       ) : null}
                     </TableCell>
                   </TableRow>

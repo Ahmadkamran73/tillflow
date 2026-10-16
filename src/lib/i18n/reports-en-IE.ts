@@ -162,4 +162,10 @@ export const reportsEnIE = {
     "Every owner is emailed when an export is requested. The file itself is never sent by email.",
   "accountExport.download": "Download ZIP",
   "accountExport.downloadFailed": "That export is not available any more.",
+  "accountExport.spaceNote":
+    "An export file takes up space on our server. Once you have downloaded it, please delete it here. You cannot get it back, and you can ask for a new export tomorrow.",
+  "accountExport.delete": "Delete file",
+  "accountExport.deleted": "The file has been deleted from our server.",
+  "accountExport.deleteFailed": "The file could not be deleted. Try again.",
+  "accountExport.error.deleted": "Deleted by you.",
 } as const;

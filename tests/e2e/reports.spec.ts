@@ -141,18 +141,44 @@ test("the owner asks for all their data, gets a ZIP once, and only one a day", a
   expect(res.headers()["content-type"]).toBe("application/zip");
   expect((await res.body()).subarray(0, 2).toString()).toBe("PK");
   expect(
-    (await sql`select count(*)::int as n from audit_log where org_id = ${orgId} and action = 'account.export_downloaded'`)[0]!.n,
+    (
+      await sql`select count(*)::int as n from audit_log where org_id = ${orgId} and action = 'account.export_downloaded'`
+    )[0]!.n,
   ).toBe(1);
 
   // One a day.
   await page.getByRole("button", { name: "Prepare my export" }).click();
   await expect(page.getByText("You can ask for one export a day")).toBeVisible();
 
+  // The page asks for the file to be deleted once downloaded; deleting removes it at once.
+  await expect(page.getByText("takes up space on our server")).toBeVisible();
+  await hydrated(page);
+  await page.getByRole("button", { name: /^Delete file/ }).click();
+  await expect(page.getByRole("status")).toContainText("The file has been deleted");
+  expect(
+    (await sql`select count(*)::int as n from account_export_files where export_id = ${id}`)[0]!.n,
+  ).toBe(0);
+  expect((await page.request.get(`/o/${orgId}/settings/export/${id}/download`)).status()).toBe(404);
+  await expect(page.getByText("Deleted by you.")).toBeVisible();
+  // A deleted export still counts for the day.
+  await page.getByRole("button", { name: "Prepare my export" }).click();
+  await expect(page.getByText("You can ask for one export a day")).toBeVisible();
+
   // Not for other shops or made-up ids.
   expect(
-    (await page.request.get(`/o/00000000-0000-4000-8000-000000000000/settings/export/${id}/download`)).status(),
+    (
+      await page.request.get(
+        `/o/00000000-0000-4000-8000-000000000000/settings/export/${id}/download`,
+      )
+    ).status(),
   ).toBe(404);
-  expect((await page.request.get(`/o/${orgId}/settings/export/${"0".repeat(8)}-0000-4000-8000-000000000000/download`)).status()).toBe(404);
+  expect(
+    (
+      await page.request.get(
+        `/o/${orgId}/settings/export/${"0".repeat(8)}-0000-4000-8000-000000000000/download`,
+      )
+    ).status(),
+  ).toBe(404);
 });
 
 test("an owner without two-step verification must type the password again for the export", async ({
@@ -175,7 +201,9 @@ test("an owner without two-step verification must type the password again for th
   await page.getByRole("button", { name: "Prepare my export" }).click();
   await expect(page).toHaveURL(/\/settings\/export\/confirm/);
   await expect(page.getByText("Enter your password to continue")).toBeVisible();
-  expect((await sql`select count(*)::int as n from account_exports where org_id = ${orgId}`)[0]!.n).toBe(0);
+  expect(
+    (await sql`select count(*)::int as n from account_exports where org_id = ${orgId}`)[0]!.n,
+  ).toBe(0);
 
   await hydrated(page);
   await page.getByLabel("Password").fill("not-my-password");
@@ -188,5 +216,7 @@ test("an owner without two-step verification must type the password again for th
   await hydrated(page);
   await page.getByRole("button", { name: "Prepare my export" }).click();
   await expect(page.getByRole("status")).toContainText("We are preparing your export");
-  expect((await sql`select count(*)::int as n from account_exports where org_id = ${orgId}`)[0]!.n).toBe(1);
+  expect(
+    (await sql`select count(*)::int as n from account_exports where org_id = ${orgId}`)[0]!.n,
+  ).toBe(1);
 });
