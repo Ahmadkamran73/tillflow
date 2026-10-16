@@ -6,6 +6,8 @@ import { rateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
+const CHUNK = 2 * 1024 * 1024; // the most get_account_export_chunk returns per call
+
 /**
  * GET /o/<orgId>/settings/export/<id>/download: the finished ZIP. Owner only (signed in, with
  * two-step verification where they have it), 5 per hour per user; the database checks the shop,
@@ -29,25 +31,66 @@ export async function GET(
   }
 
   const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase.rpc("get_account_export", {
-    p_org: orgId,
-    p_id: exportId,
-  });
-  if (error?.code === "TF003") {
+  // The file is read in slices: one call for a big ZIP hits the database's statement timeout.
+  const { data: info } = await supabase
+    .from("account_exports")
+    .select("size_bytes")
+    .eq("org_id", orgId)
+    .eq("id", exportId)
+    .maybeSingle();
+  const size = Number(info?.size_bytes ?? 0);
+  if (!Number.isSafeInteger(size) || size < 1) return new Response(null, { status: 404 });
+
+  const slice = (offset: number) =>
+    supabase.rpc("get_account_export_chunk", {
+      p_org: orgId,
+      p_id: exportId,
+      p_offset: offset,
+      p_length: CHUNK,
+    });
+  const toBytes = (data: unknown) => {
+    const hex = typeof data === "string" ? (data.startsWith("\\x") ? data.slice(2) : data) : null;
+    return hex === null ? null : new Uint8Array(Buffer.from(hex, "hex"));
+  };
+
+  // The first slice is fetched before answering, so refusals still get a proper status.
+  const first = await slice(0);
+  if (first.error?.code === "TF003") {
     // The sign-in proof is older than 10 minutes: confirm again, then come back to the list.
     const page = `/o/${orgId}/settings/export`;
     return appRedirect(`${page}/confirm?next=${encodeURIComponent(page)}`);
   }
-  if (error || typeof data !== "string") {
-    if (error && error.code !== "22023") {
-      await reportError(error, { source: "server", route: "account-export-download" });
+  const head = first.error ? null : toBytes(first.data);
+  if (first.error || !head) {
+    if (first.error && first.error.code !== "22023") {
+      await reportError(first.error, { source: "server", route: "account-export-download" });
     }
-    return new Response(null, { status: error && error.code !== "22023" ? 503 : 404 });
+    return new Response(null, { status: first.error && first.error.code !== "22023" ? 503 : 404 });
   }
-  const bytes = Buffer.from(data.startsWith("\\x") ? data.slice(2) : data, "hex");
-  return new Response(new Uint8Array(bytes), {
+
+  let offset = head.length;
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(head);
+    },
+    async pull(controller) {
+      if (offset >= size) return controller.close();
+      const next = await slice(offset);
+      const bytes = next.error ? null : toBytes(next.data);
+      if (!bytes || bytes.length === 0) {
+        if (next.error)
+          await reportError(next.error, { source: "server", route: "account-export-download" });
+        return controller.error(new Error("export slice unavailable"));
+      }
+      offset += bytes.length;
+      controller.enqueue(bytes);
+      if (offset >= size) controller.close();
+    },
+  });
+  return new Response(body, {
     headers: {
       "Content-Type": "application/zip",
+      "Content-Length": String(size),
       "Content-Disposition": `attachment; filename="tillflow-data-${exportId.slice(0, 8)}.zip"`,
       "Cache-Control": "no-store",
     },
