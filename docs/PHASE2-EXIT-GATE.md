@@ -52,7 +52,7 @@ Required for each: open shift, sales, refunds, Z-report, exports, correct number
 | Business type         | Staging day (the gate) | Automated whole day, local database (evidence, not the gate) |
 | --------------------- | ---------------------- | ------------------------------------------------------------ |
 | General / convenience | PASSED 2026-10-15 (re-run after the PDF fix, PR #43)            | PASSED: `tests/e2e/trading-day.spec.ts` "general store"      |
-| Electronics & phones  | PASSED 2026-10-15 (account already had a day: counts and exports checked, row figures against the earlier totals)            | PASSED: "electronics"                                        |
+| Electronics & phones  | PASSED 2026-10-15 (the account already had sales that day, so only the sale count and the exports were checked, not the exact row figures)            | PASSED: "electronics"                                        |
 | Clothing & footwear   | PASSED 2026-10-15 (same note as electronics)            | PASSED: "clothing"                                           |
 | Café                  | PASSED 2026-10-15 (own account, full figure checks)            | PASSED: "café"                                               |
 | Restaurant            | PASSED 2026-10-16 (own account, full figure checks)            | PASSED: "restaurant"                                         |
