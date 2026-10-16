@@ -37,3 +37,25 @@ export async function requestAccountExportAction(formData: FormData): Promise<vo
   }
   redirect(`${page}?result=requested`);
 }
+
+/** The owner deletes a finished export file (the database checks owner and status again and audits it). */
+export async function deleteAccountExportAction(formData: FormData): Promise<void> {
+  const org = z.uuid().safeParse(formData.get("orgId"));
+  const id = z.uuid().safeParse(formData.get("exportId"));
+  if (!org.success) redirect("/o");
+  await requireRole("owner", org.data);
+  const page = `/o/${org.data}/settings/export`;
+  if (!id.success) redirect(`${page}?result=gone`);
+
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase.rpc("delete_account_export", {
+    p_org: org.data,
+    p_id: id.data,
+  });
+  if (error) {
+    if (error.code === "22023") redirect(`${page}?result=gone`);
+    await reportError(error, { source: "server", route: "account-export-delete" });
+    redirect(`${page}?result=deleteFailed`);
+  }
+  redirect(`${page}?result=deleted`);
+}
