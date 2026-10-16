@@ -11,7 +11,7 @@ Source: `docs/PLAN.md` section 2 and `docs/PROMPTS_v1.md` (end of Part D):
 > In staging, run one full trading day for each of the 5 business types (open shift → sales → refunds →
 > Z-report → exports) with correct numbers. Update `docs/STATUS.md`.
 
-**Gate status (2026-10-16): all five staging trading days PASSED; Hostinger large export still to do.**
+**Gate status (2026-10-16): CLOSED. All five staging trading days PASSED and the Hostinger large export is verified (see STATUS.md); hardware, screen reader and accountant answers are carried into Phase 3.**
 Owner decision 2026-10-16: hardware testing (printer, drawer, card terminal, gift-receipt print), the
 screen-reader pass and the accountant's answers (VAT3 layout, hot take-away rate, service-charge VAT, refund
 dating, Budget 2027) are **moved to the end of Phase 3** and are no longer blockers for closing Phase 2; they
