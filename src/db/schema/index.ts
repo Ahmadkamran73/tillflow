@@ -1,4 +1,5 @@
 export * from "./audit";
+export * from "./billing";
 export * from "./catalog";
 export * from "./customers";
 export * from "./imports";

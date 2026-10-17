@@ -91,6 +91,7 @@ export const SYNC_REASONS = [
   "void_not_allowed",
   "original_not_found",
   "refund_unverified",
+  "org_read_only",
 ] as const;
 export type SyncReason = (typeof SYNC_REASONS)[number];
 
@@ -126,4 +127,6 @@ export const reasonText: Record<SyncReason, string> = {
   original_not_found: "The sale being refunded never reached the server.",
   refund_unverified:
     "A refund that needed a manager was recorded without a PIN the server could check. Check it with the cashier and manager, then mark it resolved.",
+  org_read_only:
+    "The business was read-only (an unpaid invoice) when this reached the server. Once the invoice is paid and the account reopened, press Try again to record it.",
 };

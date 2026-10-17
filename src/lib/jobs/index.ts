@@ -3,6 +3,7 @@ import type { PgBoss } from "pg-boss";
 import { reportError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import { createBoss, DEFAULT_QUEUE_OPTIONS, registerHandler, type JobHandler } from "./boss";
+import { BILLING_HANDLERS } from "./handlers/billing";
 import { IMPORT_HANDLERS } from "./handlers/imports";
 import { OPS_HANDLERS } from "./handlers/ops";
 import { REPORT_HANDLERS } from "./handlers/reports";
@@ -12,7 +13,7 @@ import { SHIFT_HANDLERS } from "./handlers/shifts";
  * Background jobs. Later steps add their handlers (import, reports, exports, billing) here.
  * The worker is started once per Node.js process from src/instrumentation.ts.
  */
-const HANDLERS: JobHandler[] = [...OPS_HANDLERS, ...SHIFT_HANDLERS, ...IMPORT_HANDLERS, ...REPORT_HANDLERS];
+const HANDLERS: JobHandler[] = [...OPS_HANDLERS, ...SHIFT_HANDLERS, ...IMPORT_HANDLERS, ...REPORT_HANDLERS, ...BILLING_HANDLERS];
 
 const RETRY_MS = 60_000;
 

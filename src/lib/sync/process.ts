@@ -100,7 +100,7 @@ const reasonOf = (e: SaleError): SyncReason => {
 const isDeterministic = (e: unknown) =>
   e instanceof z.ZodError ||
   (typeof (e as { code?: unknown })?.code === "string" &&
-    /^(22|23|42501)/.test((e as { code: string }).code));
+    /^(22|23|42501|TF004)/.test((e as { code: string }).code));
 
 const tenderLine = (t: SyncSale["tenders"][number]) => ({
   method: t.method,
@@ -353,6 +353,9 @@ async function processOne(raw: unknown, ctx: SyncCtx, deps: SyncDeps): Promise<S
         detail: { thresholdBp: ctx.discountOverrideBp, approval: "not valid" },
       });
     }
+    // The business is paused (unpaid invoice). The sale is kept for a manager; once the account is
+    // open again, Try again records it.
+    if ((e as { code?: string }).code === "TF004") return reject({ reason: "org_read_only", detail: {} });
     return reject({ reason: "invalid", detail: { message: "sale could not be recorded" } });
   }
   if (outcome === "receipt_clash") {

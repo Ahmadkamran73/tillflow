@@ -6,6 +6,7 @@ import "server-only";
  * till from the device token hash it is given, never from anything the till claims.
  */
 export {
+  deviceBillingReadOnly,
   deviceCustomerCreate,
   deviceCustomerSearch,
   deviceFeedMeta,

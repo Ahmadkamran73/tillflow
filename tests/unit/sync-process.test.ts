@@ -279,6 +279,18 @@ describe("errors that would repeat forever", () => {
     }
   });
 
+  it("a sale for a paused (read-only) business is kept for a manager, not retried for ever", async () => {
+    const { d, rejections } = deps(() => 1234, {
+      recordSale: async () => {
+        throw Object.assign(new Error("this business is paused"), { code: "TF004" });
+      },
+    });
+    const [r] = await processBatch([sale()], ctx, d);
+    expect(r).toMatchObject({ status: "rejected", reason: "org_read_only" });
+    expect(rejections).toHaveLength(1);
+    expect(rejections[0]).toMatchObject({ reason: "org_read_only" });
+  });
+
   it("a connection error still throws so the device retries", async () => {
     const { d } = deps(() => 1234, {
       recordSale: async () => {

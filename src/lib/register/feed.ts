@@ -28,6 +28,8 @@ export const feedSchema = z.object({
     refundOverrideCents: z.int().min(0).max(1_000_000).default(2000),
     /** Restaurant service charge in basis points of the eat-in bill; 0 = none. */
     serviceChargeBp: z.int().min(0).max(2500).default(0),
+    /** The business is paused (unpaid invoice): the till shows a notice and takes no sale. */
+    readOnly: z.boolean().default(false),
   }),
   /** Restaurants: the dining areas and tables of this till's location (live ones only). */
   floors: z.array(z.object({ id: z.string(), name: z.string(), sort: z.int() })).default([]),

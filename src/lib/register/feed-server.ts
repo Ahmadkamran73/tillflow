@@ -7,6 +7,7 @@ import {
   parseTenderMeta,
 } from "@/lib/device/meta";
 import {
+  deviceBillingReadOnly,
   deviceFeedMeta,
   deviceFeedTable,
   deviceRefundMeta,
@@ -56,6 +57,7 @@ export async function getCatalogFeed(
   const refundMeta = z
     .object({ refund_override_cents: z.int().min(0), last_refund_seq: z.int().min(0) })
     .safeParse(await deviceRefundMeta(tokenHash));
+  const readOnly = await deviceBillingReadOnly(tokenHash);
   const rawRestaurant = await deviceRestaurantMeta(tokenHash);
   const restaurant = rawRestaurant ? parseRestaurantMeta(rawRestaurant) : null;
   const rawTypes = await deviceTenderTypes(tokenHash);
@@ -86,6 +88,7 @@ export async function getCatalogFeed(
       discountOverrideBp: meta.org.discount_override_bp,
       refundOverrideCents: refundMeta.success ? refundMeta.data.refund_override_cents : undefined,
       serviceChargeBp: restaurant?.serviceChargeBp,
+      readOnly,
     },
     floors: restaurant?.floors ?? [],
     tables: restaurant?.tables ?? [],

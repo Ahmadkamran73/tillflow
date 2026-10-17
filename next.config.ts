@@ -45,6 +45,11 @@ const nextConfig: NextConfig = {
       "./node_modules/.pnpm/pdfkit@*/node_modules/pdfkit/js/**/*",
       "./node_modules/pdfkit/js/**/*",
     ],
+    // The invoice PDF (owner download) and the billing jobs use the same PDF library.
+    "/o/\\[orgId\\]/billing/invoices/\\[invoiceId\\]/pdf": [
+      "./node_modules/.pnpm/pdfkit@*/node_modules/pdfkit/js/**/*",
+      "./node_modules/pdfkit/js/**/*",
+    ],
   },
   // Off on Hostinger, so maps are never served. CI sets SOURCE_MAPS=true in the source-maps
   // workflow to keep a private copy per commit (docs/DEPLOY.md "Reading a browser stack trace").

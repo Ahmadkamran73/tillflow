@@ -815,6 +815,7 @@ export function Register({ orgId }: { orgId: string }) {
   }
 
   async function openTender(exchange = exchangeDraft) {
+    if (data?.org?.readOnly === true) return; // unpaid invoice: the server would refuse the sale
     const saved = (await db?.meta.get("tenderDraft"))?.value as
       { cartKey: string; tenders: LocalTender[] } | undefined;
     const base = saved && saved.cartKey === JSON.stringify(cart) ? saved.tenders : [];
@@ -1161,7 +1162,7 @@ export function Register({ orgId }: { orgId: string }) {
   }
 
   function pay() {
-    if (!till || !shift) return;
+    if (!till || !shift || data?.org?.readOnly === true) return;
     if (needsApproval && approval?.key !== discountKey) {
       setDialog({ kind: "override", ask: overrideAsk });
     } else void openTender();
@@ -1179,8 +1180,12 @@ export function Register({ orgId }: { orgId: string }) {
 
   const itemCount = cart.lines.reduce((n, l) => n + l.qty, 0);
   const due = priced ? priced.basket.amountDue : 0;
-  const payLabel = t("register.pay", { amount: formatCents(due) });
-  const canPay = !!priced && cart.lines.length > 0;
+  const payLabel =
+    data?.org?.readOnly === true
+      ? t("register.readOnlyPay")
+      : t("register.pay", { amount: formatCents(due) });
+  const readOnly = data?.org?.readOnly === true;
+  const canPay = !!priced && cart.lines.length > 0 && !readOnly;
 
   // `valid` for the discount dialog: would the cart still price with this discount?
   const discountTarget = dialog?.kind === "discount" ? dialog.target : null;
@@ -1880,6 +1885,15 @@ export function Register({ orgId }: { orgId: string }) {
                   </Button>
                 </div>
               )}
+              {readOnly && (
+                <p
+                  id="read-only-notice"
+                  className="border-warning bg-warning text-warning-foreground flex items-center gap-2 rounded-lg border-2 p-3 text-sm font-semibold"
+                >
+                  <TriangleAlertIcon aria-hidden className="size-5 shrink-0" />
+                  {t("register.readOnlyNotice")}
+                </p>
+              )}
               {outbox.signedOut && (
                 <p className="border-solid-border bg-paper flex items-center gap-2 rounded-lg border-2 p-3 text-sm font-semibold">
                   <TriangleAlertIcon aria-hidden className="size-5 shrink-0" />
@@ -2388,7 +2402,14 @@ export function Register({ orgId }: { orgId: string }) {
                   </Button>
                 ) : null}
               </div>
-              <Button size="pay" className="hidden lg:inline-flex" disabled={!canPay} onClick={pay}>
+              <Button
+                size="pay"
+                className="hidden lg:inline-flex"
+                disabled={!canPay && !readOnly}
+                aria-disabled={readOnly || undefined}
+                aria-describedby={readOnly ? "read-only-notice" : undefined}
+                onClick={pay}
+              >
                 {payLabel}
               </Button>
             </div>
@@ -2397,7 +2418,14 @@ export function Register({ orgId }: { orgId: string }) {
         bar={
           <>
             <p className="font-display text-title font-semibold tabular-nums">{formatCents(due)}</p>
-            <Button size="pay" className="flex-1" disabled={!canPay} onClick={pay}>
+            <Button
+              size="pay"
+              className="flex-1"
+              disabled={!canPay && !readOnly}
+              aria-disabled={readOnly || undefined}
+              aria-describedby={readOnly ? "read-only-notice" : undefined}
+              onClick={pay}
+            >
               {payLabel}
             </Button>
           </>

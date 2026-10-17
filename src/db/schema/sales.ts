@@ -407,6 +407,7 @@ export const syncRejectionReasons = [
   "void_not_allowed",
   "original_not_found",
   "refund_unverified",
+  "org_read_only",
 ] as const;
 
 /** A sale the server refused: the manager's "Needs attention" list. `id` is the sale id. */
