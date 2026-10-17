@@ -1174,3 +1174,37 @@ describe("admin edge cases", () => {
       );
     }));
 });
+
+describe("paused: locations, registers and import undo", () => {
+  it("refuses direct location and register changes and undoing an import; an owner may still remove a till", () =>
+    inWorld(async (ctx) => {
+      const { a } = ctx.world;
+      await ctx.sql`update organisations set status = 'read_only' where id = ${a.orgId}`;
+      const own = (fn: () => PromiseLike<unknown>) => () =>
+        ctx.as(a.owner, async () => {
+          await fn();
+        });
+      const [before] = await ctx.sql`select name from locations where id = ${a.locationId}`;
+      await ctx.as(
+        a.owner,
+        () => ctx.sql`update locations set name = 'Renamed' where id = ${a.locationId}`,
+      );
+      const [after] = await ctx.sql`select name from locations where id = ${a.locationId}`;
+      expect(after!.name).toBe(before!.name); // update matched 0 rows
+      await ctx.denied(
+        own(
+          () =>
+            ctx.sql`insert into registers (id, org_id, location_id, name)
+                    values (${randomUUID()}, ${a.orgId}, ${a.locationId}, 'Till 9')`,
+        ),
+        ["42501"],
+      );
+      await ctx.denied(
+        own(() => ctx.sql`select public.undo_import(${a.orgId}, ${randomUUID()})`),
+        PAUSED,
+      );
+      const [inner] =
+        await ctx.sql`select has_function_privilege('authenticated', 'public.undo_import_billing(uuid, uuid)', 'execute') as ok`;
+      expect(inner!.ok).toBe(false);
+    }));
+});

@@ -128,6 +128,8 @@ review this policy.**
   new pairing codes, adding till staff, tab events, creating a customer at the till.
 - Owner only while paused: revoking a till, removing till staff, setting or resetting a till PIN.
 - Suppliers have no manual screen; they change only by import, which is blocked.
+- Migration `0056` also blocks direct location and register changes and undoing an import while paused (an owner may still remove a till). Deliberately allowed: erasing a customer, withdrawing marketing consent (legal rights), marking a sale reviewed, and pairing with a code made before the pause (valid ten minutes).
+- Known limit: a till can still claim an earlier `completed_at` to get a late sale accepted; bounded to 3 days after the pause. Closing it needs a last-sync column on the register.
 
 ## Open decisions and extra limits
 
