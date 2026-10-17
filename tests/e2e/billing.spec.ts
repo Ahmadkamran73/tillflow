@@ -19,6 +19,9 @@ import {
 config({ path: ".env.local", quiet: true });
 const sql = postgres(process.env.DIRECT_URL ?? "", { max: 2, onnotice: () => {} });
 test.afterAll(() => sql.end());
+// One worker runs both tests, so the shared connection is closed once, after the last of them
+// (with fully parallel tests a worker could close it and then run another test of this file).
+test.describe.configure({ mode: "serial" });
 
 test.use({ viewport: { width: 1024, height: 768 } });
 test.setTimeout(240_000);
