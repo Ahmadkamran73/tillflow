@@ -531,3 +531,116 @@ export async function accountExportOwnerEmails(id: string): Promise<AccountExpor
     select ops.account_export_owner_emails(${id}) as r`;
   return row?.r ?? null;
 }
+// ---------------------------------------------------------------------------------------------
+// Billing (migration 0055). Thin wrappers: every figure is decided in src/lib/billing and checked
+// again by the database; none of these touches a table.
+
+export type BillingCandidate = {
+  org_id: string;
+  sub_status: "trial" | "active" | "overdue" | "paused";
+  anchor_date: string | null;
+  resumed_on: string | null;
+  trial_ends_at: string | null;
+  last_period_start: string | null;
+};
+
+/** Gives every business without a subscription a trial one; returns how many were created. */
+export async function billingEnsureSubscriptions(trialDays: number, priceCents: number) {
+  const [row] = await db()<{ n: number }[]>`
+    select ops.billing_ensure_subscriptions(${trialDays}, ${priceCents}) as n`;
+  return row?.n ?? 0;
+}
+
+export async function billingCandidates(): Promise<BillingCandidate[]> {
+  const [row] = await db()<{ c: BillingCandidate[] }[]>`select ops.billing_candidates() as c`;
+  return row?.c ?? [];
+}
+
+export type InvoiceFigures = {
+  id: string;
+  org_id: string;
+  period_start: string;
+  period_end: string;
+  amount_ex_vat_cents: number;
+  vat_rate_bp: number;
+  vat_cents: number;
+  total_cents: number;
+  due_on: string;
+  payment_reference: string;
+  supplier_name: string;
+  supplier_address: string;
+  supplier_vat_number: string;
+};
+
+export type IssuedInvoiceRow = {
+  created: boolean;
+  id: string;
+  invoice_no: number;
+  payment_reference: string;
+};
+
+/** Issues one invoice. Throws a postgres error with code 23505 when the reference is taken. */
+export async function billingIssueInvoice(f: InvoiceFigures): Promise<IssuedInvoiceRow> {
+  const [row] = await db()<{ r: IssuedInvoiceRow }[]>`
+    select ops.billing_issue_invoice(${db().json(f)}) as r`;
+  if (!row) throw new Error("billing_issue_invoice returned no row");
+  return row.r;
+}
+
+export async function billingPendingEmails(): Promise<string[]> {
+  const [row] = await db()<{ ids: string[] }[]>`select ops.billing_pending_emails() as ids`;
+  return row?.ids ?? [];
+}
+
+export async function billingMarkEmailed(invoiceId: string) {
+  await db()`select ops.billing_mark_emailed(${invoiceId})`;
+}
+
+/** The invoice row, the business and the owners' addresses; null for an unknown id. */
+export async function billingInvoiceContext(invoiceId: string): Promise<unknown> {
+  const [row] = await db()<{ c: unknown }[]>`select ops.billing_invoice_context(${invoiceId}) as c`;
+  return row?.c ?? null;
+}
+
+export type OpenInvoice = {
+  id: string;
+  org_id: string;
+  due_on: string;
+  reminder_1_sent: boolean;
+  reminder_2_sent: boolean;
+  sub_status: "trial" | "active" | "overdue" | "paused" | null;
+  org_status: string;
+};
+
+export async function billingOpenInvoices(): Promise<OpenInvoice[]> {
+  const [row] = await db()<{ o: OpenInvoice[] }[]>`select ops.billing_open_invoices() as o`;
+  return row?.o ?? [];
+}
+
+export async function billingReminderClaim(invoiceId: string, n: 1 | 2): Promise<boolean> {
+  const [row] = await db()<{ ok: boolean }[]>`
+    select ops.billing_reminder_claim(${invoiceId}, ${n}) as ok`;
+  return row?.ok ?? false;
+}
+
+export async function billingReminderRelease(invoiceId: string, n: 1 | 2) {
+  await db()`select ops.billing_reminder_release(${invoiceId}, ${n})`;
+}
+
+export async function billingMarkOverdue(orgId: string) {
+  await db()`select ops.billing_mark_overdue(${orgId})`;
+}
+
+/** Pauses the business (read-only) unless a super-admin's hold is still running; true if it did. */
+export async function billingPause(orgId: string, invoiceId: string, today: string) {
+  const [row] = await db()<{ ok: boolean }[]>`
+    select ops.billing_pause(${orgId}, ${invoiceId}, ${today}::date) as ok`;
+  return row?.ok ?? false;
+}
+
+/** True while the till's business is paused or closed (ops.device_billing_state). */
+export async function deviceBillingReadOnly(tokenHash: string): Promise<boolean> {
+  const [row] = await db()<{ m: { read_only?: boolean } | null }[]>`
+    select ops.device_billing_state(${tokenHash}) as m`;
+  return row?.m?.read_only === true;
+}

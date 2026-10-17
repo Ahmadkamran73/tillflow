@@ -70,6 +70,7 @@ export async function POST(request: NextRequest) {
     const code = (e as { code?: string }).code;
     if (code === "23505") return Response.json({ error: "email_taken" }, { status: 409 });
     if (code === "22023") return Response.json({ error: "invalid" }, { status: 400 });
+    if (code === "TF004") return Response.json({ error: "read_only" }, { status: 403 });
     await reportError(e, { source: "server", route: "/api/v1/register/customers" });
     return Response.json({ error: "try again" }, { status: 503 });
   }

@@ -5,6 +5,7 @@ export {
   getAuthUser,
   provisionOrganisation,
   requireBackOffice,
+  requirePlatformAdmin,
   requireRole,
   requireUser,
 } from "./session";

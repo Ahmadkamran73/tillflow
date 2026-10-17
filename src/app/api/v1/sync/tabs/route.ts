@@ -90,9 +90,15 @@ export async function POST(request: NextRequest) {
         });
         results.push({ id: d.id, status });
       } catch (err) {
-        // 42501 not staff; 22xxx / 23xxx a value the database refuses. All fail again: report, do not retry.
+        // 42501 not staff; TF004 the business is paused (read-only); 22xxx / 23xxx a value the database refuses. All fail again: report, do not retry.
         const code = (err as { code?: string }).code ?? "";
-        if (code !== "42501" && !code.startsWith("22") && !code.startsWith("23")) throw err;
+        if (
+          code !== "42501" &&
+          code !== "TF004" &&
+          !code.startsWith("22") &&
+          !code.startsWith("23")
+        )
+          throw err;
         await reportError(new Error("tab event rejected"), {
           source: "server",
           route: "/api/v1/sync/tabs",

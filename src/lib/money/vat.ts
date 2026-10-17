@@ -63,3 +63,18 @@ export function cashRound(cents: number): { rounded: number; adjustment: number 
   const rounded = roundHalfUp(assertInt(cents, "cents"), 5) * 5;
   return { rounded, adjustment: rounded - cents };
 }
+
+/**
+ * Adds VAT to a VAT-EXCLUSIVE amount (for example our own subscription invoices, which are priced
+ * ex VAT): `vat = round_half_up(net * rateBp / 10000)`, `gross = net + vat`. The shop-side
+ * functions go the other way (`splitVat`); invoices store all three numbers and never recompute
+ * them.
+ */
+export function addVat(net: number, rateBp: number): { net: number; vat: number; gross: number } {
+  net = assertInt(net, "net");
+  if (!Number.isSafeInteger(rateBp) || rateBp < 0 || rateBp > 10000) {
+    throw new RangeError(`rateBp must be 0..10000, got ${rateBp}`);
+  }
+  const vat = roundHalfUp(assertInt(net * rateBp, "net"), 10000);
+  return { net, vat, gross: net + vat };
+}

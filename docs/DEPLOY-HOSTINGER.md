@@ -84,7 +84,7 @@ Names only. Values come from your password manager. Same names in both apps, dif
 | `SUPABASE_SERVICE_ROLE_KEY`                               | later       | server only; add when server code needs it                                                                                                                                                    |
 | `DATABASE_URL`                                            | later       | pooled connection string                                                                                                                                                                      |
 | `EMAIL_FROM`                                              | later       | receipts and invites (later steps)                                                                                                                                                            |
-| `BANK_ACCOUNT_NAME`, `BANK_IBAN`, `BANK_BIC`, `BANK_NAME` | later       | billing invoices (phase 3)                                                                                                                                                                    |
+| `BILLING_PRICE_CENTS`, `BILLING_TRIAL_DAYS`, `BILLING_GRACE_DAYS`, `BILLING_INVOICE_DUE_DAYS`, `BILLING_VAT_RATE` (a percentage, e.g. 23), `BILLING_VAT_NUMBER`, `BILLING_ADDRESS`, `BILLING_ACCOUNT_NAME`, `BILLING_IBAN`, `BILLING_BIC`, optional `BILLING_SUPPLIER_NAME` | yes (billing) | subscription billing; billing jobs do nothing and log the names of missing or invalid settings. See `docs/specs/billing.md` |
 
 `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL` and `JOBS_DATABASE_URL` must never start with `NEXT_PUBLIC_`.
 

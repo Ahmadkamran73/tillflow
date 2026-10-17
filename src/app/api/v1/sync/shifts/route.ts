@@ -126,6 +126,7 @@ export async function POST(request: NextRequest) {
         if (
           code !== "42501" &&
           code !== "TF001" &&
+          code !== "TF004" &&
           !code.startsWith("22") &&
           !code.startsWith("23")
         )

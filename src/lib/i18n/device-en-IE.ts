@@ -59,6 +59,9 @@ export const deviceEnIE = {
   "register.unpairedBody":
     "The server no longer knows this device. Sales already rung up are safe on it. Ask a manager for a pairing code to carry on.",
   "register.unpairedAction": "Pair this till",
+  "register.readOnlyNotice":
+    "This business is read-only because an invoice is unpaid. You can look at everything, but sales are switched off until it is paid. Nothing is lost.",
+  "register.readOnlyPay": "Read-only: unpaid invoice",
   "register.signedOutNotice":
     "This till is no longer paired with the server. Sales are safe on this device; pair it again to send them.",
 

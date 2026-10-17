@@ -32,6 +32,8 @@ export async function sendMail(m: {
   subject: string;
   text: string;
   html?: string;
+  /** Files to attach (the invoice PDF). Never put customer data lists or exports here. */
+  attachments?: { filename: string; content: Buffer; contentType: string }[];
 }): Promise<MailResult> {
   const host = process.env.SMTP_HOST;
   const user = process.env.SMTP_USER;
@@ -44,6 +46,7 @@ export async function sendMail(m: {
       subject: m.subject.slice(0, 200),
       text: m.text,
       html: m.html,
+      attachments: m.attachments,
     });
     return "sent";
   } catch {

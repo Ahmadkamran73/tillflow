@@ -4,6 +4,7 @@ import {
   BarChart3Icon,
   BoxesIcon,
   ClockIcon,
+  CreditCardIcon,
   ChevronsUpDownIcon,
   LayoutDashboardIcon,
   MenuIcon,
@@ -33,7 +34,12 @@ import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/s
 import { signOutAction } from "@/lib/auth/actions";
 import { t, type MessageKey } from "@/lib/i18n";
 
-const items: { slug: string; label: MessageKey; Icon: typeof LayoutDashboardIcon }[] = [
+const items: {
+  slug: string;
+  label: MessageKey;
+  Icon: typeof LayoutDashboardIcon;
+  ownerOnly?: boolean;
+}[] = [
   { slug: "dashboard", label: "nav.dashboard", Icon: LayoutDashboardIcon },
   { slug: "sales", label: "nav.sales", Icon: ReceiptIcon },
   { slug: "shifts", label: "nav.shifts", Icon: ClockIcon },
@@ -43,15 +49,18 @@ const items: { slug: string; label: MessageKey; Icon: typeof LayoutDashboardIcon
   { slug: "suppliers", label: "nav.suppliers", Icon: TruckIcon },
   { slug: "staff", label: "nav.staff", Icon: UsersIcon },
   { slug: "reports", label: "nav.reports", Icon: BarChart3Icon },
+  { slug: "billing", label: "nav.billing", Icon: CreditCardIcon, ownerOnly: true },
   { slug: "settings", label: "nav.settings", Icon: SettingsIcon },
 ];
 
 function NavList({
   orgId,
+  role,
   collapsible,
   onNavigate,
 }: {
   orgId: string;
+  role: "owner" | "manager" | "cashier";
   collapsible?: boolean;
   onNavigate?: () => void;
 }) {
@@ -59,7 +68,7 @@ function NavList({
   return (
     <nav aria-label={t("nav.label")}>
       <ul className="flex flex-col gap-1">
-        {items.map(({ slug, label, Icon }) => {
+        {items.filter((i) => !i.ownerOnly || role === "owner").map(({ slug, label, Icon }) => {
           const href = `/o/${orgId}/${slug}`;
           const active = pathname === href || pathname.startsWith(`${href}/`);
           return (
@@ -132,7 +141,7 @@ export function BackOfficeShell({
       </a>
       <aside className="sidebar-dark bg-sidebar text-sidebar-foreground hidden flex-col gap-6 px-3 py-4 md:sticky md:top-0 md:flex md:h-screen md:overflow-y-auto">
         <Brand collapsible />
-        <NavList orgId={orgId} collapsible />
+        <NavList orgId={orgId} role={role} collapsible />
       </aside>
 
       <div className="flex min-w-0 flex-col">
@@ -150,7 +159,7 @@ export function BackOfficeShell({
             >
               <SheetTitle className="sr-only">{t("nav.label")}</SheetTitle>
               <Brand />
-              <NavList orgId={orgId} onNavigate={() => setNavOpen(false)} />
+              <NavList orgId={orgId} role={role} onNavigate={() => setNavOpen(false)} />
             </SheetContent>
           </Sheet>
 

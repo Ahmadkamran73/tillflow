@@ -484,7 +484,12 @@ describe("hardening from the audits", () => {
           and p.proname in ('record_shift_event', 'record_sale_core', 'record_refund_core',
                             'record_sale', 'record_refund', 'shift_z_email_data')`;
       expect(rows.length).toBeGreaterThanOrEqual(6);
+      // The *_core layers sit behind the paused-business check (migration 0055): closed to everyone.
       for (const r of rows)
-        expect(r, r.proname).toMatchObject({ auth: false, anon: false, svc: true });
+        expect(r, r.proname).toMatchObject({
+          auth: false,
+          anon: false,
+          svc: !r.proname.endsWith("_core"),
+        });
     }));
 });

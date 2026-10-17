@@ -57,7 +57,7 @@ const storable = (payload: Record<string, unknown>) =>
 const isDeterministic = (e: unknown) =>
   e instanceof z.ZodError ||
   (typeof (e as { code?: unknown })?.code === "string" &&
-    /^(22|23|42501)/.test((e as { code: string }).code));
+    /^(22|23|42501|TF004)/.test((e as { code: string }).code));
 
 type Rejection = { reason: SyncReason; detail: Record<string, unknown> };
 
@@ -65,6 +65,7 @@ type Rejection = { reason: SyncReason; detail: Record<string, unknown> };
 function reasonOfDbError(e: unknown): Rejection {
   const code = (e as { code?: string }).code;
   const message = String((e as { message?: unknown }).message ?? "");
+  if (code === "TF004") return { reason: "org_read_only", detail: {} };
   if (code === "42501") return { reason: "refund_needs_approval", detail: {} };
   if (message.includes("not a voidable")) return { reason: "void_not_allowed", detail: {} };
   if (message.includes("exceeds") || message.includes("lines are not")) {

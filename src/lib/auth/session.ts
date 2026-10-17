@@ -104,6 +104,20 @@ export async function requireRole(allowed: Role | readonly Role[], orgId: string
   return { user, orgId, role: membership.role };
 }
 
+/**
+ * The page guard for the Tillflow super-admin panel (/admin). Needs a signed-in user on a two-step
+ * (aal2) session who is in platform_admins; everyone else gets the same 404 as an unknown page. The
+ * database checks again in every admin_* function, so this is not the only lock.
+ */
+export async function requirePlatformAdmin(next: string) {
+  const user = await requireUser();
+  if (user.aal !== "aal2") toMfa(next);
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase.rpc("am_i_platform_admin");
+  if (error || data !== true) notFound();
+  return { user };
+}
+
 export type ApiAuth =
   { ok: true; user: AuthUser; orgId: string; role: Role } | { ok: false; status: 401 | 403 | 404 };
 
