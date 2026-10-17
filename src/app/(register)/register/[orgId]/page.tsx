@@ -14,6 +14,6 @@ export default async function RegisterPage({ params }: { params: Promise<{ orgId
   // The till is a paired device, not a signed-in user: its token (httpOnly cookie) must belong to
   // this shop. Anything else (never paired, revoked, another shop's till) goes to the pairing page.
   const device = await authenticateDevice(orgId);
-  if (!device.ok) redirect("/register/pair");
+  if (!device.ok) redirect(`/register/pair?for=${encodeURIComponent(orgId)}`);
   return <Register orgId={orgId} />;
 }

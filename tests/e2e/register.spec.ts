@@ -106,7 +106,7 @@ test("an unpaired browser is sent to the pairing page and cannot read any catalo
   // Being signed in to the back office is not enough: a till is a paired device.
   for (const org of [orgId, other]) {
     await page.goto(`/register/${org}`);
-    await expect(page).toHaveURL(/\/register\/pair$/);
+    await expect(page).toHaveURL(/\/register\/pair(\?for=[\w-]+)?$/);
     expect((await page.request.get(`/api/v1/catalog/${org}`)).status()).toBe(401);
   }
 });

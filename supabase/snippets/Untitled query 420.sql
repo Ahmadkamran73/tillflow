@@ -1,0 +1,1 @@
+insert into public.platform_admins (user_id) values ('a4e6d271-54e7-4fbf-ab6b-46fe687c5832');
