@@ -9,6 +9,13 @@ export const deviceEnIE = {
   "pair.submit": "Pair this till",
   "pair.working": "Pairing…",
   "pair.network": "Could not reach the server. Check the internet connection and try again.",
+  "pair.otherShopTitle": "This browser is a till for another business",
+  "pair.otherShopBody":
+    "It was paired with a pairing code, and a paired browser stays that till whoever is signed in. To use it for a different business, forget this till and pair it again with a new code from that business.",
+  "pair.openThatTill": "Open this browser's till",
+  "pair.forgetTill": "Forget this till and pair again",
+  "pair.forgetHint":
+    "The till stays registered for its business until a manager revokes it in Settings, Tills.",
   "pair.invalid": "That code is not valid or has expired. Ask a manager for a new one.",
 
   // Lock screen
