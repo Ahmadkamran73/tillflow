@@ -27,6 +27,9 @@ const withSerwist = withSerwistInit({
 const nextConfig: NextConfig = {
   // `next dev` runs Turbopack, which ignores the webpack-only Serwist plugin; say so explicitly.
   turbopack: {},
+  // Hostinger's build box reports 63 CPUs but caps the account's threads, so the default worker
+  // pool died with "OS can't spawn worker thread" while collecting page data. Keep it small.
+  experimental: { cpus: 2 },
   async headers() {
     return [
       {

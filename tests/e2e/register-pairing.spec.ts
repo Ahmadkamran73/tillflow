@@ -20,7 +20,7 @@ import {
 
 config({ path: ".env.local", quiet: true });
 const sql = postgres(process.env.DIRECT_URL ?? "", { max: 2, onnotice: () => {} });
-test.afterAll(() => sql.end());
+// No sql.end() here: with fullyParallel a worker can run an afterAll while a later test of this file still needs the connection (CONNECTION_ENDED); the worker process exit closes it.
 
 test.use({ viewport: { width: 1024, height: 768 }, serviceWorkers: "block" });
 test.setTimeout(180_000);
