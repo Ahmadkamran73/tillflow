@@ -5,8 +5,8 @@ export {
   getAuthUser,
   provisionOrganisation,
   requireBackOffice,
-  requirePlatformAdmin,
   requireRole,
+  requireSuperadmin,
   requireUser,
 } from "./session";
 export type { ApiAuth, AuthUser, Membership } from "./session";

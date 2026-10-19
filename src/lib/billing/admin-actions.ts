@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { createSupabaseServerClient, requirePlatformAdmin } from "@/lib/auth";
+import { createSupabaseServerClient, requireSuperadmin } from "@/lib/auth";
 import { reportError } from "@/lib/errors";
 import { rateLimit } from "@/lib/rate-limit";
 import {
@@ -18,7 +18,7 @@ import {
  * then calls a database function that checks it again and writes the audit row. Nothing here
  * changes a payment on its own: the statement matcher only suggests, a person presses Confirm.
  */
-const PAGE = "/admin/billing";
+const PAGE = "/superadmin/billing";
 const filterSchema = z.enum(["outstanding", "overdue", "paid"]).catch("outstanding");
 
 const back = (filter: string, result: string): never =>
@@ -31,7 +31,7 @@ const markPaid = z.object({
 });
 
 export async function markInvoicePaidAction(formData: FormData): Promise<void> {
-  await requirePlatformAdmin(PAGE);
+  await requireSuperadmin(PAGE);
   const filter = filterSchema.parse(formData.get("filter"));
   const parsed = markPaid.safeParse({
     invoiceId: formData.get("invoiceId"),
@@ -67,7 +67,7 @@ const unpause = z.object({
 });
 
 export async function unpauseOrganisationAction(formData: FormData): Promise<void> {
-  await requirePlatformAdmin(PAGE);
+  await requireSuperadmin(PAGE);
   const filter = filterSchema.parse(formData.get("filter"));
   const parsed = unpause.safeParse({
     orgId: formData.get("orgId"),
@@ -116,7 +116,7 @@ export async function matchStatementAction(
   _prev: StatementState,
   formData: FormData,
 ): Promise<StatementState> {
-  const { user } = await requirePlatformAdmin(PAGE);
+  const { user } = await requireSuperadmin(PAGE);
   const limit = await rateLimit("billing-statement", user.id);
   if (!limit.allowed) return { status: "error", reason: "limit" };
 

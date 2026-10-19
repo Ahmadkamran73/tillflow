@@ -12,7 +12,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { createSupabaseServerClient, requirePlatformAdmin } from "@/lib/auth";
+import { createSupabaseServerClient, requireSuperadmin } from "@/lib/auth";
 import { markInvoicePaidAction, unpauseOrganisationAction } from "@/lib/billing/admin-actions";
 import { loadBillingConfig } from "@/lib/billing/config";
 import { invoiceNumber } from "@/lib/billing/invoice-number";
@@ -52,7 +52,7 @@ export default async function AdminBillingPage({
 }: {
   searchParams: Promise<{ filter?: string; result?: string }>;
 }) {
-  await requirePlatformAdmin("/admin/billing");
+  await requireSuperadmin("/superadmin/billing");
   const sp = await searchParams;
   const filter = filterSchema.parse(sp.filter);
   const result = sp.result ? RESULTS[sp.result] : undefined;
@@ -79,7 +79,7 @@ export default async function AdminBillingPage({
           {FILTERS.map((f) => (
             <li key={f}>
               <Link
-                href={`/admin/billing?filter=${f}`}
+                href={`/superadmin/billing?filter=${f}`}
                 aria-current={f === filter ? "page" : undefined}
                 className={`inline-flex min-h-12 items-center rounded-full border-2 px-4 text-sm font-medium ${
                   f === filter ? "border-ember bg-muted" : "border-border"
