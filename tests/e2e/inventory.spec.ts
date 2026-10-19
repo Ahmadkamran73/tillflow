@@ -59,8 +59,11 @@ test("inventory: receive, damage, count, alert level, negative stock and valuati
 
   // Alert at 5: 4 on hand is low, the dashboard says so, and the Low stock filter finds it.
   await page.getByLabel("Alert when the product total is at or below").fill("5");
+  // The page already shows "Saved." from the last Record, so wait for this save's own response.
+  const saved = page.waitForResponse((r) => r.request().method() === "POST");
   await page.getByRole("button", { name: "Save alert level" }).click();
-  await expect(page.getByRole("status").first()).toHaveText("Saved."); // do not leave before the save finished
+  await saved;
+  await expect(page.getByRole("status").first()).toHaveText("Saved.");
   await page.goto(`/o/${orgId}/inventory`);
   await expect(page.getByRole("row", { name: /Milk/ })).toContainText("Low");
   await expect(page.getByTestId("stock-value")).toHaveText("€4.00");
