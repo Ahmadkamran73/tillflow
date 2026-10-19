@@ -6,6 +6,11 @@ export async function register() {
   if (process.env.JOBS_ENABLED === "false") return;
   const { startJobs } = await import("@/lib/jobs");
   void startJobs(); // don't hold up the server: /api/health shows "jobs" once it is running
+  if (process.env.IMPORT_SANDBOX_PROBE_ON_BOOT === "true") {
+    // One-off on a new host: measures what the Excel sandbox really enforces and logs the report.
+    // Needed before IMPORT_XLSX_ENABLED is turned on. See docs/specs/bulk-import.md.
+    void import("@/lib/import/sandbox/probe-on-boot").then((m) => m.probeAndLog());
+  }
 }
 
 /** Server errors from pages, route handlers, server actions and the proxy land in error_events. */

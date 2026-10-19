@@ -1,0 +1,5 @@
+{
+  "port": 9101,
+  "origins": ["https://pos.tillflow.ie"],
+  "printers": ["192.168.1.50:9100"]
+}

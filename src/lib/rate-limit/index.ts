@@ -25,7 +25,17 @@ export const RATE_LIMITS = {
   "reset-ip": { limit: 10, windowSec: 3600, auth: true }, // per IP
   mfa: { limit: 5, windowSec: 60, auth: true }, // per user
   export: { limit: 5, windowSec: 3600, auth: false }, // per user
+  "report-export": { limit: 30, windowSec: 3600, auth: false }, // per user
   import: { limit: 5, windowSec: 3600, auth: false }, // per org
+  // Preview and problem-file requests each re-read the stored upload (an Excel file starts a parser
+  // process), so they are counted too.
+  "import-reparse": { limit: 60, windowSec: 3600, auth: false }, // per org
+  // Pairing codes are 8 characters and live 10 minutes; this keeps guessing hopeless.
+  pair: { limit: 10, windowSec: 900, auth: true }, // per IP
+  // PIN checks per till, on top of the per-person lockout in the database.
+  "pin-device": { limit: 30, windowSec: 900, auth: true }, // per register
+  "receipt-email": { limit: 30, windowSec: 3600, auth: true }, // per user
+  "receipt-email-org": { limit: 200, windowSec: 3600, auth: true }, // per org
 } as const;
 
 export type RateLimitName = keyof typeof RATE_LIMITS;

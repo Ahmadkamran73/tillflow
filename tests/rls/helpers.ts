@@ -30,6 +30,8 @@ export type Shop = {
   orgId: string;
   locationId: string;
   registerId: string;
+  /** SHA-256 hex of the till's (made-up) device token, as stored on registers.device_token_hash. */
+  tokenHash: string;
   owner: Actor;
   manager: Actor;
   cashier: Actor;
@@ -39,7 +41,7 @@ export type World = { a: Shop; b: Shop };
 class Rollback extends Error {}
 
 /** JWT session facts. Defaults to a fully verified (aal2) password session. */
-export type Session = { aal?: "aal1" | "aal2"; amr?: { method: string }[] };
+export type Session = { aal?: "aal1" | "aal2"; amr?: { method: string; timestamp?: number }[] };
 
 export type Ctx = ReturnType<typeof makeCtx>;
 
@@ -84,12 +86,19 @@ function makeCtx(tx: TransactionSql, world: World) {
     /** The statement must be refused (privilege, RLS check, trigger or FK). Uses a savepoint so the tx survives. */
     async denied(fn: () => PromiseLike<unknown>, codes = ["42501", "23503"]) {
       let error: unknown;
-      try {
-        await tx.savepoint(async () => {
-          await fn();
-        });
-      } catch (e) {
-        error = e;
+      // A deadlock (another test file holds locks on tables this statement also locks, e.g. a
+      // TRUNCATE ... CASCADE) says nothing about the rule being tested: try again.
+      for (let attempt = 0; attempt < 8; attempt++) {
+        error = undefined;
+        try {
+          await tx.savepoint(async () => {
+            await fn();
+          });
+        } catch (e) {
+          error = e;
+        }
+        if ((error as { code?: string } | undefined)?.code !== "40P01") break;
+        await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
       }
       expect(error, "expected the statement to be refused").toBeDefined();
       expect(codes).toContain((error as { code?: string }).code);
@@ -106,18 +115,19 @@ async function seedShop(tx: TransactionSql, name: string): Promise<Shop> {
     orgId,
     locationId,
     registerId,
+    tokenHash: createHash("sha256").update(`device:${registerId}`).digest("hex"),
     owner: actor("owner"),
     manager: actor("manager"),
     cashier: actor("cashier"),
   };
   await tx`insert into organisations (id, name, business_type) values (${orgId}, ${name}, 'general')`;
   for (const a of [shop.owner, shop.manager, shop.cashier]) {
-    await tx`insert into memberships (id, org_id, user_id, role, pin_hash)
-             values (${randomUUID()}, ${orgId}, ${a.userId}, ${a.role}, 'argon2-secret')`;
+    await tx`insert into memberships (id, org_id, user_id, role, pin_hash, display_name)
+             values (${randomUUID()}, ${orgId}, ${a.userId}, ${a.role}, 'argon2-secret', ${a.role})`;
   }
   await tx`insert into locations (id, org_id, name) values (${locationId}, ${orgId}, ${name + " Main"})`;
   await tx`insert into registers (id, org_id, location_id, name, device_token_hash)
-           values (${registerId}, ${orgId}, ${locationId}, 'Till 1', 'device-secret')`;
+           values (${registerId}, ${orgId}, ${locationId}, 'Till 1', ${shop.tokenHash})`;
   await tx`insert into audit_log (id, org_id, actor_user_id, action, entity)
            values (${randomUUID()}, ${orgId}, ${shop.owner.userId}, 'seed', 'organisation')`;
   return shop;
@@ -128,13 +138,29 @@ async function seedShop(tx: TransactionSql, name: string): Promise<Shop> {
  * rolled back, so tests leave nothing behind and audit_log stays append-only for real.
  */
 export async function inWorld(fn: (ctx: Ctx) => Promise<void>) {
-  try {
-    await sql.begin(async (tx) => {
-      const world = { a: await seedShop(tx, "Shop A"), b: await seedShop(tx, "Shop B") };
-      await fn(makeCtx(tx, world));
-      throw new Rollback();
-    });
-  } catch (e) {
-    if (!(e instanceof Rollback)) throw e;
+  // Another test file's denied TRUNCATE takes an exclusive lock for an instant. If that deadlocks
+  // with this transaction (which already holds locks from seeding), Postgres aborts one of them;
+  // the test says nothing about the rule being tested, so run it again in a fresh transaction.
+  // Every test is rolled back and uses its own random ids, so a rerun is safe.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await sql.begin(async (tx) => {
+        const world = { a: await seedShop(tx, "Shop A"), b: await seedShop(tx, "Shop B") };
+        await fn(makeCtx(tx, world));
+        throw new Rollback();
+      });
+      return;
+    } catch (e) {
+      if (e instanceof Rollback) return;
+      if ((e as { code?: string }).code !== "40P01" || attempt >= 4) throw e;
+      await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
+    }
   }
+}
+
+/** Gives a seeded user a verified authenticator, as Supabase would after MFA enrolment. */
+export async function enrolTotp(tx: TransactionSql, actor: Actor) {
+  await tx`insert into auth.users (id, aud, role) values (${actor.userId}, 'authenticated', 'authenticated') on conflict (id) do nothing`;
+  await tx`insert into auth.mfa_factors (id, user_id, factor_type, status, created_at, updated_at, secret)
+           values (${randomUUID()}, ${actor.userId}, 'totp', 'verified', now(), now(), 'x')`;
 }

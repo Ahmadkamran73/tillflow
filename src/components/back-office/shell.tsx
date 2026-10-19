@@ -3,12 +3,14 @@
 import {
   BarChart3Icon,
   BoxesIcon,
+  ClockIcon,
   ChevronsUpDownIcon,
   LayoutDashboardIcon,
   MenuIcon,
   PackageIcon,
   ReceiptIcon,
   SettingsIcon,
+  TruckIcon,
   UserRoundIcon,
   UsersIcon,
 } from "lucide-react";
@@ -34,9 +36,11 @@ import { t, type MessageKey } from "@/lib/i18n";
 const items: { slug: string; label: MessageKey; Icon: typeof LayoutDashboardIcon }[] = [
   { slug: "dashboard", label: "nav.dashboard", Icon: LayoutDashboardIcon },
   { slug: "sales", label: "nav.sales", Icon: ReceiptIcon },
+  { slug: "shifts", label: "nav.shifts", Icon: ClockIcon },
   { slug: "products", label: "nav.products", Icon: PackageIcon },
   { slug: "inventory", label: "nav.inventory", Icon: BoxesIcon },
   { slug: "customers", label: "nav.customers", Icon: UserRoundIcon },
+  { slug: "suppliers", label: "nav.suppliers", Icon: TruckIcon },
   { slug: "staff", label: "nav.staff", Icon: UsersIcon },
   { slug: "reports", label: "nav.reports", Icon: BarChart3Icon },
   { slug: "settings", label: "nav.settings", Icon: SettingsIcon },

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { verifyMfaChallengeAction } from "@/lib/auth/actions";
@@ -41,9 +42,16 @@ export default async function MfaPage({
       ) : (
         <>
           <p className="text-sm">
-            Owners must use an authenticator app to open the back office. It takes about a minute.
+            Protect your business with a code from an authenticator app each time you log in. It
+            takes about a minute, and you can also do it later from Settings.
           </p>
           <MfaEnrol next={next} />
+          <Link
+            href={next}
+            className="inline-flex min-h-12 items-center text-sm underline underline-offset-4"
+          >
+            Skip for now
+          </Link>
         </>
       )}
     </>

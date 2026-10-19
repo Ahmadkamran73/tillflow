@@ -296,3 +296,50 @@ export async function verifyMfaChallengeAction(
   }
   redirect(safeNext(str(formData, "next")));
 }
+
+/**
+ * Proves who is at the keyboard again before a sensitive step (the whole-account export). With
+ * two-step verification: a fresh authenticator code. Without it: the password again. Either makes
+ * the session carry a sign-in proof from this minute, which the database checks (app.recent_auth).
+ */
+export async function reauthenticateAction(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const user = await requireUser();
+  const next = safeNext(str(formData, "next"));
+  const supabase = await createSupabaseServerClient();
+
+  if (user.hasVerifiedFactor) {
+    const parsed = totpCodeInput.safeParse({ code: str(formData, "code") });
+    if (!parsed.success) return { fieldErrors: fieldErrorsOf(parsed.error) };
+    const limited = await authRateLimitError("mfa", user.id);
+    if (limited) return { error: limited };
+    const { data: factors } = await supabase.auth.mfa.listFactors();
+    const factor = factors?.totp[0];
+    if (!factor) return { error: "No authenticator app is set up for this account." };
+    const { error } = await supabase.auth.mfa.challengeAndVerify({
+      factorId: factor.id,
+      code: parsed.data.code,
+    });
+    if (error) {
+      if (error.code !== "mfa_verification_failed") logAuthError("reauthMfa", error);
+      return { error: "That code is not correct. Check your app and try again." };
+    }
+    redirect(next);
+  }
+
+  const password = signInInput.shape.password.safeParse(str(formData, "password"));
+  if (!password.success) return { error: "Enter your password." };
+  const { data } = await supabase.auth.getUser();
+  const email = data.user?.email;
+  if (!email) return { error: "Sign in again with your password to continue." };
+  const limited = await authRateLimitError("login-account", email);
+  if (limited) return { error: limited };
+  const { error } = await supabase.auth.signInWithPassword({ email, password: password.data });
+  if (error) {
+    if (error.code !== "invalid_credentials") logAuthError("reauth", error);
+    return { error: "Incorrect password." };
+  }
+  redirect(next);
+}

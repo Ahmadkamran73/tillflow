@@ -1,0 +1,1 @@
+ALTER TABLE "organisations" ADD CONSTRAINT "organisations_vat_number_ie" CHECK ("organisations"."vat_number" is null or "organisations"."vat_number" ~ '^IE([0-9]{7}[A-W][A-IW]?|[0-9][A-Z+*][0-9]{5}[A-W])$');

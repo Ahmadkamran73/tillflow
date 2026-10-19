@@ -37,12 +37,12 @@ Migrations go first and the app second, so new code never runs against an old da
 
 ## Secrets: where each one lives
 
-| Secret                                                    | Lives in                                      | Seen by                                   |
-| --------------------------------------------------------- | --------------------------------------------- | ----------------------------------------- |
-| Staging DB password, access token, project ref            | GitHub environment `staging`                  | the Migrate staging workflow              |
-| Production DB password, access token, project ref         | GitHub environment `production`               | the Promote workflow, after your approval |
-| App keys (Supabase anon key, `JOBS_DATABASE_URL`, SMTP login)| hPanel environment variables of each app      | that app only                             |
-| Local values                                              | `.env.local` on your laptop (never committed) | you                                       |
+| Secret                                                        | Lives in                                      | Seen by                                   |
+| ------------------------------------------------------------- | --------------------------------------------- | ----------------------------------------- |
+| Staging DB password, access token, project ref                | GitHub environment `staging`                  | the Migrate staging workflow              |
+| Production DB password, access token, project ref             | GitHub environment `production`               | the Promote workflow, after your approval |
+| App keys (Supabase anon key, `JOBS_DATABASE_URL`, SMTP login) | hPanel environment variables of each app      | that app only                             |
+| Local values                                                  | `.env.local` on your laptop (never committed) | you                                       |
 
 Claude Code never sees production values, and CI needs no secrets at all.
 
@@ -70,7 +70,7 @@ The workflow needs these repository **variables** (public values, not secrets): 
 
 ## Background jobs
 
-pg-boss (a job queue stored in Postgres, schema `pgboss`, migration 0007) runs inside the app's Node.js process, started from `src/instrumentation.ts` unless `JOBS_ENABLED=false`. It connects with `JOBS_DATABASE_URL` as the least-privilege **`tillflow_ops`** role (migration 0008: it can run the `ops.*` functions and owns the `pgboss` schema, and cannot touch any business table; tests in `tests/rls/ops-role.test.ts`) through the Supabase **session pooler**, max 3 connections, plus 2 for the error log and rate limiter). Each job type is a handler in `src/lib/jobs/handlers/` with a Zod-checked payload (tenant jobs carry `org_id`); `enqueue(name, payload)` in `src/lib/jobs` validates and queues it. Failed jobs retry 3 times with backoff (30 s, 60 s, 120 s), then stay `failed` in `pgboss.job` and are reported to `error_events`. Scheduled jobs, all hourly: rate-limit cleanup, error prune (daily work behind a last-run guard), error digest (after 08:00 Dublin, once a day), and a heartbeat every minute. Because they run hourly with last-run guards stored in the database, a day's work is caught up on the next hour if the app was stopped or asleep. Tests (`tests/rls/jobs.test.ts`) prove a job runs once, a failing job retries then fails, a bad payload is rejected, and two workers never run the same job.
+pg-boss (a job queue stored in Postgres, schema `pgboss`, migration 0007) runs inside the app's Node.js process, started from `src/instrumentation.ts` unless `JOBS_ENABLED=false`. It connects with `JOBS_DATABASE_URL` as the least-privilege **`tillflow_ops`** role (migration 0008: it can run the `ops.*` functions and owns the `pgboss` schema, and cannot read or write any business table directly; since step 1.6 it can also call `ops.record_sale`, `ops.record_sync_rejection` and `ops.touch_register`, which write sales for any shop, so treat `JOBS_DATABASE_URL` as able to forge sales; tests in `tests/rls/ops-role.test.ts`) through the Supabase **session pooler**, max 3 connections, plus 2 for the error log and rate limiter). Each job type is a handler in `src/lib/jobs/handlers/` with a Zod-checked payload (tenant jobs carry `org_id`); `enqueue(name, payload)` in `src/lib/jobs` validates and queues it. Failed jobs retry 3 times with backoff (30 s, 60 s, 120 s), then stay `failed` in `pgboss.job` and are reported to `error_events`. Scheduled jobs, all hourly: rate-limit cleanup, error prune (daily work behind a last-run guard), error digest (after 08:00 Dublin, once a day), and a heartbeat every minute. Because they run hourly with last-run guards stored in the database, a day's work is caught up on the next hour if the app was stopped or asleep. Tests (`tests/rls/jobs.test.ts`) prove a job runs once, a failing job retries then fails, a bad payload is rejected, and two workers never run the same job.
 
 Rate-limit policies (login, reset, MFA, exports, imports) are listed in `docs/specs/auth.md` and `src/lib/rate-limit`. Auth limits fail closed, others fail open; `/api/v1/sync/*` and `/api/log-error` use a per-process in-memory limiter.
 
@@ -122,3 +122,10 @@ Create **two monitors per environment**, both on `/api/health`:
 ## Why no Sentry, Upstash or Inngest
 
 They were planned and then dropped in step 0.6: their free tiers would not cope with production, and each one is another sub-processor holding data about our shops plus more secrets to manage. Errors, rate limits and background jobs now run on the Supabase Postgres we already have (EU, backed up, covered by our DPA), as described above.
+
+## Sale sync and the service worker (step 1.6)
+
+- Migrations 0018-0020 (sales, price history, `ops.record_sale`, cashier-scoped reads) are applied by `migrate-staging` like any other.
+- The register's service worker (`public/sw.js`) is built by `next build --webpack` (the build command already used on Hostinger) and served with `Cache-Control: no-cache`. It is not committed. A deploy replaces it and clients pick it up on the next load.
+- Sync needs `JOBS_DATABASE_URL` (the `tillflow_ops` role, as for jobs) on every app; without it `POST /api/v1/sync/sales` answers 503 and tills keep their sales and retry.
+- A till that has not reached the server for 24 hours shows a warning on the register; managers see open items under Sales > Needs attention.

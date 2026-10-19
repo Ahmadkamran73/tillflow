@@ -1,5 +1,7 @@
 import { expect, type Page } from "@playwright/test";
+import { config } from "dotenv";
 import { createHmac, randomUUID } from "node:crypto";
+import postgres from "postgres";
 
 /** Local Supabase catches every auth email here (Mailpit). Tests never touch a real inbox. */
 const MAIL_API = process.env.E2E_MAIL_API ?? "http://127.0.0.1:54324/api/v1";
@@ -69,7 +71,7 @@ export async function emailedLink(
 
 /**
  * Full new-owner journey through the real UI: sign up, confirm by email, enrol an authenticator
- * app, land on the onboarding placeholder. Returns the account's secret so a later test can log in.
+ * app, land on the onboarding wizard. Returns the account's secret so a later test can log in.
  */
 export async function signUpAndEnrol(page: Page, email: string, businessName: string) {
   await page.goto("/signup");
@@ -94,13 +96,23 @@ export async function signUpAndEnrol(page: Page, email: string, businessName: st
   await page.getByRole("button", { name: "Turn on two-step verification" }).click();
 
   await expect(page).toHaveURL(/\/onboarding$/);
-  await expect(page.getByRole("heading", { name: "Welcome to Tillflow POS" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^Step 1 of 4\s*Your business$/ })).toBeVisible();
   return { secret };
 }
 
-/** From /onboarding to the dashboard; returns the org id from the URL. */
-export async function openDashboard(page: Page) {
-  await page.getByRole("link", { name: "Go to dashboard" }).click();
+/** Walks the onboarding wizard to the dashboard; returns the org id from the URL. */
+export async function openDashboard(
+  page: Page,
+  { type = "General / convenience", vat = "", tills = "1" } = {},
+) {
+  if (vat) await page.getByLabel("VAT number (optional)").fill(vat);
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await page.getByText(type, { exact: true }).click();
+  await expect(page.getByRole("radio", { name: type })).toBeChecked();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await page.getByLabel("Number of tills").fill(tills);
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await page.getByRole("button", { name: "Finish setup" }).click();
   await expect(page).toHaveURL(/\/o\/[0-9a-f-]{36}\/dashboard$/);
   return /\/o\/([0-9a-f-]{36})\//.exec(page.url())![1]!;
 }
@@ -109,4 +121,115 @@ export async function openDashboard(page: Page) {
 export async function signOut(page: Page) {
   await page.getByRole("button", { name: "Account menu" }).click();
   await page.getByRole("menuitem", { name: "Sign out" }).click();
+}
+
+/**
+ * Waits until React has hydrated the page's form. Typing into a controlled input before that is
+ * lost when hydration resets it to its initial state (slow on a cold dev server).
+ */
+export async function hydrated(page: Page) {
+  await page.waitForFunction(() => {
+    const form = document.querySelector("main form, form");
+    return !!form && Object.keys(form).some((k) => k.startsWith("__reactProps$"));
+  });
+}
+
+/** For screens with no form: the button is on the page and React has attached its handlers. */
+export async function buttonHydrated(page: Page, name: string) {
+  const button = page.getByRole("button", { name });
+  await button.waitFor();
+  await page.waitForFunction(
+    (label) =>
+      [...document.querySelectorAll("button")].some(
+        (b) =>
+          b.textContent?.trim() === label &&
+          Object.keys(b).some((k) => k.startsWith("__reactProps$")),
+      ),
+    name,
+  );
+}
+
+// ---------------------------------------------------------------- till pairing and PINs (step 1.7)
+
+export const TILL_NAME = "Maeve";
+export const TILL_PIN = "2580";
+
+/** The signed-in owner or manager sets their till name and PIN in the back office. */
+export async function setMyPin(page: Page, orgId: string, name = TILL_NAME, pin = TILL_PIN) {
+  await page.goto(`/o/${orgId}/settings/pin`);
+  await page.getByLabel("Name shown on the till").fill(name);
+  await page.getByLabel("New PIN").fill(pin);
+  await page.getByLabel("Repeat the PIN").fill(pin);
+  await page.getByRole("button", { name: "Save PIN" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "PIN saved" })).toBeVisible();
+}
+
+/** A manager makes a pairing code for the till called `till` and returns it as typed (ABCD-EFGH). */
+export async function makePairingCode(page: Page, orgId: string, till = "Till 1") {
+  await page.goto(`/o/${orgId}/settings/tills`);
+  // "Pair Till 1" the first time, "Pair again Till 1" once it has been paired.
+  await page.getByRole("button", { name: new RegExp(`^Pair (again )?${till}$`) }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByText(`Pairing code for ${till}`)).toBeVisible();
+  const code = (await dialog.locator("p.font-mono span[aria-hidden]").textContent())!.trim();
+  expect(code).toMatch(/^[A-Z2-9]{4}-[A-Z2-9]{4}$/);
+  return code;
+}
+
+/**
+ * Every test comes from the same IP, and pairing is limited to 10 tries per 15 minutes per IP, so
+ * a run of tests would lock itself out. Clears that one bucket (as an administrator, local only).
+ */
+export async function resetPairingLimit() {
+  config({ path: ".env.local", quiet: true });
+  const sql = postgres(process.env.DIRECT_URL ?? "", { max: 1, onnotice: () => {} });
+  try {
+    await sql`delete from rate_limits where bucket = 'pair'`;
+  } finally {
+    await sql.end();
+  }
+}
+
+/** Types a pairing code on the till's pair page; ends on the till's lock screen. */
+export async function pairWithCode(page: Page, code: string) {
+  await resetPairingLimit();
+  await page.goto("/register/pair");
+  await hydrated(page);
+  await page.getByLabel("Pairing code").fill(code);
+  await page.getByRole("button", { name: "Pair this till" }).click();
+}
+
+/** Picks `name` on the lock screen and enters the PIN; ends on the till. */
+export async function unlockTill(page: Page, name = TILL_NAME, pin = TILL_PIN) {
+  await page.getByRole("button", { name: new RegExp(`^${name}`) }).click();
+  await page.getByLabel(`PIN for ${name}`).fill(pin);
+  await page.getByRole("button", { name: "Unlock" }).click();
+  await expect(page.getByRole("button", { name: /^Lock till/ })).toBeVisible();
+  await openShiftIfAsked(page);
+}
+
+/** Selling is blocked until a shift is open: opens one with a 100.00 float when the till asks. */
+export async function openShiftIfAsked(page: Page, float = "100") {
+  const dialog = page.getByRole("dialog", { name: "Open the shift" });
+  const asked = await dialog.waitFor({ state: "visible", timeout: 2500 }).then(
+    () => true,
+    () => false,
+  );
+  if (!asked) return;
+  await dialog.getByLabel(/Float in the drawer/).fill(float);
+  await dialog.getByRole("button", { name: "Open shift" }).click();
+  await expect(dialog).toBeHidden();
+}
+
+/**
+ * The whole journey for a till under test: PIN, pairing code, pair this browser, unlock. Leaves
+ * the page on the register. (The browser keeps its back-office session too; the till itself only
+ * ever uses the device cookie.)
+ */
+export async function openTill(page: Page, orgId: string) {
+  await setMyPin(page, orgId);
+  const code = await makePairingCode(page, orgId);
+  await pairWithCode(page, code);
+  await expect(page).toHaveURL(new RegExp(`/register/${orgId}$`));
+  await unlockTill(page);
 }

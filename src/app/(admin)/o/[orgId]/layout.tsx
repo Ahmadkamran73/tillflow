@@ -1,7 +1,9 @@
-import { notFound } from "next/navigation";
+import Link from "next/link";
+import { notFound, redirect } from "next/navigation";
 import { BackOfficeShell } from "@/components/back-office/shell";
 import { requireRole } from "@/lib/auth";
-import { getOrganisationName } from "@/lib/org";
+import { t } from "@/lib/i18n";
+import { getOrganisation } from "@/lib/org";
 
 export default async function OrgLayout({
   children,
@@ -11,12 +13,27 @@ export default async function OrgLayout({
   params: Promise<{ orgId: string }>;
 }) {
   const { orgId } = await params;
-  const { role } = await requireRole(["owner", "manager"], orgId);
-  const orgName = await getOrganisationName(orgId);
-  if (!orgName) notFound();
+  const { role, user } = await requireRole(["owner", "manager"], orgId);
+  const org = await getOrganisation(orgId);
+  if (!org) notFound();
+  if (!org.onboardedAt && role === "owner") redirect("/onboarding");
 
   return (
-    <BackOfficeShell orgId={orgId} orgName={orgName} role={role}>
+    <BackOfficeShell orgId={orgId} orgName={org.name} role={role}>
+      {user.hasVerifiedFactor ? null : (
+        <aside
+          aria-label={t("mfa.reminderLabel")}
+          className="border-border bg-muted mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3 text-sm"
+        >
+          <span>{t("mfa.reminder")}</span>
+          <Link
+            href={`/mfa?next=${encodeURIComponent(`/o/${orgId}/settings`)}`}
+            className="inline-flex min-h-12 items-center font-medium underline underline-offset-4"
+          >
+            {t("mfa.reminderLink")}
+          </Link>
+        </aside>
+      )}
       {children}
     </BackOfficeShell>
   );

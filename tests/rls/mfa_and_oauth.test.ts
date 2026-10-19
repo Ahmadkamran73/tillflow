@@ -1,8 +1,6 @@
 // @vitest-environment node
-import { randomUUID } from "node:crypto";
-import type { TransactionSql } from "postgres";
 import { afterAll, describe, expect, it } from "vitest";
-import { inWorld, sql, type Actor } from "./helpers";
+import { enrolTotp, inWorld, sql } from "./helpers";
 
 afterAll(() => sql.end());
 
@@ -10,17 +8,17 @@ const AAL1 = { aal: "aal1" as const };
 const GOOGLE = { aal: "aal1" as const, amr: [{ method: "oauth" }] };
 const GOOGLE_AAL2 = { aal: "aal2" as const, amr: [{ method: "oauth" }, { method: "totp" }] };
 
-/** Gives a seeded user a verified authenticator, as Supabase would after MFA enrolment. */
-async function enrolTotp(tx: TransactionSql, actor: Actor) {
-  await tx`insert into auth.users (id, aud, role) values (${actor.userId}, 'authenticated', 'authenticated')`;
-  await tx`insert into auth.mfa_factors (id, user_id, factor_type, status, created_at, updated_at, secret)
-           values (${randomUUID()}, ${actor.userId}, 'totp', 'verified', now(), now(), 'x')`;
-}
+describe("an owner who set up an authenticator is held to aal2 by RLS", () => {
+  it("an owner with no authenticator is not blocked at aal1 (two-step is optional)", () =>
+    inWorld(async ({ sql, world, as }) => {
+      const orgs = await as(world.a.owner, () => sql`select id from organisations`, AAL1);
+      expect(orgs).toEqual([{ id: world.a.orgId }]);
+    }));
 
-describe("owner MFA is enforced by RLS", () => {
   it("an owner at aal1 sees no organisation data at all", () =>
     inWorld(async ({ sql, world, as }) => {
       const owner = world.a.owner;
+      await enrolTotp(sql, owner);
       expect(await as(owner, () => sql`select id from organisations`, AAL1)).toHaveLength(0);
       expect(await as(owner, () => sql`select id from locations`, AAL1)).toHaveLength(0);
       expect(await as(owner, () => sql`select id from registers`, AAL1)).toHaveLength(0);
@@ -30,6 +28,7 @@ describe("owner MFA is enforced by RLS", () => {
   it("an owner at aal1 cannot write either", () =>
     inWorld(async ({ sql, world, as }) => {
       const owner = world.a.owner;
+      await enrolTotp(sql, owner);
       const renamed = await as(
         owner,
         () =>
@@ -43,6 +42,7 @@ describe("owner MFA is enforced by RLS", () => {
 
   it("an owner at aal1 can still read only their own membership rows (so the app can ask for MFA)", () =>
     inWorld(async ({ sql, world, as }) => {
+      await enrolTotp(sql, world.a.owner);
       const rows = await as(world.a.owner, () => sql`select user_id, role from memberships`, AAL1);
       expect(rows).toEqual([{ user_id: world.a.owner.userId, role: "owner" }]);
     }));

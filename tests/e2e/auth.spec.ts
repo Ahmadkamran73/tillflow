@@ -20,6 +20,36 @@ test("sign up, confirm email, enrol MFA, see the empty dashboard", async ({ page
   await expect(page.getByText("E2E Corner Shop")).toBeVisible();
 });
 
+test("two-step verification can be skipped at sign-up, with a reminder until it is set up", async ({
+  page,
+}) => {
+  const email = uniqueEmail("skipmfa");
+  await page.goto("/signup");
+  await page.getByLabel("Business name").fill("Skip MFA Shop");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(PASSWORD);
+  await page.getByRole("button", { name: "Create account" }).click();
+  await expect(page.getByRole("status")).toContainText("Check your email");
+  await page.goto(await emailedLink(email));
+  await page.getByRole("button", { name: "Create business" }).click();
+
+  await expect(page).toHaveURL(/\/mfa\?next=%2Fonboarding/);
+  await page.getByRole("link", { name: "Skip for now" }).click();
+  await expect(page).toHaveURL(/\/onboarding$/);
+  await openDashboard(page);
+
+  // The reminder shows on every back-office page until an authenticator is set up.
+  await expect(page.getByText("Two-step verification is off")).toBeVisible();
+  await page.getByRole("link", { name: "Set it up now" }).click();
+  await expect(page).toHaveURL(/\/mfa\?next=/);
+  await page.getByRole("button", { name: "Set up authenticator app" }).click();
+  const secret = (await page.getByTestId("mfa-secret").textContent())!.replace(/\s/g, "");
+  await page.getByLabel("6-digit code").fill(totp(secret));
+  await page.getByRole("button", { name: "Turn on two-step verification" }).click();
+  await expect(page).toHaveURL(/\/settings$/);
+  await expect(page.getByText("Two-step verification is off")).toHaveCount(0);
+});
+
 test("an owner who logs in again must pass the authenticator challenge", async ({ page }) => {
   const email = uniqueEmail("relogin");
   const { secret } = await signUpAndEnrol(page, email, "Relogin Cafe");

@@ -1,26 +1,23 @@
 import type { Metadata } from "next";
-import Link from "next/link";
-import { buttonVariants } from "@/components/ui/button";
+import { notFound, redirect } from "next/navigation";
 import { requireBackOffice } from "@/lib/auth";
+import { t } from "@/lib/i18n";
+import { getOrganisation } from "@/lib/org";
+import { OnboardingWizard } from "./onboarding-wizard";
 
-export const metadata: Metadata = { title: "Welcome · Tillflow POS" };
+export const metadata: Metadata = { title: `${t("onboarding.title")} · ${t("app.name")}` };
 
-// Placeholder: the real onboarding wizard (business type, tills, product import) comes later.
 export default async function OnboardingPage() {
-  const { orgId } = await requireBackOffice("/onboarding");
+  const { orgId, role } = await requireBackOffice("/onboarding");
+  const org = await getOrganisation(orgId);
+  if (!org) notFound();
+  // Set up once, by the owner. Everyone else (and a second visit) goes to the dashboard.
+  if (role !== "owner" || org.onboardedAt) redirect(`/o/${orgId}/dashboard`);
+
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-xl flex-col justify-center gap-4 px-4 py-10">
-      <h1 className="text-2xl font-semibold tracking-tight">Welcome to Tillflow POS</h1>
-      <p className="text-sm">
-        Your account is ready. Setting up your business type, tills and products will happen here
-        soon.
-      </p>
-      <Link
-        href={`/o/${orgId}/dashboard`}
-        className={buttonVariants({ className: "h-12 w-fit px-5" })}
-      >
-        Go to dashboard
-      </Link>
+    <main className="mx-auto flex min-h-screen w-full max-w-4xl flex-col gap-6 px-4 py-10">
+      <h1 className="text-muted-foreground text-sm font-medium">{t("onboarding.title")}</h1>
+      <OnboardingWizard orgId={orgId} defaultName={org.name} />
     </main>
   );
 }

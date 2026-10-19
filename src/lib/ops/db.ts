@@ -110,3 +110,424 @@ export async function heartbeatAgeSeconds(): Promise<number | null> {
   const [row] = await db()<{ age: number | null }[]>`select ops.heartbeat_age_seconds() as age`;
   return row?.age ?? null;
 }
+
+// ---------------------------------------------------------------- sale sync (step 1.6)
+// The sync route has authenticated the user and re-priced the sale; these functions re-check
+// membership and register ownership themselves and write in one transaction.
+
+export type RecordSaleResult = "created" | "duplicate" | "receipt_clash" | "exchange_pending";
+
+/**
+ * `tokenHash`: the till's device token hash; the database then refuses a sale for any other shop or
+ * till. Only the back office's Try again (a signed-in manager, already checked) passes none.
+ */
+export async function recordSale(
+  payload: unknown,
+  tokenHash: string | null,
+): Promise<RecordSaleResult> {
+  const [row] = await db()<{ r: RecordSaleResult }[]>`
+    select ops.record_sale(${db().json(payload as postgres.JSONValue)}, ${tokenHash}) as r`;
+  if (!row) throw new Error("record_sale returned no row");
+  return row.r;
+}
+
+// ---------------------------------------------------------------- refunds (step 2.2)
+
+export type RecordRefundResult = "created" | "duplicate" | "receipt_clash" | "original_missing";
+
+/** Writes a refund, void or exchange return in one transaction (the original sale is never touched). */
+export async function recordRefund(
+  payload: unknown,
+  tokenHash: string,
+): Promise<RecordRefundResult> {
+  const [row] = await db()<{ r: RecordRefundResult }[]>`
+    select ops.record_refund(${db().json(payload as postgres.JSONValue)}, ${tokenHash}) as r`;
+  if (!row) throw new Error("record_refund returned no row");
+  return row.r;
+}
+
+/** Sales of the till's own shop to refund (by id, till + receipt number, or serial). null: not paired. */
+export async function deviceFindSale(tokenHash: string, query: unknown): Promise<unknown> {
+  const [row] = await db()<{ s: unknown }[]>`
+    select ops.device_find_sale(${tokenHash}, ${db().json(query as postgres.JSONValue)}) as s`;
+  return row?.s ?? null;
+}
+
+/** Customers of the till's own shop matching `q` (name, email, phone). null: not paired. */
+export async function deviceCustomerSearch(tokenHash: string, q: string): Promise<unknown> {
+  const [row] = await db()<
+    { r: unknown }[]
+  >`select ops.device_customer_search(${tokenHash}, ${q}) as r`;
+  return row?.r ?? null;
+}
+
+/** Adds a customer to the till's shop. null: not paired. A taken email throws 23505. */
+export async function deviceCustomerCreate(tokenHash: string, input: unknown): Promise<unknown> {
+  const [row] = await db()<{ r: unknown }[]>`
+    select ops.device_customer_create(${tokenHash}, ${db().json(input as postgres.JSONValue)}) as r`;
+  return row?.r ?? null;
+}
+
+export async function deviceRefundsKnown(tokenHash: string, ids: string[]): Promise<string[]> {
+  const rows = await db()<{ id: string }[]>`
+    select ops.device_refunds_known(${tokenHash}, ${ids}::uuid[]) as id`;
+  return rows.map((r) => r.id);
+}
+
+/** The shop's refund approval limit and this till's last refund number (ops.device_refund_meta). */
+export async function deviceRefundMeta(tokenHash: string): Promise<unknown> {
+  const [row] = await db()<{ m: unknown }[]>`select ops.device_refund_meta(${tokenHash}) as m`;
+  return row?.m ?? null;
+}
+
+/** The shop's service charge and this till's floor plan (ops.device_restaurant_meta). */
+export async function deviceRestaurantMeta(tokenHash: string): Promise<unknown> {
+  const [row] = await db()<{ m: unknown }[]>`select ops.device_restaurant_meta(${tokenHash}) as m`;
+  return row?.m ?? null;
+}
+
+export type TabEventResult = "recorded" | "duplicate";
+
+/** One restaurant tab event from a paired till (ops.record_tab_event); idempotent by event id. */
+export async function recordTabEvent(tokenHash: string, event: unknown): Promise<TabEventResult> {
+  const [row] = await db()<{ r: TabEventResult }[]>`
+    select ops.record_tab_event(${tokenHash}, ${db().json(event as postgres.JSONValue)}) as r`;
+  if (!row) throw new Error("record_tab_event returned no row");
+  return row.r;
+}
+
+export async function recordSyncRejection(payload: unknown): Promise<void> {
+  await db()`select ops.record_sync_rejection(${db().json(payload as postgres.JSONValue)})`;
+}
+
+export async function touchRegister(orgId: string, registerId: string, userId: string) {
+  await db()`select ops.touch_register(${orgId}, ${registerId}, ${userId})`;
+}
+
+// ---------------------------------------------------------------- device pairing and PINs (step 1.7)
+// A paired till holds only a device token; the app passes its SHA-256 hash. Each function resolves
+// the shop and the till from that hash itself and never trusts an org or register id from the till.
+
+export type DeviceContext = { orgId: string; registerId: string; locationId: string };
+
+/** Who is this token? null when unknown, revoked or the shop is closed. Also the till's heartbeat. */
+export async function deviceAuth(tokenHash: string): Promise<DeviceContext | null> {
+  const [row] = await db()<{ org_id: string; register_id: string; location_id: string }[]>`
+    select * from ops.device_auth(${tokenHash})`;
+  return row
+    ? { orgId: row.org_id, registerId: row.register_id, locationId: row.location_id }
+    : null;
+}
+
+/** Exchanges a pairing code (hashed) for the till it was issued for. null: unknown, used or expired. */
+export async function pairRegister(
+  codeHash: string,
+  tokenHash: string,
+): Promise<{ orgId: string; registerId: string } | null> {
+  const [row] = await db()<{ org_id: string; register_id: string }[]>`
+    select * from ops.pair_register(${codeHash}, ${tokenHash})`;
+  return row ? { orgId: row.org_id, registerId: row.register_id } : null;
+}
+
+export async function deviceFeedMeta(tokenHash: string): Promise<unknown> {
+  const [row] = await db()<{ m: unknown }[]>`select ops.device_feed_meta(${tokenHash}) as m`;
+  return row?.m ?? null;
+}
+
+/** Timezone, VAT rates and the discount threshold of the till's shop, for re-pricing synced sales. */
+export async function deviceSyncMeta(tokenHash: string): Promise<unknown> {
+  const [row] = await db()<{ m: unknown }[]>`select ops.device_sync_meta(${tokenHash}) as m`;
+  return row?.m ?? null;
+}
+
+/** The payment types of the till's location and the shop's business type (ops.device_tender_types). */
+export async function deviceTenderTypes(tokenHash: string): Promise<unknown> {
+  const [row] = await db()<{ m: unknown }[]>`select ops.device_tender_types(${tokenHash}) as m`;
+  return row?.m ?? null;
+}
+
+export type FeedTable =
+  | "categories"
+  | "products"
+  | "variants"
+  | "modifier_groups"
+  | "modifiers"
+  | "product_modifier_groups";
+
+export async function deviceFeedTable(
+  tokenHash: string,
+  table: FeedTable,
+  since: Date | null,
+  after: string | null,
+  limit: number,
+): Promise<unknown[] | null> {
+  const [row] = await db()<{ t: unknown[] | null }[]>`
+    select ops.device_feed_table(${tokenHash}, ${table}, ${since}, ${after}, ${limit}) as t`;
+  return row?.t ?? null;
+}
+
+export async function deviceSaleCatalogAsOf(
+  tokenHash: string,
+  variantIds: string[],
+  modifierIds: string[],
+  at: Date,
+): Promise<unknown> {
+  const [row] = await db()<{ c: unknown }[]>`
+    select ops.device_sale_catalog_as_of(${tokenHash}, ${variantIds}::uuid[], ${modifierIds}::uuid[], ${at}) as c`;
+  return row?.c ?? null;
+}
+
+export async function deviceSalesKnown(tokenHash: string, ids: string[]): Promise<string[]> {
+  const rows = await db()<{ id: string }[]>`
+    select ops.device_sales_known(${tokenHash}, ${ids}::uuid[]) as id`;
+  return rows.map((r) => r.id);
+}
+
+export type PinAttemptBegin =
+  | { status: "ok"; pinHash: string; role: "owner" | "manager" | "cashier" }
+  | { status: "locked"; lockedUntil: Date }
+  | { status: "no_pin" };
+
+/** Reserves one attempt BEFORE the PIN is checked (see migration 0022), so parallel guesses cannot beat the limit. */
+export async function pinAttemptBegin(tokenHash: string, userId: string): Promise<PinAttemptBegin> {
+  const [row] = await db()<
+    {
+      status: string;
+      pin_hash: string | null;
+      role: "owner" | "manager" | "cashier" | null;
+      locked_until: Date | null;
+    }[]
+  >`select * from ops.pin_attempt_begin(${tokenHash}, ${userId})`;
+  if (!row) throw new Error("pin_attempt_begin returned no row");
+  if (row.status === "ok" && row.pin_hash && row.role) {
+    return { status: "ok", pinHash: row.pin_hash, role: row.role };
+  }
+  if (row.status === "locked" && row.locked_until) {
+    return { status: "locked", lockedUntil: row.locked_until };
+  }
+  return { status: "no_pin" };
+}
+
+export async function pinAttemptFinish(
+  tokenHash: string,
+  userId: string,
+  ok: boolean,
+): Promise<{ locked: boolean; lockedUntil: Date | null }> {
+  const [row] = await db()<{ locked: boolean; locked_until: Date | null }[]>`
+    select * from ops.pin_attempt_finish(${tokenHash}, ${userId}, ${ok})`;
+  return { locked: row?.locked === true, lockedUntil: row?.locked_until ?? null };
+}
+
+export type ApprovalPurpose = "discount" | "no_sale" | "refund" | "void_item";
+
+/**
+ * Turns a manager PIN the server just verified into a single-use proof (register_approvals) for one
+ * sale or event on this till. The sale/event carries only the returned id; the database derives the
+ * approver from it.
+ */
+export async function issueApproval(
+  tokenHash: string,
+  userId: string,
+  purpose: ApprovalPurpose,
+  /** A refund approval is for one sale and up to a value in cents; other purposes carry neither. */
+  bind?: { saleId: string; maxCents: number },
+): Promise<string> {
+  const [row] = await db()<{ id: string }[]>`
+    select ops.issue_approval(${tokenHash}, ${userId}, ${purpose},
+                              ${bind?.saleId ?? null}::uuid, ${bind?.maxCents ?? null}::integer) as id`;
+  if (!row) throw new Error("issue_approval returned no row");
+  return row.id;
+}
+
+/**
+ * A short-lived, server-signed "serving as" token for someone whose PIN the unlock route has just
+ * verified: it names the person, the shop and the till. record_refund and the sale lookup verify it
+ * in the database, so who is serving never rests on what the till says.
+ */
+export async function issueServingToken(tokenHash: string, userId: string): Promise<string> {
+  const [row] = await db()<{ t: string }[]>`
+    select ops.issue_serving_token(${tokenHash}, ${userId}) as t`;
+  if (!row) throw new Error("issue_serving_token returned no row");
+  return row.t;
+}
+
+export async function recordRegisterEvents(tokenHash: string, events: unknown): Promise<string[]> {
+  const rows = await db()<{ id: string }[]>`
+    select ops.record_register_events(${tokenHash}, ${db().json(events as postgres.JSONValue)}) as id`;
+  return rows.map((r) => r.id);
+}
+
+// ---------------------------------------------------------------- shifts (step 2.3)
+
+export type ShiftEventResult = "recorded" | "duplicate";
+
+/** One open / cash in-out / close event from a paired till's shift outbox (idempotent by id). */
+export async function recordShiftEvent(
+  tokenHash: string,
+  event: unknown,
+): Promise<ShiftEventResult> {
+  const [row] = await db()<{ r: ShiftEventResult }[]>`
+    select ops.record_shift_event(${tokenHash}, ${db().json(event as postgres.JSONValue)}) as r`;
+  if (!row) throw new Error("record_shift_event returned no row");
+  return row.r;
+}
+
+/** What the Z email needs: the stored report, shop and till names, and the owners' addresses. */
+export async function shiftZEmailData(shiftId: string): Promise<unknown> {
+  const [row] = await db()<{ d: unknown }[]>`select ops.shift_z_email_data(${shiftId}) as d`;
+  return row?.d ?? null;
+}
+
+// ---------------------------------------------------------------- bulk import
+
+export type ImportStart = {
+  org_id: string;
+  type?: "products" | "stock" | "customers" | "suppliers";
+  mode: "create" | "upsert" | "count" | "received";
+  match_key: "sku" | "barcode" | "email" | "name";
+  mapping: Record<string, string | null>;
+  file_name: string;
+  total_rows: number;
+  business_type: string;
+};
+
+/** Marks a confirmed import as running and returns its settings; null if there is nothing to do. */
+export async function importBegin(importId: string, userId: string): Promise<ImportStart | null> {
+  const [row] = await db()<{ r: ImportStart | null }[]>`
+    select ops.import_begin(${importId}, ${userId}) as r`;
+  return row?.r ?? null;
+}
+
+export async function importFile(importId: string): Promise<Buffer | null> {
+  const [row] = await db()<{ b: Buffer | null }[]>`select ops.import_file(${importId}) as b`;
+  return row?.b ?? null;
+}
+
+export type ImportBatchResult = { ref: string; status: "ok" | "error"; code?: string }[];
+
+export async function importApplyBatch(batch: unknown): Promise<ImportBatchResult> {
+  const [row] = await db()<{ r: ImportBatchResult }[]>`
+    select ops.import_apply_batch(${db().json(batch as postgres.JSONValue)}) as r`;
+  if (!row) throw new Error("import_apply_batch returned no row");
+  return row.r;
+}
+
+/** A batch of stock lines (see ops.import_apply_stock). */
+export async function importApplyStock(batch: unknown): Promise<ImportBatchResult> {
+  const [row] = await db()<{ r: ImportBatchResult }[]>`
+    select ops.import_apply_stock(${db().json(batch as postgres.JSONValue)}) as r`;
+  if (!row) throw new Error("import_apply_stock returned no row");
+  return row.r;
+}
+
+/** A batch of suppliers (see ops.import_apply_suppliers). */
+export async function importApplySuppliers(batch: unknown): Promise<ImportBatchResult> {
+  const [row] = await db()<{ r: ImportBatchResult }[]>`
+    select ops.import_apply_suppliers(${db().json(batch as postgres.JSONValue)}) as r`;
+  if (!row) throw new Error("import_apply_suppliers returned no row");
+  return row.r;
+}
+
+/** A batch of customers (see ops.import_apply_customers). */
+export async function importApplyCustomers(batch: unknown): Promise<ImportBatchResult> {
+  const [row] = await db()<{ r: ImportBatchResult }[]>`
+    select ops.import_apply_customers(${db().json(batch as postgres.JSONValue)}) as r`;
+  if (!row) throw new Error("import_apply_customers returned no row");
+  return row.r;
+}
+
+export async function importFinish(
+  importId: string,
+  ok: boolean,
+  errorCount: number,
+  errors: unknown,
+  failure: string | null,
+): Promise<void> {
+  await db()`select ops.import_finish(${importId}, ${ok}, ${errorCount},
+    ${db().json(errors as postgres.JSONValue)}, ${failure})`;
+}
+
+/** Deletes uploaded import files older than 7 days; returns how many. */
+export async function importPurge(): Promise<number> {
+  const [row] = await db()<{ n: number }[]>`select ops.import_purge() as n`;
+  return row?.n ?? 0;
+}
+
+// ---------------------------------------------------------------- reports
+
+/**
+ * Rebuilds the report summary for days that had a sale or refund land (oldest first, at most
+ * `limit`). With `daysBack` it first marks every shop's last N days, the nightly safety net for
+ * renamed products and anything a trigger could have missed. Returns how many days were rebuilt.
+ */
+export async function rebuildDirtySummaries(limit = 200, daysBack = 0): Promise<number> {
+  const [row] = await db()<{ n: number }[]>`
+    select ops.rebuild_dirty_summaries(${limit}, ${daysBack}) as n`;
+  return row?.n ?? 0;
+}
+
+// ---------------------------------------------------------------- whole-account export
+
+export type AccountExportStart = { org_id: string; org_name: string };
+
+/** Marks the export running and names its shop; null when there is nothing to do. */
+export async function accountExportBegin(id: string): Promise<AccountExportStart | null> {
+  const [row] = await db()<{ r: AccountExportStart | null }[]>`
+    select ops.account_export_begin(${id}) as r`;
+  return row?.r ?? null;
+}
+
+/** One page of an allow-listed table of the export's shop (no secrets) as plain objects. */
+export async function accountExportRows(
+  id: string,
+  table: string,
+  offset: number,
+  limit: number,
+): Promise<Record<string, unknown>[]> {
+  const [row] = await db()<{ r: Record<string, unknown>[] }[]>`
+    select ops.account_export_rows(${id}, ${table}, ${offset}, ${limit}) as r`;
+  return row?.r ?? [];
+}
+
+export async function accountExportFinish(id: string, fileName: string, bytes: Buffer) {
+  await db()`select ops.account_export_finish(${id}, ${fileName}, ${bytes})`;
+}
+
+export async function accountExportFail(id: string, code: string) {
+  await db()`select ops.account_export_fail(${id}, ${code})`;
+}
+
+export type AccountExportMail = {
+  org_id: string;
+  org_name: string;
+  file_name: string;
+  size_bytes: number;
+  expires_at: string;
+  email: string | null;
+};
+
+export async function accountExportMailData(id: string): Promise<AccountExportMail | null> {
+  const [row] = await db()<{ r: AccountExportMail | null }[]>`
+    select ops.account_export_mail_data(${id}) as r`;
+  return row?.r ?? null;
+}
+
+/** Deletes finished export files after 7 days; returns how many. */
+export async function accountExportPurge(): Promise<number> {
+  const [row] = await db()<{ n: number }[]>`select ops.account_export_purge() as n`;
+  return row?.n ?? 0;
+}
+
+export type AccountExportOwners = {
+  org_id: string;
+  org_name: string;
+  requested_at: string;
+  emails: string[];
+};
+
+/** Every owner of the export's shop, to be told it was requested. */
+export async function accountExportOwnerEmails(id: string): Promise<AccountExportOwners | null> {
+  const [row] = await db()<{ r: AccountExportOwners | null }[]>`
+    select ops.account_export_owner_emails(${id}) as r`;
+  return row?.r ?? null;
+}

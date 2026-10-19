@@ -72,12 +72,15 @@ Names only. Values come from your password manager. Same names in both apps, dif
 | `AUTH_GOOGLE_ENABLED`                                     | yes         | `true` only after Google is enabled in that Supabase project                                                                                                                                  |
 | `JOBS_DATABASE_URL`                                       | yes         | Supabase **session pooler** URL (port 5432) with user `tillflow_ops.<project-ref>`, never `postgres`. Used for background jobs, rate limits, the error log and the health check. Server only. |
 | `JOBS_ENABLED`                                            | optional    | leave unset (on). `false` stops this app running the job worker.                                                                                                                              |
-| `ALERT_EMAIL` | yes | where new-error alerts and the daily digest go |
-| `ALERT_FROM` | yes | sender, e.g. `Tillflow Alerts <your-gmail-address>`; must be the SMTP account's own address on Gmail |
-| `SMTP_HOST` | yes | `smtp.gmail.com` (later your tillflow.ie mailbox host) |
-| `SMTP_PORT` | optional | `465` (default, implicit TLS) or `587` (STARTTLS) |
-| `SMTP_USER` | yes | the SMTP login (the Gmail address) |
-| `SMTP_PASS` | yes | Gmail **app password**, never the account password. Without the `SMTP_*` set, alerts are skipped (errors are still stored). |
+| `IMPORT_XLSX_ENABLED` | optional | **Leave unset: Excel import is OFF in production and ON by default on staging only (`NEXT_PUBLIC_APP_ENV=staging`; `false` turns it off there). Do not enable in production until the sandbox probe has passed on this app.** `true` turns on reading Excel files in a separate restricted process, and only if the host also passes a self-test. CSV and JSON imports do not depend on it. See "Excel import" below. |
+| `IMPORT_SANDBOX_PROBE_ON_BOOT` | optional | `true` for ONE deploy: at start-up the app runs the sandbox probe and writes its JSON report to the application log (it starts a few misbehaving child processes; none is allowed past about 900 MB, and the address-space step is skipped if the host reports less than 2 GB). Remove it again afterwards. |
+| `IMPORT_SANDBOX_*` | optional | Limits of the Excel parser process: `TIMEOUT_MS` (20000), `HEAP_MB` (256), `RSS_MB` (768), `OUTPUT_BYTES` (41943040), `ULIMIT_KB` (0 = off), `CONCURRENCY` (2), `QUEUE` (4), `QUEUE_WAIT_MS` (10000). Positive integers; leave unset unless the probe shows the host needs different values. |
+| `ALERT_EMAIL`                                             | yes         | where new-error alerts and the daily digest go                                                                                                                                                |
+| `ALERT_FROM`                                              | yes         | sender, e.g. `Tillflow Alerts <your-gmail-address>`; must be the SMTP account's own address on Gmail                                                                                          |
+| `SMTP_HOST`                                               | yes         | `smtp.gmail.com` (later your tillflow.ie mailbox host)                                                                                                                                        |
+| `SMTP_PORT`                                               | optional    | `465` (default, implicit TLS) or `587` (STARTTLS)                                                                                                                                             |
+| `SMTP_USER`                                               | yes         | the SMTP login (the Gmail address)                                                                                                                                                            |
+| `SMTP_PASS`                                               | yes         | Gmail **app password**, never the account password. Without the `SMTP_*` set, alerts are skipped (errors are still stored).                                                                   |
 | `SUPABASE_SERVICE_ROLE_KEY`                               | later       | server only; add when server code needs it                                                                                                                                                    |
 | `DATABASE_URL`                                            | later       | pooled connection string                                                                                                                                                                      |
 | `EMAIL_FROM`                                              | later       | receipts and invites (later steps)                                                                                                                                                            |
@@ -86,6 +89,18 @@ Names only. Values come from your password manager. Same names in both apps, dif
 `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL` and `JOBS_DATABASE_URL` must never start with `NEXT_PUBLIC_`.
 
 `.env.example` is write-protected for Claude; its lines are updated by hand to match this table.
+
+## Excel import (off until verified on this host; on by default on staging only)
+
+**Staging exception:** on an app whose `NEXT_PUBLIC_APP_ENV` is `staging`, Excel import is on when `IMPORT_XLSX_ENABLED` is unset (still only after the self-test passes), so real workbooks can be tried there. Set `IMPORT_XLSX_ENABLED=false` to switch it off on staging. Production (and any other value) stays off unless `IMPORT_XLSX_ENABLED=true`. The `.env.example` line must be updated by hand (write-protected for Claude).
+
+
+Reading `.xlsx` files runs in a separate Node process with its own memory, time and output limits, no file writes, no child processes and no credentials (`docs/specs/bulk-import.md`). **It is off by default and there is no in-process fallback.** CSV and JSON imports work either way. Hostinger's documentation says nothing about child processes, worker threads or process counts for Node.js apps, so nothing is assumed:
+
+1. Deploy with `IMPORT_SANDBOX_PROBE_ON_BOOT=true` (staging first) and `IMPORT_XLSX_ENABLED` unset.
+2. In the app's log (hPanel > the app > Logs), find the line "xlsx sandbox probe" and read `verdict` and `report.enforced`. It must say `"verdict":"isolation-enforced"`. Note `rssCapKills`, `ulimitCapWorks` and the host facts (`cgroupMemoryMax`, `cgroupPidsMax`, `constrainedMemoryMb`): those are the limits the host really enforces, as opposed to the intended ones. If the probe says `NOT-enforced`, or the log line never appears, leave Excel off.
+3. Remove `IMPORT_SANDBOX_PROBE_ON_BOOT`, set `IMPORT_XLSX_ENABLED=true`, redeploy. `/api/health` shows `"importXlsx":"unchecked"` until the import page or an Excel upload has run the self-test in that app process, then `"ready"`; `"unavailable"` means this host failed the self-test and Excel stays refused.
+4. Try a normal workbook and a deliberately hostile one (see the spec) on staging before production.
 
 ## After each app is live
 
@@ -100,10 +115,10 @@ Hostinger runs the build and start commands you give it, and `next start` works 
 
 `tillflow.ie`'s DNS is at **eLive** (nameservers `dns.elive.ie`), not Hostinger, so add these records in the eLive control panel. For the two app rows, use the value hPanel shows on each app's Domains step (staging: `A` `72.61.204.157`).
 
-| Type       | Name                | Value                                                                     | TTL  | Purpose                             |
-| ---------- | ------------------- | ------------------------------------------------------------------------- | ---- | ----------------------------------- |
-| A or CNAME | `pos`               | shown by hPanel when you connect `pos.tillflow.ie` to the production app  | 300  | Production app                      |
-| A or CNAME | `staging`           | shown by hPanel when you connect `staging.tillflow.ie` to the staging app | 300  | Staging app                         |
-| TXT        | `_dmarc`            | `v=DMARC1; p=none; rua=mailto:dmarc@tillflow.ie`                          | 3600 | Recommended DMARC (start at `none`) |
+| Type       | Name      | Value                                                                     | TTL  | Purpose                             |
+| ---------- | --------- | ------------------------------------------------------------------------- | ---- | ----------------------------------- |
+| A or CNAME | `pos`     | shown by hPanel when you connect `pos.tillflow.ie` to the production app  | 300  | Production app                      |
+| A or CNAME | `staging` | shown by hPanel when you connect `staging.tillflow.ie` to the staging app | 300  | Staging app                         |
+| TXT        | `_dmarc`  | `v=DMARC1; p=none; rua=mailto:dmarc@tillflow.ie`                          | 3600 | Recommended DMARC (start at `none`) |
 
 Email: no sending-domain DNS records are needed while alerts go out through Gmail SMTP. When a `tillflow.ie` mailbox is created, add the SPF, DKIM and DMARC records its provider gives you, and do not create a second SPF record on the same name. Leave the existing landing-page records for `tillflow.ie` and `www` alone.

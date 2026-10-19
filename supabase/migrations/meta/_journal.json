@@ -64,6 +64,160 @@
       "when": 1790862751413,
       "tag": "0008_ops_least_privilege_role",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1791035557871,
+      "tag": "0009_categories_and_onboarded_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1791035574374,
+      "tag": "0010_categories_rls_and_onboarding",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1791037438769,
+      "tag": "0011_organisations_vat_number_check",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1791192043986,
+      "tag": "0012_catalog",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1791198009542,
+      "tag": "0014_vat_rates_confirmed",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1791204575931,
+      "tag": "0016_variant_costs",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1791278933440,
+      "tag": "0018_sales_and_sync",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1791286233644,
+      "tag": "0021_device_pairing_and_pins",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1791295358027,
+      "tag": "0022_register_approvals",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1791368122895,
+      "tag": "0025_sales_review_flags_and_till_staff",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1791450676983,
+      "tag": "0027_tender_types",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1791540011262,
+      "tag": "0029_refunds",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1791547993971,
+      "tag": "0032_shifts",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1791556281609,
+      "tag": "0034_inventory",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1791558240846,
+      "tag": "0036_customers",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1791638306007,
+      "tag": "0038_restaurant",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1791643898494,
+      "tag": "0040_imports",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1791881238589,
+      "tag": "0042_import_types",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1791886733365,
+      "tag": "0044_import_mapping_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1791905432853,
+      "tag": "0046_suppliers",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1791967204275,
+      "tag": "0048_report_summaries",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1791968521284,
+      "tag": "0050_account_exports",
+      "breakpoints": true
     }
   ]
 }

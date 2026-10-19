@@ -1,8 +1,10 @@
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   check,
   foreignKey,
   index,
+  integer,
   pgEnum,
   pgTable,
   text,
@@ -36,11 +38,35 @@ export const organisations = pgTable(
     country: text("country").notNull().default("IE"),
     plan: text("plan").notNull().default("standard"),
     trialEndsAt: timestamp("trial_ends_at", { withTimezone: true }),
+    /** Set once by public.complete_onboarding; never client-writable. */
+    onboardedAt: timestamp("onboarded_at", { withTimezone: true }),
+    /** Set by public.confirm_vat_rates (owner, audit-logged); never client-writable. */
+    vatRatesConfirmedAt: timestamp("vat_rates_confirmed_at", { withTimezone: true }),
+    vatRatesConfirmedBy: uuid("vat_rates_confirmed_by"),
+    /** A discount above this share (basis points) of a line or sale needs a manager PIN. */
+    discountOverrideBp: integer("discount_override_bp").notNull().default(1000),
+    /** A cashier refund above this many cents needs a manager PIN. */
+    refundOverrideCents: integer("refund_override_cents").notNull().default(2000),
+    /** Restaurant service charge in basis points of the eat-in bill (0 = none). Set by public.set_service_charge. */
+    serviceChargeBp: integer("service_charge_bp").notNull().default(0),
     status: orgStatus("status").notNull().default("trial"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [check("organisations_country_len", sql`char_length(${t.country}) = 2`)],
+  (t) => [
+    check("organisations_country_len", sql`char_length(${t.country}) = 2`),
+    // Shape only; the mod-23 check digit is verified in src/lib/onboarding.ts.
+    check("organisations_discount_override_bp", sql`${t.discountOverrideBp} between 0 and 10000`),
+    check("organisations_service_charge_bp", sql`${t.serviceChargeBp} between 0 and 2500`),
+    check(
+      "organisations_refund_override_cents",
+      sql`${t.refundOverrideCents} between 0 and 1000000`,
+    ),
+    check(
+      "organisations_vat_number_ie",
+      sql`${t.vatNumber} is null or ${t.vatNumber} ~ '^IE([0-9]{7}[A-W][A-IW]?|[0-9][A-Z+*][0-9]{5}[A-W])$'`,
+    ),
+  ],
 );
 
 /**
@@ -58,6 +84,17 @@ export const memberships = pgTable(
     userId: uuid("user_id").notNull(),
     role: membershipRole("role").notNull(),
     pinHash: text("pin_hash"),
+    /** Name shown on the till's staff picker. */
+    displayName: text("display_name"),
+    pinSetAt: timestamp("pin_set_at", { withTimezone: true }),
+    /** Attempts reserved since the last good PIN; the 5th failure sets pinLockedUntil. */
+    pinFailedCount: integer("pin_failed_count").notNull().default(0),
+    pinLockedUntil: timestamp("pin_locked_until", { withTimezone: true }),
+    /**
+     * A cashier added by a manager for the till only: no login account. Such a row never
+     * authorises a session (app.org_ids_with_roles skips it), even if its id ever matched a user.
+     */
+    tillOnly: boolean("till_only").notNull().default(false),
     locationIds: uuid("location_ids")
       .array()
       .notNull()
@@ -115,6 +152,72 @@ export const registers = pgTable(
       foreignColumns: [locations.orgId, locations.id],
     }),
     unique("registers_org_location_name_key").on(t.orgId, t.locationId, t.name),
+    // Target for composite FKs so a sale can never point at another org's register.
+    unique("registers_org_id_id_key").on(t.orgId, t.id),
+  ],
+);
+
+/**
+ * One-time pairing codes (8 characters, 10 minutes). Only the hash is stored; the code is shown
+ * once to the manager. Written by public.create_pairing_code / ops.pair_register, never by clients.
+ */
+export const registerPairingCodes = pgTable(
+  "register_pairing_codes",
+  {
+    id: uuid("id").primaryKey(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organisations.id),
+    registerId: uuid("register_id").notNull(),
+    codeHash: text("code_hash").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdBy: uuid("created_by").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    foreignKey({
+      name: "register_pairing_codes_org_register_fk",
+      columns: [t.orgId, t.registerId],
+      foreignColumns: [registers.orgId, registers.id],
+    }),
+    unique("register_pairing_codes_code_hash_key").on(t.codeHash),
+    index("register_pairing_codes_org_register_idx").on(t.orgId, t.registerId),
+  ],
+);
+
+/**
+ * A manager's PIN, checked by the server (ops.issue_approval), turned into a single-use proof the
+ * till attaches to one sale or event. The database derives the approver from this row, never from
+ * anything the till says. Valid 30 minutes from creation, for one register and one purpose.
+ */
+export const registerApprovals = pgTable(
+  "register_approvals",
+  {
+    id: uuid("id").primaryKey(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organisations.id),
+    registerId: uuid("register_id").notNull(),
+    approverUserId: uuid("approver_user_id").notNull(),
+    purpose: text("purpose").notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    /** The sale or event the approval was spent on. */
+    consumedFor: uuid("consumed_for"),
+    /** A refund approval is for ONE sale and up to this value (cents); null for other purposes. */
+    saleId: uuid("sale_id"),
+    maxCents: integer("max_cents"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    foreignKey({
+      name: "register_approvals_org_register_fk",
+      columns: [t.orgId, t.registerId],
+      foreignColumns: [registers.orgId, registers.id],
+    }),
+    check("register_approvals_purpose", sql`${t.purpose} in ('discount', 'no_sale', 'refund', 'void_item')`),
+    check("register_approvals_max_cents", sql`${t.maxCents} is null or ${t.maxCents} >= 0`),
+    index("register_approvals_org_register_idx").on(t.orgId, t.registerId, t.createdAt),
   ],
 );
 

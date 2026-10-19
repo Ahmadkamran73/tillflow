@@ -49,3 +49,11 @@ next-env.d.ts
 # playwright
 /test-results/
 /playwright-report/
+
+# service worker built by @serwist/next
+/public/sw.js
+/public/sw.js.map
+/public/swe-worker-*.js
+
+# Sample exports written by tests/unit/sample-exports.test.ts when SAMPLE_EXPORT_DIR is set here
+/sample-exports/

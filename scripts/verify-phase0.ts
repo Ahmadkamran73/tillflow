@@ -16,8 +16,13 @@ function report(ok: boolean, name: string, evidence: string) {
   if (!ok) failed++;
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${evidence ? ` — ${evidence}` : ""}`);
 }
+// Reuse the pnpm that launched us (npm_execpath), so `corepack pnpm verify` works where a bare
+// `pnpm` resolves to a binary that Windows policy blocks.
+const execPath = process.env.npm_execpath;
+const PNPM =
+  execPath && /pnpm/i.test(execPath) && /\.c?js$/.test(execPath) ? `node "${execPath}"` : "pnpm";
 function run(cmd: string) {
-  const r = spawnSync(cmd, { shell: true, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  const r = spawnSync(cmd.replace(/^pnpm\b/, PNPM), { shell: true, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   return { ok: r.status === 0, out: `${r.stdout ?? ""}${r.stderr ?? ""}`.trim() };
 }
 const lastLine = (s: string) => s.split(/\r?\n/).filter(Boolean).pop() ?? "";

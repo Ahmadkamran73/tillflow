@@ -14,17 +14,17 @@ How to use this file:
 
 ## Part A — Session rules (read once, follow every time)
 
-| Situation | What to do |
-| --- | --- |
-| Starting a new step | `/clear` (fresh context), then paste the step's prompt |
-| Complex or risky step (schema, RLS, money, sync, payments) | Switch to **plan mode** first (press **Shift+Tab** until it shows plan mode), read the plan, correct it, then approve |
-| Context getting full mid-step | Run `/context` to check. Above ~60% full, run `/compact focus on <the current step and files being changed>` |
-| Switching to unrelated work | `/clear` — never carry old context into a new module |
-| Claude went the wrong way | Press **Esc** to interrupt, or `/rewind` to jump back to an earlier checkpoint |
-| Coming back tomorrow | `claude --continue` (last session) or `/resume` (pick a session) — or start fresh; `docs/STATUS.md` holds where you are |
-| Big research question ("how do Irish shops reconcile card terminal totals?") | Ask Claude to **use a subagent** for the research so file dumps stay out of your main context |
-| Before merging anything touching auth, RLS, money, sync or payments | Run `/security-review`, then ask the `tenant-isolation-auditor` subagent to review |
-| End of every step | Tests green → commit → Claude updates `docs/STATUS.md` → `/clear` |
+| Situation                                                                    | What to do                                                                                                              |
+| ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Starting a new step                                                          | `/clear` (fresh context), then paste the step's prompt                                                                  |
+| Complex or risky step (schema, RLS, money, sync, payments)                   | Switch to **plan mode** first (press **Shift+Tab** until it shows plan mode), read the plan, correct it, then approve   |
+| Context getting full mid-step                                                | Run `/context` to check. Above ~60% full, run `/compact focus on <the current step and files being changed>`            |
+| Switching to unrelated work                                                  | `/clear` — never carry old context into a new module                                                                    |
+| Claude went the wrong way                                                    | Press **Esc** to interrupt, or `/rewind` to jump back to an earlier checkpoint                                          |
+| Coming back tomorrow                                                         | `claude --continue` (last session) or `/resume` (pick a session) — or start fresh; `docs/STATUS.md` holds where you are |
+| Big research question ("how do Irish shops reconcile card terminal totals?") | Ask Claude to **use a subagent** for the research so file dumps stay out of your main context                           |
+| Before merging anything touching auth, RLS, money, sync or payments          | Run `/security-review`, then ask the `tenant-isolation-auditor` subagent to review                                      |
+| End of every step                                                            | Tests green → commit → Claude updates `docs/STATUS.md` → `/clear`                                                       |
 
 **Model choice:** run `/model` and choose **opusplan** (Opus plans, Sonnet executes) as the default. For Phase 1.1 (money), 1.6 (sync), 2.1 (tenders) and 3.6 (security) use Opus for the whole step.
 
@@ -36,17 +36,17 @@ How to use this file:
 
 Phase 0 is split so **Claude Code does everything it can**, and you only do what needs your identity, payment details, secrets or a browser sign-in.
 
-| Step | Who | Time | What happens |
-| --- | --- | --- | --- |
-| 0.0 | **You** | 1–2 h | Install 4 tools, create accounts, sign in once in the terminal |
-| 0.1 | Claude | ~1 h | Checks your machine, installs missing CLIs, creates the GitHub repo, scaffolds the app, starts local Supabase |
-| 0.2 | Claude + you (1 sign-in) | 20 min | Installs Claude Code plugins and MCP servers; you approve the browser sign-ins |
-| 0.3 | Claude | 30 min | Writes CLAUDE.md, rules, subagents, hooks, skills, status file |
-| 0.4 | Claude | 2–3 h | Tenancy schema, RLS, RLS tests; creates and migrates the **staging** Supabase project |
-| 0.5 | Claude + you (Google keys) | 3–4 h | Sign-up, login, MFA, optional Google sign-in |
-| 0.6 | Claude + you (paste secrets, DNS) | 2–3 h | CI/CD, branch protection, staging + production deploys, Sentry, health check |
-| 0.7 | Claude | 3–4 h | Design system and app shell |
-| 0.8 | Claude | 20 min | Verifies the whole phase and writes the exit report |
+| Step | Who                               | Time   | What happens                                                                                                  |
+| ---- | --------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------- |
+| 0.0  | **You**                           | 1–2 h  | Install 4 tools, create accounts, sign in once in the terminal                                                |
+| 0.1  | Claude                            | ~1 h   | Checks your machine, installs missing CLIs, creates the GitHub repo, scaffolds the app, starts local Supabase |
+| 0.2  | Claude + you (1 sign-in)          | 20 min | Installs Claude Code plugins and MCP servers; you approve the browser sign-ins                                |
+| 0.3  | Claude                            | 30 min | Writes CLAUDE.md, rules, subagents, hooks, skills, status file                                                |
+| 0.4  | Claude                            | 2–3 h  | Tenancy schema, RLS, RLS tests; creates and migrates the **staging** Supabase project                         |
+| 0.5  | Claude + you (Google keys)        | 3–4 h  | Sign-up, login, MFA, optional Google sign-in                                                                  |
+| 0.6  | Claude + you (paste secrets, DNS) | 2–3 h  | CI/CD, branch protection, staging + production deploys, Sentry, health check                                  |
+| 0.7  | Claude                            | 3–4 h  | Design system and app shell                                                                                   |
+| 0.8  | Claude                            | 20 min | Verifies the whole phase and writes the exit report                                                           |
 
 **Three rules that apply to every step below**
 
@@ -77,7 +77,7 @@ Everything else (pnpm, GitHub CLI, Supabase CLI, jq, Vercel CLI) **Claude instal
 - [ ] **Hosting** — decide now and write it down for Step 0.6:
   - `vercel` → create a Vercel account, **or**
   - `hostinger` → make sure your Hostinger Business or Cloud plan has a free **Web Apps (Node.js)** slot and an EU data centre
-- [ ] *(Optional)* **Google Cloud** project if you want "Continue with Google" — Claude gives you the exact clicks in Step 0.5
+- [ ] _(Optional)_ **Google Cloud** project if you want "Continue with Google" — Claude gives you the exact clicks in Step 0.5
 
 **Make the project folder:**
 
@@ -655,6 +655,7 @@ Security hardening pass per docs/PLAN.md section 10:
 ```
 
 Then run, in order:
+
 1. `/security-review` (current branch).
 2. `/code-review` locally, and for the full release branch consider `/ultrareview` (deeper multi-agent review — see <https://code.claude.com/docs/en/ultrareview>).
 3. Optionally install the Claude Security plugin for a whole-repo scan: <https://code.claude.com/docs/en/claude-security>.
@@ -700,6 +701,7 @@ Read GitHub issue #<number> with `gh issue view <number>`. Reproduce it with a f
 ```
 
 Tips for the pilot weeks:
+
 - One bug = `/clear` + the prompt above. Use `/resume` only when returning to the same bug.
 - For a batch of small UI fixes, run them in parallel sessions using git worktrees (<https://code.claude.com/docs/en/worktrees>).
 - Ask your accountant to review a real week's VAT report and Z-reports from a pilot site.
@@ -730,24 +732,24 @@ Create docs/LAUNCH.md and verify each item, marking pass/fail with evidence: ban
 
 ## Part H — Quick reference
 
-| Command / feature | Use it for |
-| --- | --- |
-| `/clear` | Start every new step with an empty context |
-| `/compact focus on …` | Shrink a long session but keep what matters |
-| `/context` | See how full the context window is |
-| `/rewind` | Undo to an earlier checkpoint (code + conversation) |
-| Shift+Tab → plan mode | Make Claude plan before touching files |
-| `/model` → opusplan | Opus for planning, Sonnet for doing |
-| `/resume`, `claude --continue` | Pick up a previous session |
-| `/memory` | View/edit CLAUDE.md and auto-memory |
-| `/agents` | Manage subagents (tenant-isolation-auditor, vat-auditor, accessibility-reviewer) |
-| `/hooks` | Check formatting, file protection and post-compact hooks |
-| `/plugin`, `/reload-plugins` | Install and activate plugins |
-| `/mcp` | Connect/sign in to Supabase (staging, read-only) |
-| `/security-review` | Security pass on the current branch |
-| `/code-review`, `/ultrareview` | Code review locally; deeper multi-agent review before release |
-| `/write-spec` (your skill) | Turn a feature into `docs/specs/*.md` before building |
-| `/commit` (commit-commands plugin) | Clean conventional commits |
-| `pnpm verify` (your script, Step 0.8) | Check that Phase 0 is fully set up |
+| Command / feature                     | Use it for                                                                       |
+| ------------------------------------- | -------------------------------------------------------------------------------- |
+| `/clear`                              | Start every new step with an empty context                                       |
+| `/compact focus on …`                 | Shrink a long session but keep what matters                                      |
+| `/context`                            | See how full the context window is                                               |
+| `/rewind`                             | Undo to an earlier checkpoint (code + conversation)                              |
+| Shift+Tab → plan mode                 | Make Claude plan before touching files                                           |
+| `/model` → opusplan                   | Opus for planning, Sonnet for doing                                              |
+| `/resume`, `claude --continue`        | Pick up a previous session                                                       |
+| `/memory`                             | View/edit CLAUDE.md and auto-memory                                              |
+| `/agents`                             | Manage subagents (tenant-isolation-auditor, vat-auditor, accessibility-reviewer) |
+| `/hooks`                              | Check formatting, file protection and post-compact hooks                         |
+| `/plugin`, `/reload-plugins`          | Install and activate plugins                                                     |
+| `/mcp`                                | Connect/sign in to Supabase (staging, read-only)                                 |
+| `/security-review`                    | Security pass on the current branch                                              |
+| `/code-review`, `/ultrareview`        | Code review locally; deeper multi-agent review before release                    |
+| `/write-spec` (your skill)            | Turn a feature into `docs/specs/*.md` before building                            |
+| `/commit` (commit-commands plugin)    | Clean conventional commits                                                       |
+| `pnpm verify` (your script, Step 0.8) | Check that Phase 0 is fully set up                                               |
 
 Docs: [Best practices](https://code.claude.com/docs/en/best-practices) · [Context & compaction](https://code.claude.com/docs/en/context-window) · [Memory / CLAUDE.md](https://code.claude.com/docs/en/memory) · [Subagents](https://code.claude.com/docs/en/sub-agents) · [Skills](https://code.claude.com/docs/en/skills) · [Hooks](https://code.claude.com/docs/en/hooks-guide) · [Plugins](https://code.claude.com/docs/en/plugins/anthropic-marketplaces) · [Security guidance plugin](https://code.claude.com/docs/en/security-guidance) · [MCP](https://code.claude.com/docs/en/mcp)
