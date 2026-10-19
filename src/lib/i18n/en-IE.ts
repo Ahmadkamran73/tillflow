@@ -10,6 +10,7 @@ import { registerEnIE } from "./register-en-IE";
 import { restaurantEnIE } from "./restaurant-en-IE";
 import { salesEnIE } from "./sales-en-IE";
 import { billingEnIE } from "./billing-en-IE";
+import { superadminEnIE } from "./superadmin-en-IE";
 import { shiftsEnIE } from "./shifts-en-IE";
 import { tendersEnIE } from "./tenders-en-IE";
 
@@ -192,6 +193,7 @@ export const enIE = {
   ...restaurantEnIE,
   ...reportsEnIE,
   ...billingEnIE,
+  ...superadminEnIE,
 } as const;
 
 export type MessageKey = keyof typeof enIE;

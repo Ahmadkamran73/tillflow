@@ -1,8 +1,10 @@
 import "server-only";
 import { notFound, redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { cache } from "react";
 import { v7 as uuidv7 } from "uuid";
 import { z } from "zod";
+import { superadminIpAllowed } from "@/lib/superadmin/ip";
 import { createSupabaseServerClient } from "./server";
 import { businessName, roles, type Role } from "./schemas";
 
@@ -105,14 +107,24 @@ export async function requireRole(allowed: Role | readonly Role[], orgId: string
 }
 
 /**
- * The page guard for the Tillflow super-admin panel (/admin). Needs a signed-in user on a two-step
- * (aal2) session who is in platform_admins; everyone else gets the same 404 as an unknown page. The
- * database checks again in every admin_* function, so this is not the only lock.
+ * The guard for the Tillflow superadmin console (/superadmin). Three locks, in this order: the
+ * caller's IP is on SUPERADMIN_IP_ALLOWLIST (also checked in the proxy; fail closed), the user is in
+ * platform_admins, and the session is two-step (aal2). Anything else gets the same 404 as an unknown
+ * page, so a normal account learns nothing. A real admin whose session is still one-step is sent to
+ * MFA, but only after the IP and admin checks pass. The database checks again in every admin_*
+ * function, so this is not the only lock.
  */
-export async function requirePlatformAdmin(next: string) {
+export async function requireSuperadmin(next: string) {
+  if (!superadminIpAllowed(await headers())) notFound();
   const user = await requireUser();
-  if (user.aal !== "aal2") toMfa(next);
   const supabase = await createSupabaseServerClient();
+  if (user.aal !== "aal2") {
+    // am_i_platform_admin() is false at aal1, so admin status cannot be told apart yet and is never
+    // revealed: anyone with a factor is sent to the MFA step (as on every other page), anyone
+    // without one gets the 404. A superadmin must have enrolled two-step before reaching this.
+    if (user.hasVerifiedFactor) toMfa(next);
+    notFound();
+  }
   const { data, error } = await supabase.rpc("am_i_platform_admin");
   if (error || data !== true) notFound();
   return { user };

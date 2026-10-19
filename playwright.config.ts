@@ -19,6 +19,9 @@ const fakeBilling: Record<string, string> = {
   BILLING_ADDRESS: "1 Test Street, Dublin",
 };
 for (const [k, v] of Object.entries(fakeBilling)) process.env[k] ??= v;
+// /superadmin is reachable only from this documentation-range address. The tests present it with an
+// X-Real-IP header (the way the host's proxy does); without a header nobody is allowed in.
+process.env.SUPERADMIN_IP_ALLOWLIST ??= "203.0.113.10";
 
 export default defineConfig({
   testDir: "./tests/e2e",

@@ -23,7 +23,10 @@ test.afterAll(() => sql.end());
 // (with fully parallel tests a worker could close it and then run another test of this file).
 test.describe.configure({ mode: "serial" });
 
-test.use({ viewport: { width: 1024, height: 768 } });
+test.use({
+  viewport: { width: 1024, height: 768 },
+  extraHTTPHeaders: { "x-real-ip": "203.0.113.10" }, // the allowlisted address for /superadmin
+});
 test.setTimeout(240_000);
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -114,7 +117,7 @@ test("a paused business is read-only on the till, still exports, and a super-adm
   await openTill(page, orgId);
 
   // Not a super-admin yet: the admin panel is a 404 for them.
-  const notFound = await page.goto("/admin/billing");
+  const notFound = await page.goto("/superadmin/billing");
   expect(notFound?.status()).toBe(404);
 
   // The job pauses the business (the database function it calls).
@@ -148,7 +151,7 @@ test("a paused business is read-only on the till, still exports, and a super-adm
   const [user] = await sql`select id from auth.users where email = ${email}`;
   await sql`insert into platform_admins (user_id) values (${user!.id})`;
 
-  await page.goto("/admin/billing?filter=overdue");
+  await page.goto("/superadmin/billing?filter=overdue");
   await expect(page.getByRole("heading", { name: "Billing admin" })).toBeVisible();
   // The invoice is due in 2099, so it is in Outstanding.
   await page.getByRole("link", { name: "Outstanding" }).click();
