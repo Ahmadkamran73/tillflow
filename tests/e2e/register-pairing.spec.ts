@@ -60,7 +60,7 @@ test("a pairing code works once; an expired or made-up code does not", async ({ 
   const other = await fresh.newPage();
   await pairWithCode(other, code);
   await expect(other.locator("#pair-error")).toContainText("not valid or has expired");
-  await expect(other).toHaveURL(/\/register\/pair$/);
+  await expect(other).toHaveURL(/\/register\/pair(\?for=[\w-]+)?$/);
 
   // A code that has run out of its 10 minutes.
   const second = await makePairingCode(page, orgId);
@@ -126,7 +126,7 @@ test("revoking a till stops it at once; its sales wait on the device", async ({ 
     ).status(),
   ).toBe(401);
   await page.goto(`/register/${orgId}`);
-  await expect(page).toHaveURL(/\/register\/pair$/);
+  await expect(page).toHaveURL(/\/register\/pair(\?for=[\w-]+)?$/);
 });
 
 test("a discount above the limit needs a manager PIN and is audit-logged; so is a no-sale drawer open", async ({
@@ -247,4 +247,31 @@ test("a manager adds a cashier by name and PIN; the cashier unlocks the till and
   await page.getByRole("button", { name: "Yes, remove Aoife" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Cashier removed" })).toBeVisible();
   expect((await sql`select 1 from sales where org_id = ${orgId}`).length).toBe(1);
+});
+
+test("opening another business's till on a paired browser says so, and the browser can be switched", async ({
+  page,
+}) => {
+  const orgId = await setup(page, "switch");
+  await openTill(page, orgId);
+  const otherOrg = "01900000-0000-7000-8000-000000000001";
+
+  // Not silently redirected to the first business: the page explains what is going on.
+  await page.goto(`/register/${otherOrg}`);
+  await expect(page).toHaveURL(new RegExp(`/register/pair\\?for=${otherOrg}`));
+  await expect(
+    page.getByRole("heading", { name: "This browser is a till for another business" }),
+  ).toBeVisible();
+
+  // The way back to the paired till still works.
+  await page.getByRole("link", { name: /Open this browser.s till/ }).click();
+  await expect(page).toHaveURL(new RegExp(`/register/${orgId}$`));
+
+  // Forgetting the till shows the pairing form; the till stays registered for its business.
+  await page.goto(`/register/${otherOrg}`);
+  await page.getByRole("button", { name: "Forget this till and pair again" }).click();
+  await expect(page.getByLabel("Pairing code")).toBeVisible();
+  const [reg] =
+    await sql`select count(*)::int as n from registers where org_id = ${orgId} and device_token_hash is not null`;
+  expect(reg!.n).toBe(1);
 });
