@@ -11,9 +11,11 @@
 -- ---------------------------------------------------------------- hide superadmin rows from tenants
 -- audit_log is readable by a business's owners and managers. Rows written by the platform admin
 -- (who looked, the admin's user id, the internal reason note) are for us, not for the customer, so
--- a restrictive policy hides them. The SECURITY DEFINER writers and readers still see them.
+-- a restrictive policy hides them. billing.unpaused is hidden too: admin_unpause keeps the admin's
+-- free-text reason in it. (billing.marked_paid carries no note and stays visible.) The SECURITY
+-- DEFINER writers and readers still see all of them.
 create policy audit_log_hide_superadmin on public.audit_log as restrictive for select
-  using (action not like 'superadmin.%');
+  using (action not like 'superadmin.%' and action <> 'billing.unpaused');
 
 -- ---------------------------------------------------------------- audit helper
 create function app.superadmin_audit(p_org uuid, p_action text, p_entity text, p_entity_id uuid, p_before jsonb, p_after jsonb)

@@ -111,6 +111,12 @@ describe("superadmin audit rows are not visible to the business", () => {
         AAL2,
       );
       expect(await audit(ctx, a.orgId, "superadmin.paused")).toBe(1);
+      await ctx.as(
+        admin,
+        () => ctx.sql`select public.admin_unpause(${a.orgId}, 'paid by phone', 7)`,
+        AAL2,
+      );
+      expect(await audit(ctx, a.orgId, "billing.unpaused")).toBe(1); // written, but hidden below
       for (const who of [a.owner, a.manager]) {
         const rows = await ctx.as(
           who,
@@ -118,7 +124,11 @@ describe("superadmin audit rows are not visible to the business", () => {
           AAL2,
         );
         expect(rows.length).toBeGreaterThan(0); // the seeded row is still visible
-        expect(rows.filter((r) => String(r.action).startsWith("superadmin."))).toHaveLength(0);
+        expect(
+          rows.filter(
+            (r) => String(r.action).startsWith("superadmin.") || r.action === "billing.unpaused",
+          ),
+        ).toHaveLength(0);
       }
     }));
 });
