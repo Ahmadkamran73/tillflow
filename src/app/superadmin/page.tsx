@@ -64,7 +64,7 @@ export default async function SuperadminHome({
         <p className="text-muted-foreground text-sm">{t("superadmin.orgs.empty")}</p>
       ) : (
         <div
-          className="surface-panel overflow-x-auto"
+          className="surface-panel"
           role="region"
           tabIndex={0}
           aria-label={t("superadmin.orgs.title")}
@@ -112,7 +112,7 @@ export default async function SuperadminHome({
         </div>
       )}
 
-      <nav className="flex gap-4" aria-label={t("superadmin.orgs.title")}>
+      <nav className="flex gap-4" aria-label={t("superadmin.pagination")}>
         {page > 0 ? (
           <Link href={link(page - 1)} className="inline-flex min-h-12 items-center underline">
             {t("superadmin.orgs.prev")}
