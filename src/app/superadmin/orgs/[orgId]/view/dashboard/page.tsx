@@ -27,7 +27,7 @@ export default async function ViewDashboard({ params }: { params: Promise<{ orgI
         {tiles.map(([k, v]) => (
           <div key={k} className="surface-panel flex flex-col gap-1 p-4">
             <dt className="text-muted-foreground text-sm">{k}</dt>
-            <dd className="text-amount font-mono tabular-nums">{v}</dd>
+            <dd className="text-title sm:text-amount font-mono break-all tabular-nums">{v}</dd>
           </div>
         ))}
       </dl>

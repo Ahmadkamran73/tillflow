@@ -26,7 +26,7 @@ export default async function ViewStaff({ params }: { params: Promise<{ orgId: s
         <p className="text-muted-foreground text-sm">{t("superadmin.view.empty")}</p>
       ) : (
         <div
-          className="surface-panel overflow-x-auto"
+          className="surface-panel"
           role="region"
           tabIndex={0}
           aria-label={t("superadmin.view.staff")}
@@ -44,7 +44,7 @@ export default async function ViewStaff({ params }: { params: Promise<{ orgId: s
               {rows.map((m, i) => (
                 <TableRow key={i}>
                   <TableHead scope="row" className="font-normal">
-                    {m.display_name ?? "—"}
+                    {m.display_name ?? t("superadmin.orgs.none")}
                   </TableHead>
                   <TableCell>{m.role}</TableCell>
                   <TableCell>

@@ -17,6 +17,11 @@ export const superadminEnIE = {
   "superadmin.orgs.col.lastSync": "Last sync",
   "superadmin.orgs.never": "Never",
   "superadmin.orgs.none": "None",
+  "superadmin.pagination": "Pagination",
+  "superadmin.org.extendDaysHint":
+    "1 to 90 days, counted from the current trial end (or from now if it has ended).",
+  "superadmin.org.holdHint":
+    "0 to 365 days. The business is not paused again for non-payment before then.",
   "superadmin.orgs.next": "Next page",
   "superadmin.orgs.prev": "Previous page",
   "superadmin.status.trial": "Trial",

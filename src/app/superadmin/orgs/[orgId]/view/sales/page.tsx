@@ -40,7 +40,7 @@ export default async function ViewSales({
         <p className="text-muted-foreground text-sm">{t("superadmin.view.empty")}</p>
       ) : (
         <div
-          className="surface-panel overflow-x-auto"
+          className="surface-panel"
           role="region"
           tabIndex={0}
           aria-label={t("superadmin.view.sales")}
