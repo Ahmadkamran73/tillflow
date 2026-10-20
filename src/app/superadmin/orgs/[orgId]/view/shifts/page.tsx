@@ -19,7 +19,7 @@ export default async function ViewShifts({ params }: { params: Promise<{ orgId: 
   const { orgId, userId } = await viewGuard(params, "shifts");
   const rows = await viewShifts(userId, orgId).catch(() => null);
   if (!rows) notFound();
-  const money = (c: number | null) => (c === null ? "" : formatCents(c));
+  const money = (c: number | null) => (c === null ? t("superadmin.orgs.none") : formatCents(c));
   const right = "text-right font-mono tabular-nums";
   return (
     <section aria-labelledby="h" className="flex flex-col gap-4">
@@ -30,7 +30,7 @@ export default async function ViewShifts({ params }: { params: Promise<{ orgId: 
         <p className="text-muted-foreground text-sm">{t("superadmin.view.empty")}</p>
       ) : (
         <div
-          className="surface-panel overflow-x-auto"
+          className="surface-panel"
           role="region"
           tabIndex={0}
           aria-label={t("superadmin.view.shifts")}
@@ -72,7 +72,9 @@ export default async function ViewShifts({ params }: { params: Promise<{ orgId: 
                   <TableCell className={right}>{money(s.expected_cents)}</TableCell>
                   <TableCell className={right}>{money(s.over_short_cents)}</TableCell>
                   <TableCell className="font-mono">
-                    {s.z_seq === null ? "" : `Z${String(s.z_seq).padStart(4, "0")}`}
+                    {s.z_seq === null
+                      ? t("superadmin.orgs.none")
+                      : `Z${String(s.z_seq).padStart(4, "0")}`}
                   </TableCell>
                 </TableRow>
               ))}

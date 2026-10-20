@@ -38,7 +38,7 @@ export default async function SuperadminOrgPage({
   const u = await orgUsage(user.id, id.data).catch(() => null);
   if (!u) notFound();
   const sp = await searchParams;
-  const result = sp.result ? RESULTS[sp.result] : undefined;
+  const result = sp.result && Object.hasOwn(RESULTS, sp.result) ? RESULTS[sp.result] : undefined;
   const config = loadBillingConfig();
   const holdDefault = config.ok ? config.config.graceDays : 7;
   const never = t("superadmin.orgs.never");
@@ -81,7 +81,7 @@ export default async function SuperadminOrgPage({
         </h2>
         <dl className="surface-panel grid gap-x-8 gap-y-3 p-4 sm:grid-cols-2">
           {facts.map(([k, v]) => (
-            <div key={k} className="flex justify-between gap-4">
+            <div key={k} className="flex flex-wrap justify-between gap-x-4">
               <dt className="text-muted-foreground text-sm">{t(k)}</dt>
               <dd className="font-mono text-sm tabular-nums">{v}</dd>
             </div>
@@ -125,6 +125,9 @@ export default async function SuperadminOrgPage({
                 required
                 className="h-12"
               />
+              <p id="extend-days-hint" className="text-muted-foreground text-xs">
+                {t("superadmin.org.extendDaysHint")}
+              </p>
               <Label htmlFor="extend-note">{t("superadmin.org.note")}</Label>
               <Input
                 id="extend-note"

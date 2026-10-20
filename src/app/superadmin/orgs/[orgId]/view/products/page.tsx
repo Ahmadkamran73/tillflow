@@ -40,7 +40,7 @@ export default async function ViewProducts({
         <p className="text-muted-foreground text-sm">{t("superadmin.view.empty")}</p>
       ) : (
         <div
-          className="surface-panel overflow-x-auto"
+          className="surface-panel"
           role="region"
           tabIndex={0}
           aria-label={t("superadmin.view.products")}
@@ -67,7 +67,9 @@ export default async function ViewProducts({
                   </TableHead>
                   <TableCell>{p.tax_category}</TableCell>
                   <TableCell className="text-right font-mono tabular-nums">
-                    {p.price_from_cents === null ? "" : formatCents(p.price_from_cents)}
+                    {p.price_from_cents === null
+                      ? t("superadmin.orgs.none")
+                      : formatCents(p.price_from_cents)}
                   </TableCell>
                   <TableCell className="text-right font-mono tabular-nums">{p.variants}</TableCell>
                 </TableRow>
@@ -76,7 +78,7 @@ export default async function ViewProducts({
           </Table>
         </div>
       )}
-      <nav className="flex gap-4" aria-label={t("superadmin.view.products")}>
+      <nav className="flex gap-4" aria-label={t("superadmin.pagination")}>
         {page > 0 ? (
           <Link href={href(page - 1)} className="inline-flex min-h-12 items-center underline">
             {t("superadmin.orgs.prev")}
